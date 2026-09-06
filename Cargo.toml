@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/fo3_gamebryo_core",
     "crates/fo3_nif",
+    "crates/fo3_bsa",
     "crates/fo3_testbed",
 ]
 
@@ -11,3 +12,4 @@ glam = "0.29"
 byteorder = "1.5"
 thiserror = "2.0"
 slotmap = "1.0"
+flate2 = "1.0"
