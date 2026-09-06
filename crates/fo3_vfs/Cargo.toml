@@ -1,0 +1,8 @@
+[package]
+name = "fo3_vfs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fo3_bsa = { path = "../fo3_bsa" }
+thiserror = { workspace = true }

@@ -7,3 +7,4 @@ edition = "2021"
 fo3_nif = { path = "../fo3_nif" }
 fo3_gamebryo_core = { path = "../fo3_gamebryo_core" }
 fo3_bsa = { path = "../fo3_bsa" }
+fo3_vfs = { path = "../fo3_vfs" }

@@ -4,6 +4,7 @@ members = [
     "crates/fo3_gamebryo_core",
     "crates/fo3_nif",
     "crates/fo3_bsa",
+    "crates/fo3_vfs",
     "crates/fo3_testbed",
 ]
 
