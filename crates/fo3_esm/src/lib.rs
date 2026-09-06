@@ -18,4 +18,4 @@ pub use types::{FormId, FourCC, ObjectBounds};
 pub use header::{GroupHeader, RecordHeader, SubrecordHeader};
 pub use subrecord::Subrecord;
 pub use records::{CellRecord, RefrRecord, StatRecord, Tes4Header};
-pub use reader::{EsmEntry, EsmReader};
+pub use reader::{BaseObjectInfo, EsmEntry, EsmReader};

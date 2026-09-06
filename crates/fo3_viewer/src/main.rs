@@ -145,8 +145,9 @@ impl ViewerState {
                 println!("ESM からセル \"{}\" を検索中...", cell_edid);
                 let esm_path = data_p.join("Fallout3.esm");
                 let mut esm_reader = EsmReader::open(&esm_path).expect("Failed to open Fallout3.esm");
-                println!("STAT レコードマップをロード中...");
-                let stat_map = esm_reader.read_stat_map().expect("Failed to read STAT map");
+                println!("3D モデル保持レコード (STAT, SCOL, DOOR, ACTI, FURN, etc.) を一括走査中...");
+                let model_map = esm_reader.read_all_models_map().expect("Failed to read models map");
+                println!("モデルマップ登録件数: {} 件", model_map.len());
 
                 let (cell, refrs) = esm_reader
                     .find_cell_by_edid(cell_edid)
@@ -160,20 +161,28 @@ impl ViewerState {
 
                 let mut nif_cache: HashMap<String, Arc<NifFile>> = HashMap::new();
                 let mut placed_items: Vec<(Arc<NifFile>, NiTransform)> = Vec::new();
+                let mut skipped_markers = 0;
 
                 for refr in &refrs {
-                    if let Some(stat) = stat_map.get(&refr.base_object) {
-                        if stat.model.is_empty() {
+                    if let Some(obj_info) = model_map.get(&refr.base_object) {
+                        if obj_info.model.is_empty() {
                             continue;
                         }
-                        let model_key = stat.model.to_ascii_lowercase();
+
+                        // エディタ専用マーカー（矢印等）や光線エフェクト（真っ白な板になる）を除外
+                        if is_editor_marker_or_effect(&obj_info.edid, &obj_info.model) {
+                            skipped_markers += 1;
+                            continue;
+                        }
+
+                        let model_key = obj_info.model.to_ascii_lowercase();
                         let nif = if let Some(n) = nif_cache.get(&model_key) {
                             n.clone()
                         } else {
                             let mesh_path = if model_key.starts_with("meshes\\") || model_key.starts_with("meshes/") {
-                                stat.model.clone()
+                                obj_info.model.clone()
                             } else {
-                                format!("meshes\\{}", stat.model)
+                                format!("meshes\\{}", obj_info.model)
                             };
                             match vfs.read(&mesh_path) {
                                 Ok(bytes) => {
@@ -199,8 +208,9 @@ impl ViewerState {
                 }
 
                 println!(
-                    "配置可能メッシュロード完了: {} 件。GPU シーン構築中...",
-                    placed_items.len()
+                    "配置メッシュロード完了: {} 件 (マーカー/エフェクト除外: {} 件)。GPU シーン構築中...",
+                    placed_items.len(),
+                    skipped_markers
                 );
                 let placed_refs: Vec<(&NifFile, NiTransform)> =
                     placed_items.iter().map(|(n, t)| (n.as_ref(), *t)).collect();
@@ -459,4 +469,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     event_loop.run_app(&mut app)?;
 
     Ok(())
+}
+
+/// エディタ用配置マーカー（矢印、ボックス）や光線エフェクトメッシュ（真っ白な板になる）かどうかを判定。
+fn is_editor_marker_or_effect(edid: &str, model: &str) -> bool {
+    let lower_model = model.to_ascii_lowercase();
+    let lower_edid = edid.to_ascii_lowercase();
+
+    // エディタ専用マーカー (矢印 MarkerXHeading、不可視ドアマーカー等)
+    if lower_model.contains("marker") || lower_edid.contains("marker") {
+        return true;
+    }
+    // 環境光線・グローエフェクト (不透明ジオメトリ描画では真っ白な板として現れてしまうもの)
+    if lower_model.contains("lightbeam") || lower_model.contains("glow") || lower_model.contains("ray") {
+        return true;
+    }
+
+    false
 }

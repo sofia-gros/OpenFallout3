@@ -364,9 +364,9 @@ fn test_esm_cell(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::e
 
     let mut reader = EsmReader::open(esm_path)?;
 
-    println!("STAT レコードマップを構築中...");
-    let stat_map = reader.read_stat_map()?;
-    println!("STAT レコード登録件数: {} 件", stat_map.len());
+    println!("全 3D モデル保持レコード (STAT, SCOL, DOOR, ACTI, FURN, etc.) のマップを構築中...");
+    let model_map = reader.read_all_models_map()?;
+    println!("モデル登録総件数: {} 件", model_map.len());
 
     println!("セル \"{}\" を探索中...", target_edid);
     let result = reader.find_cell_by_edid(target_edid)?;
@@ -383,11 +383,11 @@ fn test_esm_cell(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::e
             }
 
             println!("\n【配置参照オブジェクト (REFR) 総数: {} 件】", refrs.len());
-            let mut stat_count = 0;
+            let mut resolved_count = 0;
             for (i, refr) in refrs.iter().enumerate() {
-                let model_info = if let Some(stat) = stat_map.get(&refr.base_object) {
-                    stat_count += 1;
-                    format!("STAT: \"{}\" -> {}", stat.edid, stat.model)
+                let model_info = if let Some(info) = model_map.get(&refr.base_object) {
+                    resolved_count += 1;
+                    format!("{}: \"{}\" -> {}", info.record_type, info.edid, info.model)
                 } else {
                     format!("Base: {:#010X}", refr.base_object.0)
                 };
@@ -406,7 +406,7 @@ fn test_esm_cell(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::e
                     println!("  ... (中略: 残り {} 件) ...", refrs.len().saturating_sub(35));
                 }
             }
-            println!("\nSTAT オブジェクト参照数: {} / {}", stat_count, refrs.len());
+            println!("\n3D モデル解決数: {} / {}", resolved_count, refrs.len());
             println!("セル検証完了！");
         }
         None => {

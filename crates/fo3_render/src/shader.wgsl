@@ -73,6 +73,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let lighting = ambient + n_dot_l * 0.65 + fill_light;
 
     let base_color = tex_color * in.color;
+    // アルファテスト (透過テクスチャの切り抜き)
+    if (base_color.a < 0.33) {
+        discard;
+    }
+
     let final_rgb = base_color.rgb * lighting;
 
     return vec4<f32>(final_rgb, base_color.a);

@@ -13,7 +13,19 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use crate::header::{GroupHeader, RecordHeader};
 use crate::records::{CellRecord, RefrRecord, StatRecord, Tes4Header};
 use crate::subrecord::{parse_subrecords, Subrecord};
-use crate::types::{FormId, REC_CELL, REC_REFR, REC_STAT, REC_TES4};
+use crate::types::{
+    FormId, FourCC, REC_ACTI, REC_CELL, REC_CONT, REC_DOOR, REC_FURN, REC_MSTT, REC_REFR,
+    REC_SCOL, REC_STAT, REC_TERM, REC_TES4, SUB_EDID, SUB_MODL,
+};
+
+/// 配置元ベースオブジェクトのメタ情報（モデルパス、エディタID、レコード型）。
+#[derive(Clone, Debug, PartialEq)]
+pub struct BaseObjectInfo {
+    pub form_id: FormId,
+    pub edid: String,
+    pub model: String,
+    pub record_type: FourCC,
+}
 
 /// ESM ファイルのエントリ（レコードまたはグループ）。
 #[derive(Debug)]
@@ -186,6 +198,65 @@ impl<R: Read + Seek> EsmReader<R> {
         for stat in stats {
             map.insert(stat.form_id, stat);
         }
+        Ok(map)
+    }
+
+    /// STAT, SCOL, DOOR, ACTI, FURN, CONT, MSTT, TERM など
+    /// 3D モデル (MODL) を保持するすべての基本レコードを一括走査してマップを構築する。
+    pub fn read_all_models_map(&mut self) -> io::Result<HashMap<FormId, BaseObjectInfo>> {
+        let start_pos = 24 + self.header_record.data_size as u64;
+        self.reader.seek(SeekFrom::Start(start_pos))?;
+
+        let target_types = [
+            REC_STAT, REC_SCOL, REC_DOOR, REC_ACTI,
+            REC_FURN, REC_CONT, REC_MSTT, REC_TERM,
+        ];
+
+        let mut map = HashMap::new();
+
+        while let Some(entry) = self.read_next_entry()? {
+            match entry {
+                EsmEntry::Group(group) => {
+                    if let Some(rtype) = group.target_record_type() {
+                        if target_types.contains(&rtype) {
+                            let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                            while self.reader.stream_position()? < group_end {
+                                if let Some(inner) = self.read_next_entry()? {
+                                    if let EsmEntry::Record(header, subrecords) = inner {
+                                        let mut edid = String::new();
+                                        let mut model = String::new();
+                                        for sub in &subrecords {
+                                            if sub.type_id == SUB_EDID {
+                                                edid = sub.as_string();
+                                            } else if sub.type_id == SUB_MODL {
+                                                model = sub.as_string();
+                                            }
+                                        }
+                                        if !model.is_empty() {
+                                            map.insert(header.form_id, BaseObjectInfo {
+                                                form_id: header.form_id,
+                                                edid,
+                                                model,
+                                                record_type: header.type_id,
+                                            });
+                                        }
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+                            continue;
+                        }
+                    }
+                    let remaining = group.group_size as u64 - GroupHeader::SIZE as u64;
+                    self.skip(remaining)?;
+                }
+                EsmEntry::Record(rec, _) => {
+                    self.skip(rec.data_size as u64)?;
+                }
+            }
+        }
+
         Ok(map)
     }
 
