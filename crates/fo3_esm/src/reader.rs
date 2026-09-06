@@ -11,7 +11,9 @@ use flate2::read::ZlibDecoder;
 use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::header::{GroupHeader, RecordHeader};
-use crate::records::{CellRecord, LandRecord, LightRecord, LtexRecord, RefrRecord, StatRecord, Tes4Header, TextureSetRecord};
+use crate::records::{
+    CellRecord, LandRecord, LightRecord, LtexRecord, RefrRecord, StatRecord, Tes4Header, TextureSetRecord, WorldRecord,
+};
 use crate::subrecord::{parse_subrecords, Subrecord};
 use crate::types::{
     FormId, FourCC, REC_ACTI, REC_ALCH, REC_AMMO, REC_ARMO, REC_BOOK, REC_CELL, REC_CONT,
@@ -578,6 +580,188 @@ impl<R: Read + Seek> EsmReader<R> {
             }
         }
         Ok(())
+    }
+
+    /// 指定された EDID を持つ WRLD (World Space) レコードを検索し、
+    /// (WorldRecord, 子グループ開始位置, 子グループ終了位置) を返す。
+    pub fn find_world_by_edid(&mut self, target_edid: &str) -> io::Result<Option<(WorldRecord, u64, u64)>> {
+        let start_pos = 24 + self.header_record.data_size as u64;
+        self.reader.seek(SeekFrom::Start(start_pos))?;
+
+        while let Some(entry) = self.read_next_entry()? {
+            match entry {
+                EsmEntry::Group(group) => {
+                    let rtype = group.target_record_type();
+                    let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                    if rtype == Some(REC_WRLD) {
+                        while self.reader.stream_position()? < group_end {
+                            if let Some(inner) = self.read_next_entry()? {
+                                match inner {
+                                    EsmEntry::Record(rec_hdr, subs) => {
+                                        if rec_hdr.type_id == REC_WRLD {
+                                            let world = WorldRecord::from_subrecords(rec_hdr.form_id, &subs);
+                                            if world.edid.eq_ignore_ascii_case(target_edid) {
+                                                let next_pos = self.reader.stream_position()?;
+                                                if let Some(next_entry) = self.read_next_entry()? {
+                                                    if let EsmEntry::Group(child_grp) = next_entry {
+                                                        let child_start = self.reader.stream_position()?;
+                                                        let child_end = child_start + (child_grp.group_size as u64 - GroupHeader::SIZE as u64);
+                                                        return Ok(Some((world, child_start, child_end)));
+                                                    }
+                                                }
+                                                self.reader.seek(SeekFrom::Start(next_pos))?;
+                                                return Ok(Some((world, 0, 0)));
+                                            }
+                                        }
+                                    }
+                                    EsmEntry::Group(g) => {
+                                        let skip = g.group_size as u64 - GroupHeader::SIZE as u64;
+                                        self.skip(skip)?;
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        let rem = group.group_size as u64 - GroupHeader::SIZE as u64;
+                        self.skip(rem)?;
+                    }
+                }
+                EsmEntry::Record(rec, _) => {
+                    self.skip(rec.data_size as u64)?;
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// ワールド空間ストリーム内を走査し、指定グリッド範囲内にある全セル（CELL, REFR群, LAND）を抽出する。
+    /// `center_grid` が None の場合、最初に見つかった外部セルの座標を中心とする。
+    pub fn read_cells_in_world_region(
+        &mut self,
+        group_start: u64,
+        group_end: u64,
+        center_grid: Option<(i32, i32)>,
+        radius: i32,
+    ) -> io::Result<(Option<(i32, i32)>, Vec<(CellRecord, Vec<RefrRecord>, Option<LandRecord>)>)> {
+        self.reader.seek(SeekFrom::Start(group_start))?;
+        let mut determined_center = center_grid;
+        let mut results = Vec::new();
+
+        self.collect_region_cells_recursive(group_end, &mut determined_center, radius, &mut results)?;
+        Ok((determined_center, results))
+    }
+
+    fn collect_region_cells_recursive(
+        &mut self,
+        end_pos: u64,
+        center: &mut Option<(i32, i32)>,
+        radius: i32,
+        out: &mut Vec<(CellRecord, Vec<RefrRecord>, Option<LandRecord>)>,
+    ) -> io::Result<()> {
+        let mut pending_cell: Option<(CellRecord, bool)> = None;
+
+        while self.reader.stream_position()? < end_pos {
+            let entry = match self.read_next_entry()? {
+                Some(e) => e,
+                None => break,
+            };
+
+            match entry {
+                EsmEntry::Group(group) => {
+                    let group_size = group.group_size as u64 - GroupHeader::SIZE as u64;
+                    let inner_end = self.reader.stream_position()? + group_size;
+
+                    if let Some((cell, in_range)) = pending_cell.take() {
+                        let group_label_id = u32::from_le_bytes(group.label);
+                        if (group.group_type == 6 || group.group_type == 8 || group.group_type == 9)
+                            && group_label_id == cell.form_id.0
+                        {
+                            if in_range {
+                                let mut refrs = Vec::new();
+                                let mut land = None;
+                                self.collect_children_in_group(inner_end, &mut refrs, &mut land)?;
+                                out.push((cell, refrs, land));
+                            } else {
+                                self.skip(group_size)?;
+                            }
+                            continue;
+                        } else {
+                            if in_range {
+                                out.push((cell, Vec::new(), None));
+                            }
+                        }
+                    }
+
+                    // グループ内の再帰探索
+                    self.collect_region_cells_recursive(inner_end, center, radius, out)?;
+                }
+                EsmEntry::Record(header, subrecords) => {
+                    if let Some((cell, in_range)) = pending_cell.take() {
+                        if in_range {
+                            out.push((cell, Vec::new(), None));
+                        }
+                    }
+
+                    if header.type_id == REC_CELL {
+                        let cell = CellRecord::from_record(&header, &subrecords)?;
+                        if let Some((gx, gy)) = cell.grid {
+                            if center.is_none() {
+                                *center = Some((gx, gy));
+                            }
+                            let (cx, cy) = center.unwrap();
+                            let in_range = (gx - cx).abs() <= radius && (gy - cy).abs() <= radius;
+                            pending_cell = Some((cell, in_range));
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some((cell, in_range)) = pending_cell.take() {
+            if in_range {
+                out.push((cell, Vec::new(), None));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// セル名からセルを検索し、内部セルなら単一セル、外部セルなら周囲 `radius` マス（3x3等）の全セルを返す。
+    pub fn find_cell_and_neighbors(
+        &mut self,
+        target_edid: &str,
+        radius: i32,
+    ) -> io::Result<Option<Vec<(CellRecord, Vec<RefrRecord>, Option<LandRecord>)>>> {
+        let initial = match self.find_cell_by_edid(target_edid)? {
+            Some(res) => res,
+            None => return Ok(None),
+        };
+
+        let (grid_x, grid_y) = match initial.0.grid {
+            Some(g) if radius > 0 => g,
+            _ => return Ok(Some(vec![initial])),
+        };
+
+        // 外部セルの場合、WRLD グループから周囲のセルを収集
+        let start_pos = 24 + self.header_record.data_size as u64;
+        self.reader.seek(SeekFrom::Start(start_pos))?;
+
+        while let Some(entry) = self.read_next_entry()? {
+            if let EsmEntry::Group(group) = entry {
+                if group.target_record_type() == Some(REC_WRLD) {
+                    let group_start = self.reader.stream_position()?;
+                    let group_end = group_start + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                    let (_, cells) = self.read_cells_in_world_region(group_start, group_end, Some((grid_x, grid_y)), radius)?;
+                    if !cells.is_empty() {
+                        return Ok(Some(cells));
+                    }
+                } else {
+                    self.skip(group.group_size as u64 - GroupHeader::SIZE as u64)?;
+                }
+            }
+        }
+
+        Ok(Some(vec![initial]))
     }
 }
 

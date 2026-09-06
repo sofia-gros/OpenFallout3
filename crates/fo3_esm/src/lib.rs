@@ -19,7 +19,7 @@ pub use header::{GroupHeader, RecordHeader, SubrecordHeader};
 pub use subrecord::Subrecord;
 pub use records::{
     CellLighting, CellRecord, LandRecord, LandTextureLayer, LightRecord, LtexRecord, RefrRecord, StatRecord, Tes4Header,
-    TextureSetRecord, LAND_HEIGHT_SCALE, LAND_NUM_VERTS, LAND_REAL_SIZE, LAND_VERTS_PER_SIDE,
+    TextureSetRecord, WorldRecord, LAND_HEIGHT_SCALE, LAND_NUM_VERTS, LAND_REAL_SIZE, LAND_VERTS_PER_SIDE,
 };
 pub use reader::{BaseObjectInfo, EsmEntry, EsmReader};
 

@@ -8,6 +8,7 @@ pub mod land;
 pub mod light;
 pub mod ltex;
 pub mod txst;
+pub mod wrld;
 
 pub use tes4::Tes4Header;
 pub use stat::StatRecord;
@@ -17,5 +18,6 @@ pub use land::{LandRecord, LandTextureLayer, LAND_HEIGHT_SCALE, LAND_NUM_VERTS, 
 pub use light::LightRecord;
 pub use ltex::LtexRecord;
 pub use txst::TextureSetRecord;
+pub use wrld::WorldRecord;
 
 

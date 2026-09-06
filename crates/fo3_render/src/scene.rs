@@ -104,7 +104,7 @@ impl RenderScene {
         Self::from_cell(device, queue, context, placed_nifs, None, None, vfs)
     }
 
-    /// ESM セルデータから 3D シーンを構築。
+    /// 単一 ESM セルデータから 3D シーンを構築。
     pub fn from_cell(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -114,7 +114,31 @@ impl RenderScene {
         landscape_texture_map: Option<&HashMap<fo3_esm::FormId, (String, String)>>,
         vfs: &mut VfsManager,
     ) -> Self {
+        Self::from_cells(
+            device,
+            queue,
+            context,
+            &[(placed_nifs, land_info)],
+            landscape_texture_map,
+            vfs,
+        )
+    }
+
+    /// 複数の ESM セルデータから 3D シーンを構築（屋外 3x3 セルやワールドスペース表示に対応）。
+    ///
+    /// 参照元:
+    /// - `references/openmw/components/esm4/loadland.hpp` (クアドラント 0..3, ATXT, VTXT)
+    /// - `knowledge/worldspace_cells.md` (ワールドスペースと外部セルグリッド)
+    pub fn from_cells(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        context: &RenderContext,
+        cells_data: &[(&[(&NifFile, NiTransform)], Option<(&fo3_esm::LandRecord, i32, i32)>)],
+        landscape_texture_map: Option<&HashMap<fo3_esm::FormId, (String, String)>>,
+        vfs: &mut VfsManager,
+    ) -> Self {
         let mut meshes = Vec::new();
+        let mut collision_meshes = Vec::new();
         let mut texture_cache: HashMap<String, GpuTexture> = HashMap::new();
         let default_texture = GpuTexture::create_default_white(device, queue);
         let default_normal_texture = GpuTexture::create_default_normal(device, queue);
@@ -123,131 +147,213 @@ impl RenderScene {
         let mut max = Vec3::splat(f32::MIN);
         let mut found = false;
 
-        // 1. 地形 (LAND) メッシュの生成と登録 (4クアドラント分割描画)
-        // 参照元:
-        // - references/openmw/components/esm4/loadland.hpp:79 (クアドラント 0..3)
-        // - references/openmw/components/esm4/loadland.cpp:138-143 (BTXT)
-        // - knowledge/landscape_multitexturing.md
-        if let Some((land, grid_x, grid_y)) = land_info {
-            let origin_x = grid_x as f32 * fo3_esm::LAND_REAL_SIZE;
-            let origin_y = grid_y as f32 * fo3_esm::LAND_REAL_SIZE;
+        for (placed_nifs, land_info) in cells_data {
+            // 1. 地形 (LAND) メッシュの生成と登録 (4クアドラント下地 + 追加レイヤーブレンド)
+            if let Some((land, grid_x, grid_y)) = *land_info {
+                let origin_x = grid_x as f32 * fo3_esm::LAND_REAL_SIZE;
+                let origin_y = grid_y as f32 * fo3_esm::LAND_REAL_SIZE;
 
-            for q in 0..4 {
-                if let Some(gpu_mesh) = GpuMesh::from_land_quadrant(device, land, grid_x, grid_y, q) {
-                    let form_id = land.base_textures[q];
-                    let (diff_name, norm_name) = if form_id != fo3_esm::FormId(0) {
-                        if let Some(tex_map) = landscape_texture_map {
-                            if let Some((diff, norm)) = tex_map.get(&form_id) {
-                                (
-                                    normalize_texture_path(diff),
-                                    if norm.is_empty() {
-                                        None
-                                    } else {
-                                        Some(normalize_texture_path(norm))
-                                    },
-                                )
+                // ① 下地ベーステクスチャ (BTXT) メッシュ (4 クアドラント)
+                for q in 0..4 {
+                    if let Some(gpu_mesh) = GpuMesh::from_land_quadrant(device, land, grid_x, grid_y, q) {
+                        let form_id = land.base_textures[q];
+                        let (diff_name, norm_name) = if form_id != fo3_esm::FormId(0) {
+                            if let Some(tex_map) = landscape_texture_map {
+                                if let Some((diff, norm)) = tex_map.get(&form_id) {
+                                    (
+                                        normalize_texture_path(diff),
+                                        if norm.is_empty() {
+                                            None
+                                        } else {
+                                            Some(normalize_texture_path(norm))
+                                        },
+                                    )
+                                } else {
+                                    ("textures\\landscape\\dirtwasteland01.dds".to_string(), None)
+                                }
                             } else {
                                 ("textures\\landscape\\dirtwasteland01.dds".to_string(), None)
                             }
                         } else {
                             ("textures\\landscape\\dirtwasteland01.dds".to_string(), None)
-                        }
-                    } else {
-                        ("textures\\landscape\\dirtwasteland01.dds".to_string(), None)
-                    };
+                        };
 
-                    let diff_opt = Some(diff_name.clone());
-                    ensure_texture_cached(&diff_opt, vfs, device, queue, &mut texture_cache);
-                    ensure_texture_cached(&norm_name, vfs, device, queue, &mut texture_cache);
+                        let diff_opt = Some(diff_name.clone());
+                        ensure_texture_cached(&diff_opt, vfs, device, queue, &mut texture_cache);
+                        ensure_texture_cached(&norm_name, vfs, device, queue, &mut texture_cache);
 
-                    let diffuse_texture = texture_cache.get(&diff_name).unwrap_or(&default_texture);
-                    let normal_texture = norm_name
-                        .as_ref()
-                        .and_then(|p| texture_cache.get(p))
-                        .unwrap_or(&default_normal_texture);
+                        let diffuse_texture = texture_cache.get(&diff_name).unwrap_or(&default_texture);
+                        let normal_texture = norm_name
+                            .as_ref()
+                            .and_then(|p| texture_cache.get(p))
+                            .unwrap_or(&default_normal_texture);
 
-                    let model_uniform = ModelUniform::new(glam::Mat4::IDENTITY, None);
-                    let model_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("Model Uniform Buffer: Landscape Q{}", q)),
-                        contents: bytemuck::bytes_of(&model_uniform),
-                        usage: wgpu::BufferUsages::UNIFORM,
-                    });
+                        let model_uniform = ModelUniform::new(glam::Mat4::IDENTITY, None);
+                        let model_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("Model Uniform Buffer: Landscape Q{}", q)),
+                            contents: bytemuck::bytes_of(&model_uniform),
+                            usage: wgpu::BufferUsages::UNIFORM,
+                        });
 
-                    let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some(&format!("Model Bind Group: Landscape Q{}", q)),
-                        layout: &context.model_bind_group_layout,
-                        entries: &[wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: model_uniform_buffer.as_entire_binding(),
-                        }],
-                    });
-
-                    let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some(&format!("Texture Bind Group: Landscape Q{}", q)),
-                        layout: &context.texture_bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
+                        let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some(&format!("Model Bind Group: Landscape Q{}", q)),
+                            layout: &context.model_bind_group_layout,
+                            entries: &[wgpu::BindGroupEntry {
                                 binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::TextureView(&normal_texture.view),
-                            },
-                        ],
-                    });
+                                resource: model_uniform_buffer.as_entire_binding(),
+                            }],
+                        });
 
-                    let q_offset_x = if q % 2 == 1 {
-                        fo3_esm::LAND_REAL_SIZE * 0.75
-                    } else {
-                        fo3_esm::LAND_REAL_SIZE * 0.25
-                    };
-                    let q_offset_y = if q >= 2 {
-                        fo3_esm::LAND_REAL_SIZE * 0.75
-                    } else {
-                        fo3_esm::LAND_REAL_SIZE * 0.25
-                    };
+                        let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some(&format!("Texture Bind Group: Landscape Q{}", q)),
+                            layout: &context.texture_bind_group_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: wgpu::BindingResource::TextureView(&normal_texture.view),
+                                },
+                            ],
+                        });
 
-                    meshes.push(RenderMesh {
-                        name: format!("Landscape_Q{}", q),
-                        mesh: gpu_mesh,
-                        model_bind_group,
-                        texture_bind_group,
-                        is_transparent: false,
-                        alpha_sort: false,
-                        world_center: Vec3::new(origin_x + q_offset_x, origin_y + q_offset_y, 0.0),
-                    });
+                        let q_offset_x = if q % 2 == 1 {
+                            fo3_esm::LAND_REAL_SIZE * 0.75
+                        } else {
+                            fo3_esm::LAND_REAL_SIZE * 0.25
+                        };
+                        let q_offset_y = if q >= 2 {
+                            fo3_esm::LAND_REAL_SIZE * 0.75
+                        } else {
+                            fo3_esm::LAND_REAL_SIZE * 0.25
+                        };
+
+                        meshes.push(RenderMesh {
+                            name: format!("Landscape_Q{}_Cell_{}_{}", q, grid_x, grid_y),
+                            mesh: gpu_mesh,
+                            model_bind_group,
+                            texture_bind_group,
+                            is_transparent: false,
+                            alpha_sort: false,
+                            world_center: Vec3::new(origin_x + q_offset_x, origin_y + q_offset_y, 0.0),
+                        });
+                    }
                 }
+
+                // ② 追加レイヤー (ATXT/VTXT: 道路・瓦礫・草) の半透明重畳描画
+                for (l_idx, layer) in land.layers.iter().enumerate() {
+                    if let Some(gpu_mesh) = GpuMesh::from_land_quadrant_layer(device, land, grid_x, grid_y, layer) {
+                        let (diff_name, norm_name) = if layer.form_id != fo3_esm::FormId(0) {
+                            if let Some(tex_map) = landscape_texture_map {
+                                if let Some((diff, norm)) = tex_map.get(&layer.form_id) {
+                                    (
+                                        normalize_texture_path(diff),
+                                        if norm.is_empty() {
+                                            None
+                                        } else {
+                                            Some(normalize_texture_path(norm))
+                                        },
+                                    )
+                                } else {
+                                    ("textures\\landscape\\dirtwasteland01.dds".to_string(), None)
+                                }
+                            } else {
+                                ("textures\\landscape\\dirtwasteland01.dds".to_string(), None)
+                            }
+                        } else {
+                            ("textures\\landscape\\dirtwasteland01.dds".to_string(), None)
+                        };
+
+                        let diff_opt = Some(diff_name.clone());
+                        ensure_texture_cached(&diff_opt, vfs, device, queue, &mut texture_cache);
+                        ensure_texture_cached(&norm_name, vfs, device, queue, &mut texture_cache);
+
+                        let diffuse_texture = texture_cache.get(&diff_name).unwrap_or(&default_texture);
+                        let normal_texture = norm_name
+                            .as_ref()
+                            .and_then(|p| texture_cache.get(p))
+                            .unwrap_or(&default_normal_texture);
+
+                        let model_uniform = ModelUniform::new(glam::Mat4::IDENTITY, None);
+                        let model_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("Model Uniform Buffer: Landscape Layer Q{}_{}", layer.quadrant, l_idx)),
+                            contents: bytemuck::bytes_of(&model_uniform),
+                            usage: wgpu::BufferUsages::UNIFORM,
+                        });
+
+                        let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some(&format!("Model Bind Group: Landscape Layer Q{}_{}", layer.quadrant, l_idx)),
+                            layout: &context.model_bind_group_layout,
+                            entries: &[wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: model_uniform_buffer.as_entire_binding(),
+                            }],
+                        });
+
+                        let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some(&format!("Texture Bind Group: Landscape Layer Q{}_{}", layer.quadrant, l_idx)),
+                            layout: &context.texture_bind_group_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: wgpu::BindingResource::TextureView(&normal_texture.view),
+                                },
+                            ],
+                        });
+
+                        meshes.push(RenderMesh {
+                            name: format!("Landscape_Q{}_Layer{}_Cell_{}_{}", layer.quadrant, l_idx, grid_x, grid_y),
+                            mesh: gpu_mesh,
+                            model_bind_group,
+                            texture_bind_group,
+                            is_transparent: true,
+                            alpha_sort: false,
+                            world_center: Vec3::new(
+                                origin_x + fo3_esm::LAND_REAL_SIZE * 0.5,
+                                origin_y + fo3_esm::LAND_REAL_SIZE * 0.5,
+                                0.0,
+                            ),
+                        });
+                    }
+                }
+
+                // 地形のバウンディング反映
+                let heights = land.compute_heights();
+                for &h in &heights {
+                    min.z = min.z.min(h);
+                    max.z = max.z.max(h);
+                }
+                min.x = min.x.min(origin_x);
+                max.x = max.x.max(origin_x + fo3_esm::LAND_REAL_SIZE);
+                min.y = min.y.min(origin_y);
+                max.y = max.y.max(origin_y + fo3_esm::LAND_REAL_SIZE);
+                found = true;
             }
 
-            // 地形のバウンディング反映
-            let heights = land.compute_heights();
-            for &h in &heights {
-                min.z = min.z.min(h);
-                max.z = max.z.max(h);
-            }
-            min.x = min.x.min(origin_x);
-            max.x = max.x.max(origin_x + fo3_esm::LAND_REAL_SIZE);
-            min.y = min.y.min(origin_y);
-            max.y = max.y.max(origin_y + fo3_esm::LAND_REAL_SIZE);
-            found = true;
-        }
-
-        // 2. 配置された 3D オブジェクト (REFR) の走査と登録
-        let mut collision_meshes = Vec::new();
-        for (nif, world_transform) in placed_nifs {
-            if !nif.blocks.is_empty() {
-                traverse_block(
-                    0,
-                    world_transform,
-                    None,
-                    nif,
-                    vfs,
-                    device,
+            // 2. 配置された 3D オブジェクト (REFR) の走査と登録
+            for (nif, world_transform) in *placed_nifs {
+                if !nif.blocks.is_empty() {
+                    traverse_block(
+                        0,
+                        world_transform,
+                        None,
+                        nif,
+                        vfs,
+                        device,
                     queue,
                     context,
                     &mut meshes,
@@ -286,6 +392,7 @@ impl RenderScene {
                 }
             }
         }
+    }
 
         let (bounds_center, bounds_radius) = if found {
             let center = (min + max) * 0.5;

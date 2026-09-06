@@ -104,6 +104,8 @@ pub const SUB_VCLR: FourCC = FourCC(*b"VCLR");
 pub const SUB_BTXT: FourCC = FourCC(*b"BTXT");
 pub const SUB_ATXT: FourCC = FourCC(*b"ATXT");
 pub const SUB_VTXT: FourCC = FourCC(*b"VTXT");
+pub const SUB_WNAM: FourCC = FourCC(*b"WNAM");
+pub const SUB_NAM2: FourCC = FourCC(*b"NAM2");
 
 /// 32-bit オブジェクト一意識別子 (FormID)。
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]

@@ -337,6 +337,118 @@ impl GpuMesh {
         Self::create(device, &vertices, &indices)
     }
 
+    /// 地形 (LAND) の追加テクスチャレイヤー (ATXT/VTXT) 用 GpuMesh を生成する。
+    /// 頂点カラーのアルファチャンネル (color[3]) に透過率 (0.0〜1.0) を格納。
+    ///
+    /// 参照元:
+    /// - `references/openmw/components/esm4/loadland.hpp:84-98` (ATXT, VTXT)
+    /// - `knowledge/worldspace_cells.md:セクション5`
+    pub fn from_land_quadrant_layer(
+        device: &wgpu::Device,
+        land: &fo3_esm::LandRecord,
+        grid_x: i32,
+        grid_y: i32,
+        layer: &fo3_esm::LandTextureLayer,
+    ) -> Option<Self> {
+        use fo3_esm::{LAND_REAL_SIZE, LAND_VERTS_PER_SIDE};
+
+        if layer.quadrant >= 4 {
+            return None;
+        }
+
+        const QUAD_VERTS_PER_SIDE: usize = 17;
+        const QUAD_QUADS_PER_SIDE: usize = 16;
+        const NUM_QUAD_VERTS: usize = QUAD_VERTS_PER_SIDE * QUAD_VERTS_PER_SIDE; // 289
+
+        // 17x17 頂点の透過率テーブルを構築
+        let mut opacity_grid = [0.0f32; NUM_QUAD_VERTS];
+        let mut has_visible = false;
+        for &(pos, op) in &layer.opacities {
+            if (pos as usize) < NUM_QUAD_VERTS {
+                opacity_grid[pos as usize] = op.clamp(0.0, 1.0);
+                if op > 0.001 {
+                    has_visible = true;
+                }
+            }
+        }
+
+        // 不透明度がすべてゼロならメッシュ生成不要
+        if !has_visible {
+            return None;
+        }
+
+        let heights = land.compute_heights();
+        let step = LAND_REAL_SIZE / (LAND_VERTS_PER_SIDE - 1) as f32;
+        let origin_x = grid_x as f32 * LAND_REAL_SIZE;
+        let origin_y = grid_y as f32 * LAND_REAL_SIZE;
+
+        let (x_start, y_start) = match layer.quadrant {
+            0 => (0, 0),
+            1 => (16, 0),
+            2 => (0, 16),
+            3 => (16, 16),
+            _ => unreachable!(),
+        };
+
+        let mut vertices = Vec::with_capacity(NUM_QUAD_VERTS);
+        for ly in 0..QUAD_VERTS_PER_SIDE {
+            for lx in 0..QUAD_VERTS_PER_SIDE {
+                let local_idx = ly * QUAD_VERTS_PER_SIDE + lx;
+                let gx = x_start + lx;
+                let gy = y_start + ly;
+                let idx = gy * LAND_VERTS_PER_SIDE + gx;
+
+                let wx = origin_x + gx as f32 * step;
+                let wy = origin_y + gy as f32 * step;
+                let wz = heights[idx];
+
+                let normal = if let Some(ref norms) = land.normals {
+                    if idx < norms.len() {
+                        let n = norms[idx];
+                        [n[0] as f32 / 127.0, n[1] as f32 / 127.0, n[2] as f32 / 127.0]
+                    } else {
+                        [0.0, 0.0, 1.0]
+                    }
+                } else {
+                    [0.0, 0.0, 1.0]
+                };
+
+                let alpha = opacity_grid[local_idx];
+                let color = [1.0, 1.0, 1.0, alpha];
+                let uv = [gx as f32, gy as f32];
+
+                vertices.push(Vertex {
+                    position: [wx, wy, wz],
+                    normal,
+                    uv,
+                    color,
+                    tangent: [1.0, 0.0, 0.0],
+                    bitangent: [0.0, 1.0, 0.0],
+                });
+            }
+        }
+
+        let mut indices = Vec::with_capacity(QUAD_QUADS_PER_SIDE * QUAD_QUADS_PER_SIDE * 6);
+        for ly in 0..QUAD_QUADS_PER_SIDE {
+            for lx in 0..QUAD_QUADS_PER_SIDE {
+                let i0 = (ly * QUAD_VERTS_PER_SIDE + lx) as u16;
+                let i1 = (ly * QUAD_VERTS_PER_SIDE + lx + 1) as u16;
+                let i2 = ((ly + 1) * QUAD_VERTS_PER_SIDE + lx) as u16;
+                let i3 = ((ly + 1) * QUAD_VERTS_PER_SIDE + lx + 1) as u16;
+
+                indices.push(i0);
+                indices.push(i2);
+                indices.push(i1);
+
+                indices.push(i1);
+                indices.push(i2);
+                indices.push(i3);
+            }
+        }
+
+        Self::create(device, &vertices, &indices)
+    }
+
     fn create(device: &wgpu::Device, vertices: &[Vertex], indices: &[u16]) -> Option<Self> {
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Mesh Vertex Buffer"),
