@@ -276,7 +276,10 @@ impl ViewerState {
                                                 nif_cache.insert(model_key, arc.clone());
                                                 arc
                                             }
-                                            Err(_) => continue,
+                                            Err(e) => {
+                                                eprintln!("警告: メッシュ \"{}\" のパースに失敗しました（スキップします）: {}", mesh_path, e);
+                                                continue;
+                                            }
                                         }
                                     }
                                     Err(_) => continue,

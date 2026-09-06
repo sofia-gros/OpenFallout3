@@ -512,18 +512,30 @@ impl<R: Read + Seek> EsmReader<R> {
 
             match entry {
                 EsmEntry::Group(group) => {
-                    let inner_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                    let group_size = group.group_size as u64 - GroupHeader::SIZE as u64;
+                    let inner_end = self.reader.stream_position()? + group_size;
+
                     if let Some(ref cell) = found_cell {
                         let cell_id = cell.form_id.0;
                         let group_label_id = u32::from_le_bytes(group.label);
-                        // 対象セルの子グループ (CellChildren=6, Persistent=8, Temporary=9)
-                        if (group.group_type == 6 || group.group_type == 8 || group.group_type == 9) && group_label_id == cell_id {
+                        // 対象セルの子グループ (CellChildren=6, Persistent=8, Temporary=9, VisibleDistant=10)
+                        // 参照元: references/openmw/components/esm4/loadgrup.hpp:L134-149
+                        if (group.group_type == 6 || group.group_type == 8 || group.group_type == 9 || group.group_type == 10)
+                            && group_label_id == cell_id
+                        {
                             self.collect_children_in_group(inner_end, &mut refrs, &mut land)?;
+                            continue;
                         } else {
-                            // 子グループを抜けたので終了
+                            // 対象セルの子グループ群を抜けたので検索終了
                             return Ok(Some((cell.clone(), refrs, land)));
                         }
                     } else {
+                        // セル未発見時、セルレコードを含み得ない子グループ (6, 7, 8, 9, 10) は高速スキップ
+                        if group.group_type == 6 || group.group_type == 7 || group.group_type == 8 || group.group_type == 9 || group.group_type == 10 {
+                            self.skip(group_size)?;
+                            continue;
+                        }
+
                         // まだセルが見つかっていない場合、再帰的に探索
                         if let Some(result) = self.search_cell_in_stream(inner_end, target_edid)? {
                             return Ok(Some(result));
@@ -635,7 +647,8 @@ impl<R: Read + Seek> EsmReader<R> {
     }
 
     /// ワールド空間ストリーム内を走査し、指定グリッド範囲内にある全セル（CELL, REFR群, LAND）を抽出する。
-    /// `center_grid` が None の場合、最初に見つかった外部セルの座標を中心とする。
+    /// `center_grid` が None の場合、独立ワールド空間なら全景（全セル）、広大ワールドなら最密集セル周辺を自動選択する。
+    /// 参照元: references/openmw/components/esm4/loadgrup.hpp:L134-149
     pub fn read_cells_in_world_region(
         &mut self,
         group_start: u64,
@@ -644,22 +657,70 @@ impl<R: Read + Seek> EsmReader<R> {
         radius: i32,
     ) -> io::Result<(Option<(i32, i32)>, Vec<(CellRecord, Vec<RefrRecord>, Option<LandRecord>)>)> {
         self.reader.seek(SeekFrom::Start(group_start))?;
-        let mut determined_center = center_grid;
-        let mut results = Vec::new();
+        let mut cell_order = Vec::new();
+        let mut cell_map: HashMap<FormId, (CellRecord, Vec<RefrRecord>, Option<LandRecord>)> = HashMap::new();
 
-        self.collect_region_cells_recursive(group_end, &mut determined_center, radius, &mut results)?;
-        Ok((determined_center, results))
+        self.collect_region_cells_recursive(
+            group_end,
+            center_grid,
+            radius,
+            &mut cell_order,
+            &mut cell_map,
+        )?;
+
+        // 有効セル（REFR または LAND または EDID を保持するセル）のみを抽出
+        let mut all_valid_cells: Vec<(CellRecord, Vec<RefrRecord>, Option<LandRecord>)> = cell_order
+            .into_iter()
+            .filter_map(|id| cell_map.remove(&id))
+            .filter(|(cell, refrs, land)| !refrs.is_empty() || land.is_some() || !cell.edid.is_empty())
+            .collect();
+
+        if let Some((cx, cy)) = center_grid {
+            // グリッド指定がある場合: 指定グリッドの周囲 radius マスに厳密フィルタ
+            all_valid_cells.retain(|(cell, _, _)| {
+                if let Some((gx, gy)) = cell.grid {
+                    (gx - cx).abs() <= radius && (gy - cy).abs() <= radius
+                } else {
+                    true
+                }
+            });
+            Ok((Some((cx, cy)), all_valid_cells))
+        } else {
+            // グリッド未指定の場合:
+            // 独立ワールド空間 (MegatonWorld 等: 有効セル数 25 件以下) なら全景をそのまま一括返却
+            if all_valid_cells.len() <= 25 {
+                let resolved_center = all_valid_cells
+                    .iter()
+                    .max_by_key(|(_, r, _)| r.len())
+                    .and_then(|(c, _, _)| c.grid);
+                Ok((resolved_center, all_valid_cells))
+            } else {
+                // 巨大荒野ワールド空間 (Wasteland 等): 最も配置物 (REFR) が多いセルを中心として radius マスを抽出
+                let best_center = all_valid_cells
+                    .iter()
+                    .max_by_key(|(_, r, _)| r.len())
+                    .and_then(|(c, _, _)| c.grid)
+                    .unwrap_or((0, 0));
+                all_valid_cells.retain(|(cell, _, _)| {
+                    if let Some((gx, gy)) = cell.grid {
+                        (gx - best_center.0).abs() <= radius && (gy - best_center.1).abs() <= radius
+                    } else {
+                        false
+                    }
+                });
+                Ok((Some(best_center), all_valid_cells))
+            }
+        }
     }
 
     fn collect_region_cells_recursive(
         &mut self,
         end_pos: u64,
-        center: &mut Option<(i32, i32)>,
+        center: Option<(i32, i32)>,
         radius: i32,
-        out: &mut Vec<(CellRecord, Vec<RefrRecord>, Option<LandRecord>)>,
+        cell_order: &mut Vec<FormId>,
+        cell_map: &mut HashMap<FormId, (CellRecord, Vec<RefrRecord>, Option<LandRecord>)>,
     ) -> io::Result<()> {
-        let mut pending_cell: Option<(CellRecord, bool)> = None;
-
         while self.reader.stream_position()? < end_pos {
             let entry = match self.read_next_entry()? {
                 Some(e) => e,
@@ -670,56 +731,51 @@ impl<R: Read + Seek> EsmReader<R> {
                 EsmEntry::Group(group) => {
                     let group_size = group.group_size as u64 - GroupHeader::SIZE as u64;
                     let inner_end = self.reader.stream_position()? + group_size;
+                    let group_label_id = FormId(u32::from_le_bytes(group.label));
 
-                    if let Some((cell, in_range)) = pending_cell.take() {
-                        let group_label_id = u32::from_le_bytes(group.label);
-                        if (group.group_type == 6 || group.group_type == 8 || group.group_type == 9)
-                            && group_label_id == cell.form_id.0
-                        {
-                            if in_range {
-                                let mut refrs = Vec::new();
-                                let mut land = None;
-                                self.collect_children_in_group(inner_end, &mut refrs, &mut land)?;
-                                out.push((cell, refrs, land));
-                            } else {
-                                self.skip(group_size)?;
-                            }
-                            continue;
+                    // セル子グループ (CellChildren=6, Persistent=8, Temporary=9, VisibleDistant=10)
+                    // 参照元: references/openmw/components/esm4/loadgrup.hpp:L134-149
+                    if group.group_type == 6 || group.group_type == 8 || group.group_type == 9 || group.group_type == 10 {
+                        if let Some((_, ref mut refrs, ref mut land)) = cell_map.get_mut(&group_label_id) {
+                            self.collect_children_in_group(inner_end, refrs, land)?;
                         } else {
-                            if in_range {
-                                out.push((cell, Vec::new(), None));
-                            }
+                            // 対象外のセルグループはスキップ
+                            self.skip(group_size)?;
                         }
+                        continue;
                     }
 
-                    // グループ内の再帰探索
-                    self.collect_region_cells_recursive(inner_end, center, radius, out)?;
+                    // コンテナグループ（Type 1: World Children, Type 4: Exterior Cell, Type 5: Sub-Cell 等）は再帰探索
+                    self.collect_region_cells_recursive(
+                        inner_end,
+                        center,
+                        radius,
+                        cell_order,
+                        cell_map,
+                    )?;
                 }
                 EsmEntry::Record(header, subrecords) => {
-                    if let Some((cell, in_range)) = pending_cell.take() {
-                        if in_range {
-                            out.push((cell, Vec::new(), None));
-                        }
-                    }
-
                     if header.type_id == REC_CELL {
                         let cell = CellRecord::from_record(&header, &subrecords)?;
-                        if let Some((gx, gy)) = cell.grid {
-                            if center.is_none() {
-                                *center = Some((gx, gy));
+                        let in_range = if let Some((cx, cy)) = center {
+                            if let Some((gx, gy)) = cell.grid {
+                                (gx - cx).abs() <= radius && (gy - cy).abs() <= radius
+                            } else {
+                                true
                             }
-                            let (cx, cy) = center.unwrap();
-                            let in_range = (gx - cx).abs() <= radius && (gy - cy).abs() <= radius;
-                            pending_cell = Some((cell, in_range));
+                        } else {
+                            // 中心未指定時は候補として全セルを登録
+                            true
+                        };
+
+                        if in_range {
+                            if !cell_map.contains_key(&cell.form_id) {
+                                cell_order.push(cell.form_id);
+                                cell_map.insert(cell.form_id, (cell, Vec::new(), None));
+                            }
                         }
                     }
                 }
-            }
-        }
-
-        if let Some((cell, in_range)) = pending_cell.take() {
-            if in_range {
-                out.push((cell, Vec::new(), None));
             }
         }
 

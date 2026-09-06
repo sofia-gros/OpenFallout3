@@ -27,6 +27,9 @@ impl NiObjectNET {
     pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
         let name_index = reader.read_u32::<LittleEndian>()?;
         let num_extra = reader.read_u32::<LittleEndian>()? as usize;
+        if num_extra > 4096 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("num_extra too large: {}", num_extra)));
+        }
         let mut extra_data_list = Vec::with_capacity(num_extra);
         for _ in 0..num_extra {
             extra_data_list.push(reader.read_i32::<LittleEndian>()?);
@@ -70,6 +73,9 @@ impl NiAVObject {
         let scale = reader.read_f32::<LittleEndian>()?;
 
         let num_properties = reader.read_u32::<LittleEndian>()? as usize;
+        if num_properties > 4096 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("num_properties too large: {}", num_properties)));
+        }
         let mut properties = Vec::with_capacity(num_properties);
         for _ in 0..num_properties {
             properties.push(reader.read_i32::<LittleEndian>()?);
@@ -106,12 +112,18 @@ impl NiNode {
         let av = NiAVObject::read(reader)?;
 
         let num_children = reader.read_u32::<LittleEndian>()? as usize;
+        if num_children > 65536 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("num_children too large: {}", num_children)));
+        }
         let mut children = Vec::with_capacity(num_children);
         for _ in 0..num_children {
             children.push(reader.read_i32::<LittleEndian>()?);
         }
 
         let num_effects = reader.read_u32::<LittleEndian>()? as usize;
+        if num_effects > 4096 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("num_effects too large: {}", num_effects)));
+        }
         let mut effects = Vec::with_capacity(num_effects);
         for _ in 0..num_effects {
             effects.push(reader.read_i32::<LittleEndian>()?);

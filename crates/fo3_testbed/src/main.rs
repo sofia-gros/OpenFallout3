@@ -606,6 +606,71 @@ fn test_esm_cell(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
+fn test_esm_world_dump(esm_path: &str, world_edid: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::SeekFrom;
+    use fo3_esm::{EsmEntry, GroupHeader};
+    use fo3_esm::types::{REC_CELL, REC_REFR};
+
+    println!("=== ESM ワールド空間詳細ダンプ: \"{}\" ({}) ===", world_edid, esm_path);
+    let mut reader = EsmReader::open(esm_path)?;
+    let (world_rec, group_start, group_end) = reader
+        .find_world_by_edid(world_edid)?
+        .expect("World not found");
+
+    println!("ワールド発見: \"{}\" (FormID: {:#010X})", world_rec.edid, world_rec.form_id.0);
+    println!("グループ範囲: {} .. {} (サイズ: {} バイト)", group_start, group_end, group_end - group_start);
+
+    reader.seek(SeekFrom::Start(group_start))?;
+
+    fn dump_group_recursive<R: std::io::Read + std::io::Seek>(
+        reader: &mut EsmReader<R>,
+        end_pos: u64,
+        indent: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let pad = "  ".repeat(indent);
+        while reader.stream_position()? < end_pos {
+            let entry = match reader.read_next_entry()? {
+                Some(e) => e,
+                None => break,
+            };
+
+            match entry {
+                EsmEntry::Group(group) => {
+                    let group_size = group.group_size as u64 - GroupHeader::SIZE as u64;
+                    let inner_end = reader.stream_position()? + group_size;
+                    let label_val = u32::from_le_bytes(group.label);
+                    println!(
+                        "{}GRUP: Type={}, Label={:#010X} (Size: {})",
+                        pad, group.group_type, label_val, group.group_size
+                    );
+                    dump_group_recursive(reader, inner_end, indent + 1)?;
+                }
+                EsmEntry::Record(header, subrecords) => {
+                    if header.type_id == REC_CELL {
+                        let cell = fo3_esm::CellRecord::from_record(&header, &subrecords)?;
+                        println!(
+                            "{}RECORD: CELL FormID={:#010X}, EDID=\"{}\", Grid={:?}",
+                            pad, cell.form_id.0, cell.edid, cell.grid
+                        );
+                    } else if header.type_id == REC_REFR {
+                        let refr = fo3_esm::RefrRecord::from_record(&header, &subrecords)?;
+                        println!(
+                            "{}RECORD: REFR FormID={:#010X}, Base={:#010X}, Pos={:?}",
+                            pad, refr.form_id.0, refr.base_object.0, refr.position
+                        );
+                    } else {
+                        println!("{}RECORD: {} FormID={:#010X}", pad, header.type_id, header.form_id.0);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    dump_group_recursive(&mut reader, group_end, 0)?;
+    Ok(())
+}
+
 fn scan_records_for_formids(
     esm_path: &str,
     target_ids: &std::collections::BTreeSet<fo3_esm::FormId>,
@@ -870,6 +935,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
             test_esm_worlds(&args[2])?;
+        }
+        "esm-world-dump" => {
+            if args.len() < 4 {
+                println!("使用法: esm-world-dump <path/to/file.esm> <world_edid>");
+                return Ok(());
+            }
+            test_esm_world_dump(&args[2], &args[3])?;
         }
         "collision-batch" => {
             if args.len() < 3 {
