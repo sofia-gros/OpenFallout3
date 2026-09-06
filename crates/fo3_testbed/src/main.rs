@@ -30,6 +30,7 @@ fn print_usage() {
     println!("  cargo run -p fo3_testbed -- esm-groups <path/to/file.esm>");
     println!("  cargo run -p fo3_testbed -- esm-stat <path/to/file.esm> [limit]");
     println!("  cargo run -p fo3_testbed -- esm-cell <path/to/file.esm> <cell_edid>");
+    println!("  cargo run -p fo3_testbed -- collision-batch <data_dir> [limit]");
 }
 
 fn test_nif(nif_path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -132,6 +133,74 @@ fn dump_nif<R: std::io::BufRead>(reader: &mut R, title: &str) -> Result<(), Box<
             }
             NifBlock::NiAlphaProperty(alpha) => {
                 println!("Flags: {:#X} Threshold: {}", alpha.flags, alpha.threshold);
+            }
+            NifBlock::BhkCollisionObject(obj) => {
+                println!("Target: {} Flags: {:#X} Body: {}", obj.target, obj.flags, obj.body);
+            }
+            NifBlock::BhkRigidBody(body) | NifBlock::BhkRigidBodyT(body) => {
+                println!(
+                    "Shape: {} Layer: {} Mass: {:.2}kg Motion: {} Trans: {:?}",
+                    body.world_obj.shape,
+                    body.world_obj.havok_filter_layer,
+                    body.mass,
+                    body.motion_system,
+                    body.translation,
+                );
+            }
+            NifBlock::BhkMoppBvTreeShape(mopp) => {
+                println!(
+                    "Shape: {} Scale: {:.2} MOPPデータ長: {} bytes Offset: {:?}",
+                    mopp.shape,
+                    mopp.scale,
+                    mopp.mopp_data.len(),
+                    mopp.mopp_offset,
+                );
+            }
+            NifBlock::BhkPackedNiTriStripsShape(shape) => {
+                println!(
+                    "Data: {} Radius: {:.3} Scale: {:?}",
+                    shape.data,
+                    shape.radius,
+                    shape.scale,
+                );
+            }
+            NifBlock::HkPackedNiTriStripsData(data) => {
+                println!(
+                    "頂点数: {} (圧縮={}) 三角形数: {} サブシェイプ数: {}",
+                    data.vertices.len(),
+                    data.is_compressed,
+                    data.triangles.len(),
+                    data.sub_shapes.len(),
+                );
+                if let Some(first_sub) = data.sub_shapes.first() {
+                    println!(
+                        "          SubShape[0]: Layer={}, Vertices={}, Material={:#X}",
+                        first_sub.havok_filter_layer,
+                        first_sub.num_vertices,
+                        first_sub.material,
+                    );
+                }
+                if let (Some(first), Some(last)) = (data.vertices.first(), data.vertices.last()) {
+                    println!("          Vert[0]: {:?}, Vert[last]: {:?}", first, last);
+                }
+            }
+            NifBlock::BhkBoxShape(box_shape) => {
+                println!("Radius: {:.3} Dimensions: {:?}", box_shape.radius, box_shape.dimensions);
+            }
+            NifBlock::BhkSphereShape(sphere) => {
+                println!("Radius: {:.3} Material: {:#X}", sphere.radius, sphere.material);
+            }
+            NifBlock::BhkCapsuleShape(capsule) => {
+                println!("Pt1: {:?} (r={:.2}), Pt2: {:?} (r={:.2})", capsule.first_point, capsule.radius1, capsule.second_point, capsule.radius2);
+            }
+            NifBlock::BhkBlendCollisionObject(blend) => {
+                println!("Target: {} Flags: {:#X} Body: {} HeirGain: {:.2} VelGain: {:.2}", blend.col.target, blend.col.flags, blend.col.body, blend.heir_gain, blend.vel_gain);
+            }
+            NifBlock::BhkConvexVerticesShape(convex) => {
+                println!("Radius: {:.3} 頂点数: {} 法線数: {}", convex.radius, convex.vertices.len(), convex.normals.len());
+            }
+            NifBlock::BhkListShape(list) => {
+                println!("子形状数: {} フィルター数: {}", list.sub_shapes.len(), list.filters.len());
             }
             NifBlock::Unknown { type_name: _, data } => {
                 println!("(未対応/スキップ - {} バイト)", data.len());
@@ -720,6 +789,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             test_esm_worlds(&args[2])?;
         }
+        "collision-batch" => {
+            if args.len() < 3 {
+                print_usage();
+                return Ok(());
+            }
+            let limit = args.get(3).and_then(|s| s.parse::<usize>().ok()).unwrap_or(100);
+            test_collision_batch(&args[2], limit)?;
+        }
         _ => {
             if args[1].ends_with(".nif") {
                 test_nif(&args[1])?;
@@ -729,5 +806,130 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    Ok(())
+}
+
+fn test_collision_batch(data_dir: &str, limit: usize) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== Havok コリジョンブロック一括パース検証 (最大 {} 件) ===", limit);
+    let mut vfs = create_vfs(data_dir)?;
+
+    let mesh_bsa_path = Path::new(data_dir).join("Fallout - Meshes.bsa");
+    let bsa = BsaArchive::open(&mesh_bsa_path)?;
+    let files = bsa.list_files();
+
+    let mut total_meshes = 0;
+    let mut meshes_with_collision = 0;
+    let mut count_collision_obj = 0;
+    let mut count_rigid_body = 0;
+    let mut count_mopp = 0;
+    let mut count_packed_shape = 0;
+    let mut count_packed_data = 0;
+    let mut count_compressed_data = 0;
+    let mut count_box_shape = 0;
+    let mut count_sphere_shape = 0;
+    let mut count_capsule_shape = 0;
+    let mut count_convex_vertices = 0;
+    let mut count_list_shape = 0;
+    let mut count_blend_collision_obj = 0;
+    let mut count_unknown_bhk = 0;
+    let mut unknown_types = std::collections::BTreeMap::<String, usize>::new();
+    let mut total_collision_triangles = 0;
+    let mut total_collision_vertices = 0;
+
+    for file_path in files {
+        if !file_path.ends_with(".nif") {
+            continue;
+        }
+        total_meshes += 1;
+
+        if let Ok(data) = vfs.read(file_path) {
+            let mut cursor = Cursor::new(&data);
+            if let Ok(nif) = NifFile::read(&mut cursor) {
+                let mut has_col = false;
+                for block in &nif.blocks {
+                    match block {
+                        NifBlock::BhkCollisionObject(_) => {
+                            has_col = true;
+                            count_collision_obj += 1;
+                        }
+                        NifBlock::BhkRigidBody(_) | NifBlock::BhkRigidBodyT(_) => {
+                            count_rigid_body += 1;
+                        }
+                        NifBlock::BhkMoppBvTreeShape(_) => {
+                            count_mopp += 1;
+                        }
+                        NifBlock::BhkPackedNiTriStripsShape(_) => {
+                            count_packed_shape += 1;
+                        }
+                        NifBlock::HkPackedNiTriStripsData(d) => {
+                            count_packed_data += 1;
+                            if d.is_compressed {
+                                count_compressed_data += 1;
+                            }
+                            total_collision_triangles += d.triangles.len();
+                            total_collision_vertices += d.vertices.len();
+                        }
+                        NifBlock::BhkBoxShape(_) => {
+                            count_box_shape += 1;
+                        }
+                        NifBlock::BhkSphereShape(_) => {
+                            count_sphere_shape += 1;
+                        }
+                        NifBlock::BhkCapsuleShape(_) => {
+                            count_capsule_shape += 1;
+                        }
+                        NifBlock::BhkConvexVerticesShape(s) => {
+                            count_convex_vertices += 1;
+                            total_collision_vertices += s.vertices.len();
+                        }
+                        NifBlock::BhkListShape(_) => {
+                            count_list_shape += 1;
+                        }
+                        NifBlock::BhkBlendCollisionObject(_) => {
+                            has_col = true;
+                            count_blend_collision_obj += 1;
+                        }
+                        NifBlock::Unknown { type_name, .. } => {
+                            if type_name.starts_with("bhk") || type_name.starts_with("hk") {
+                                count_unknown_bhk += 1;
+                                *unknown_types.entry(type_name.clone()).or_insert(0) += 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if has_col {
+                    meshes_with_collision += 1;
+                }
+            }
+        }
+
+        if total_meshes >= limit {
+            break;
+        }
+    }
+
+    println!("検証メッシュ総数: {}", total_meshes);
+    println!("コリジョン含有メッシュ数: {} ({:.1}%)", meshes_with_collision, (meshes_with_collision as f64 / total_meshes as f64) * 100.0);
+    println!("パース成功ブロック内訳:");
+    println!("  bhkCollisionObject:          {} 件", count_collision_obj);
+    println!("  bhkBlendCollisionObject:     {} 件", count_blend_collision_obj);
+    println!("  bhkRigidBody / T:            {} 件", count_rigid_body);
+    println!("  bhkMoppBvTreeShape:          {} 件", count_mopp);
+    println!("  bhkPackedNiTriStripsShape:   {} 件", count_packed_shape);
+    println!("  hkPackedNiTriStripsData:     {} 件 (うち圧縮半精度: {} 件)", count_packed_data, count_compressed_data);
+    println!("  bhkBoxShape:                 {} 件", count_box_shape);
+    println!("  bhkSphereShape:              {} 件", count_sphere_shape);
+    println!("  bhkCapsuleShape:             {} 件", count_capsule_shape);
+    println!("  bhkConvexVerticesShape:      {} 件", count_convex_vertices);
+    println!("  bhkListShape:                {} 件", count_list_shape);
+    println!("抽出コリジョン総ポリゴン数:");
+    println!("  総三角形数:                 {} 枚", total_collision_triangles);
+    println!("  総頂点数:                   {} 点", total_collision_vertices);
+    println!("未対応/未パース Havok ブロック: {} 件", count_unknown_bhk);
+    for (tname, count) in &unknown_types {
+        println!("    - {}: {} 件", tname, count);
+    }
+    println!("=== コリジョン一括検証完了 ===");
     Ok(())
 }

@@ -109,6 +109,126 @@ impl NifFile {
                         data: block_bytes,
                     },
                 },
+                "bhkCollisionObject" => match BhkCollisionObject::read(&mut cursor) {
+                    Ok(obj) => NifBlock::BhkCollisionObject(obj),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkCollisionObjectパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "bhkRigidBody" => match BhkRigidBody::read(&mut cursor) {
+                    Ok(body) => NifBlock::BhkRigidBody(body),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkRigidBodyパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "bhkRigidBodyT" => match BhkRigidBody::read(&mut cursor) {
+                    Ok(body) => NifBlock::BhkRigidBodyT(body),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkRigidBodyTパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "bhkMoppBvTreeShape" => match BhkMoppBvTreeShape::read(&mut cursor) {
+                    Ok(shape) => NifBlock::BhkMoppBvTreeShape(shape),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkMoppBvTreeShapeパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "bhkPackedNiTriStripsShape" => match BhkPackedNiTriStripsShape::read(&mut cursor) {
+                    Ok(shape) => NifBlock::BhkPackedNiTriStripsShape(shape),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkPackedNiTriStripsShapeパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "hkPackedNiTriStripsData" => match HkPackedNiTriStripsData::read(&mut cursor) {
+                    Ok(data) => NifBlock::HkPackedNiTriStripsData(data),
+                    Err(e) => {
+                        eprintln!("[WARN] hkPackedNiTriStripsDataパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "bhkBoxShape" => match BhkBoxShape::read(&mut cursor) {
+                    Ok(shape) => NifBlock::BhkBoxShape(shape),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkBoxShapeパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "bhkSphereShape" => match BhkSphereShape::read(&mut cursor) {
+                    Ok(shape) => NifBlock::BhkSphereShape(shape),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkSphereShapeパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "bhkCapsuleShape" => match BhkCapsuleShape::read(&mut cursor) {
+                    Ok(shape) => NifBlock::BhkCapsuleShape(shape),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkCapsuleShapeパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "bhkConvexVerticesShape" => match BhkConvexVerticesShape::read(&mut cursor) {
+                    Ok(shape) => NifBlock::BhkConvexVerticesShape(shape),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkConvexVerticesShapeパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "bhkListShape" => match BhkListShape::read(&mut cursor) {
+                    Ok(shape) => NifBlock::BhkListShape(shape),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkListShapeパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "bhkBlendCollisionObject" => match BhkBlendCollisionObject::read(&mut cursor) {
+                    Ok(obj) => NifBlock::BhkBlendCollisionObject(obj),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkBlendCollisionObjectパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
                 _ => NifBlock::Unknown {
                     type_name: block_type_name.clone(),
                     data: block_bytes,
