@@ -10,14 +10,19 @@ pub mod ltex;
 pub mod txst;
 pub mod wrld;
 
+pub mod armo;
+pub mod npc;
+
 pub use tes4::Tes4Header;
 pub use stat::StatRecord;
 pub use cell::{CellLighting, CellRecord};
-pub use refr::RefrRecord;
+pub use refr::{EnableParent, LockData, RefrRecord, TeleportDoor};
 pub use land::{LandRecord, LandTextureLayer, LAND_HEIGHT_SCALE, LAND_NUM_VERTS, LAND_REAL_SIZE, LAND_VERTS_PER_SIDE};
 pub use light::LightRecord;
 pub use ltex::LtexRecord;
 pub use txst::TextureSetRecord;
 pub use wrld::WorldRecord;
+pub use armo::ArmorRecord;
+pub use npc::NpcRecord;
 
 

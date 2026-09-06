@@ -36,6 +36,8 @@ pub struct OrbitCamera {
     pub z_near: f32,
     /// 後方クリップ距離
     pub z_far: f32,
+    /// 自由視点・ウォークスルー用のカメラ位置オーバーライド (None の場合は target + 球面座標距離から計算)
+    pub override_eye: Option<Vec3>,
 }
 
 impl Default for OrbitCamera {
@@ -49,6 +51,7 @@ impl Default for OrbitCamera {
             aspect: 16.0 / 9.0,
             z_near: 1.0,
             z_far: 100000.0,
+            override_eye: None,
         }
     }
 }
@@ -63,15 +66,33 @@ impl OrbitCamera {
 
     /// カメラの 3D ワールド座標を計算。
     pub fn eye_position(&self) -> Vec3 {
-        let x = self.distance * self.pitch.cos() * self.yaw.cos();
-        let y = self.distance * self.pitch.cos() * self.yaw.sin();
-        let z = self.distance * self.pitch.sin();
-        self.target + Vec3::new(x, y, z)
+        if let Some(eye) = self.override_eye {
+            eye
+        } else {
+            let x = self.distance * self.pitch.cos() * self.yaw.cos();
+            let y = self.distance * self.pitch.cos() * self.yaw.sin();
+            let z = self.distance * self.pitch.sin();
+            self.target + Vec3::new(x, y, z)
+        }
+    }
+
+    /// カメラの注視方向単位ベクトル (視線ベクトル) を計算。
+    pub fn forward_vector(&self) -> Vec3 {
+        Vec3::new(
+            self.pitch.cos() * self.yaw.cos(),
+            self.pitch.cos() * self.yaw.sin(),
+            self.pitch.sin(),
+        ).normalize()
     }
 
     /// ビュー行列 (Z-up) を計算。
     pub fn view_matrix(&self) -> Mat4 {
-        Mat4::look_at_rh(self.eye_position(), self.target, Vec3::Z)
+        if let Some(eye) = self.override_eye {
+            let forward = self.forward_vector();
+            Mat4::look_at_rh(eye, eye + forward, Vec3::Z)
+        } else {
+            Mat4::look_at_rh(self.eye_position(), self.target, Vec3::Z)
+        }
     }
 
     /// 透視投影行列を計算。

@@ -769,6 +769,432 @@ impl BhkBlendCollisionObject {
     }
 }
 
+/// 局所変換行列付き凸形状ブロック。
+///
+/// 参照元: `references/nifxml/nif.xml:L3107` (`bhkConvexTransformShape`)
+#[derive(Clone, Debug, PartialEq)]
+pub struct BhkConvexTransformShape {
+    /// 内包される凸形状 (`bhkConvexShape`) への参照 (Ref)
+    pub shape: i32,
+    /// マテリアル (`Fallout3HavokMaterial`)
+    pub material: u32,
+    /// コリジョンシェル半径 (通常 0.05)
+    pub radius: f32,
+    /// 局所変換 4x4 行列 (`Matrix44`: 16 floats, 列優先/行優先)
+    pub transform: [f32; 16],
+}
+
+impl BhkConvexTransformShape {
+    pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let shape = reader.read_i32::<LittleEndian>()?;
+        let material = reader.read_u32::<LittleEndian>()?;
+        let radius = reader.read_f32::<LittleEndian>()?;
+
+        let mut unused01 = [0u8; 8];
+        reader.read_exact(&mut unused01)?;
+
+        let mut transform = [0.0f32; 16];
+        for v in &mut transform {
+            *v = reader.read_f32::<LittleEndian>()?;
+        }
+
+        Ok(BhkConvexTransformShape {
+            shape,
+            material,
+            radius,
+            transform,
+        })
+    }
+}
+
+/// 凸形状リストブロック（複数の凸形状の集合）。
+///
+/// 参照元: `references/nifxml/nif.xml:L6835` (`bhkConvexListShape`)
+#[derive(Clone, Debug, PartialEq)]
+pub struct BhkConvexListShape {
+    /// 内包する子凸形状へのブロックインデックスリスト (Ref)
+    pub sub_shapes: Vec<i32>,
+    /// マテリアル (`Fallout3HavokMaterial`)
+    pub material: u32,
+    /// 半径
+    pub radius: f32,
+    /// 未知 uint
+    pub unknown_int1: u32,
+    /// 未知 float
+    pub unknown_float1: f32,
+    /// 子形状プロパティ (`bhkWorldObjCInfoProperty`)
+    pub child_shape_prop: [u32; 3],
+    /// キャッシュ AABB 使用フラグ
+    pub use_cached_aabb: bool,
+    /// 最近接点最小距離
+    pub closest_point_min_distance: f32,
+}
+
+impl BhkConvexListShape {
+    pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let num_sub_shapes = reader.read_u32::<LittleEndian>()? as usize;
+        let mut sub_shapes = Vec::with_capacity(num_sub_shapes);
+        for _ in 0..num_sub_shapes {
+            sub_shapes.push(reader.read_i32::<LittleEndian>()?);
+        }
+
+        let material = reader.read_u32::<LittleEndian>()?;
+        let radius = reader.read_f32::<LittleEndian>()?;
+        let unknown_int1 = reader.read_u32::<LittleEndian>()?;
+        let unknown_float1 = reader.read_f32::<LittleEndian>()?;
+
+        let child_shape_prop = [
+            reader.read_u32::<LittleEndian>()?,
+            reader.read_u32::<LittleEndian>()?,
+            reader.read_u32::<LittleEndian>()?,
+        ];
+
+        let use_cached_aabb = reader.read_u8()? != 0;
+        let closest_point_min_distance = reader.read_f32::<LittleEndian>()?;
+
+        Ok(BhkConvexListShape {
+            sub_shapes,
+            material,
+            radius,
+            unknown_int1,
+            unknown_float1,
+            child_shape_prop,
+            use_cached_aabb,
+            closest_point_min_distance,
+        })
+    }
+}
+
+/// Fallout 3 Havok マテリアル種別。
+///
+/// 参照元: `references/nifxml/nif.xml:L444` (`Fallout3HavokMaterial`)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u32)]
+pub enum Fallout3HavokMaterial {
+    Stone = 0,
+    Cloth = 1,
+    Dirt = 2,
+    Glass = 3,
+    Grass = 4,
+    Metal = 5,
+    Organic = 6,
+    Skin = 7,
+    Water = 8,
+    Wood = 9,
+    HeavyStone = 10,
+    HeavyMetal = 11,
+    HeavyWood = 12,
+    Chain = 13,
+    Bottlecap = 14,
+    Elevator = 15,
+    HollowMetal = 16,
+    SheetMetal = 17,
+    Sand = 18,
+    BrokenConcrete = 19,
+    VehicleBody = 20,
+    VehiclePartSolid = 21,
+    VehiclePartHollow = 22,
+    Barrel = 23,
+    Bottle = 24,
+    SodaCan = 25,
+    Pistol = 26,
+    Rifle = 27,
+    ShoppingCart = 28,
+    Lunchbox = 29,
+    BabyRattle = 30,
+    RubberBall = 31,
+    StonePlatform = 32,
+    ClothPlatform = 33,
+    DirtPlatform = 34,
+    GlassPlatform = 35,
+    MetalPlatform = 36,
+    SandPlatform = 37,
+    WoodPlatform = 38,
+    Unknown(u32),
+}
+
+impl From<u32> for Fallout3HavokMaterial {
+    fn from(val: u32) -> Self {
+        match val {
+            0 => Self::Stone,
+            1 => Self::Cloth,
+            2 => Self::Dirt,
+            3 => Self::Glass,
+            4 => Self::Grass,
+            5 => Self::Metal,
+            6 => Self::Organic,
+            7 => Self::Skin,
+            8 => Self::Water,
+            9 => Self::Wood,
+            10 => Self::HeavyStone,
+            11 => Self::HeavyMetal,
+            12 => Self::HeavyWood,
+            13 => Self::Chain,
+            14 => Self::Bottlecap,
+            15 => Self::Elevator,
+            16 => Self::HollowMetal,
+            17 => Self::SheetMetal,
+            18 => Self::Sand,
+            19 => Self::BrokenConcrete,
+            20 => Self::VehicleBody,
+            21 => Self::VehiclePartSolid,
+            22 => Self::VehiclePartHollow,
+            23 => Self::Barrel,
+            24 => Self::Bottle,
+            25 => Self::SodaCan,
+            26 => Self::Pistol,
+            27 => Self::Rifle,
+            28 => Self::ShoppingCart,
+            29 => Self::Lunchbox,
+            30 => Self::BabyRattle,
+            31 => Self::RubberBall,
+            32 => Self::StonePlatform,
+            33 => Self::ClothPlatform,
+            34 => Self::DirtPlatform,
+            35 => Self::GlassPlatform,
+            36 => Self::MetalPlatform,
+            37 => Self::SandPlatform,
+            38 => Self::WoodPlatform,
+            other => Self::Unknown(other),
+        }
+    }
+}
+
+/// Fallout 3 Havok コリジョンレイヤー種別。
+///
+/// 参照元: `references/nifxml/nif.xml:L719` (`Fallout3Layer`)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum Fallout3Layer {
+    Unidentified = 0,
+    Static = 1,
+    AnimStatic = 2,
+    Transparent = 3,
+    Clutter = 4,
+    Weapon = 5,
+    Projectile = 6,
+    Spell = 7,
+    Biped = 8,
+    Trees = 9,
+    Props = 10,
+    Water = 11,
+    Trigger = 12,
+    Terrain = 13,
+    Trap = 14,
+    NonCollidable = 15,
+    CloudTrap = 16,
+    Ground = 17,
+    Portal = 18,
+    DebrisSmall = 19,
+    DebrisLarge = 20,
+    AcousticSpace = 21,
+    ActorZone = 22,
+    ProjectileZone = 23,
+    GasTrap = 24,
+    ShellCasing = 25,
+    TransparentSmall = 26,
+    InvisibleWall = 27,
+    TransparentSmallAnim = 28,
+    DeadBip = 29,
+    CharController = 30,
+    AvoidBox = 31,
+    CollisionBox = 32,
+    CameraSphere = 33,
+    DoorDetection = 34,
+    CameraPick = 35,
+    ItemPick = 36,
+    LineOfSight = 37,
+    PathPick = 38,
+    CustomPick1 = 39,
+    CustomPick2 = 40,
+    SpellExplosion = 41,
+    DroppingPick = 42,
+    Null = 43,
+    Unknown(u8),
+}
+
+impl From<u8> for Fallout3Layer {
+    fn from(val: u8) -> Self {
+        match val {
+            0 => Self::Unidentified,
+            1 => Self::Static,
+            2 => Self::AnimStatic,
+            3 => Self::Transparent,
+            4 => Self::Clutter,
+            5 => Self::Weapon,
+            6 => Self::Projectile,
+            7 => Self::Spell,
+            8 => Self::Biped,
+            9 => Self::Trees,
+            10 => Self::Props,
+            11 => Self::Water,
+            12 => Self::Trigger,
+            13 => Self::Terrain,
+            14 => Self::Trap,
+            15 => Self::NonCollidable,
+            16 => Self::CloudTrap,
+            17 => Self::Ground,
+            18 => Self::Portal,
+            19 => Self::DebrisSmall,
+            20 => Self::DebrisLarge,
+            21 => Self::AcousticSpace,
+            22 => Self::ActorZone,
+            23 => Self::ProjectileZone,
+            24 => Self::GasTrap,
+            25 => Self::ShellCasing,
+            26 => Self::TransparentSmall,
+            27 => Self::InvisibleWall,
+            28 => Self::TransparentSmallAnim,
+            29 => Self::DeadBip,
+            30 => Self::CharController,
+            31 => Self::AvoidBox,
+            32 => Self::CollisionBox,
+            33 => Self::CameraSphere,
+            34 => Self::DoorDetection,
+            35 => Self::CameraPick,
+            36 => Self::ItemPick,
+            37 => Self::LineOfSight,
+            38 => Self::PathPick,
+            39 => Self::CustomPick1,
+            40 => Self::CustomPick2,
+            41 => Self::SpellExplosion,
+            42 => Self::DroppingPick,
+            43 => Self::Null,
+            other => Self::Unknown(other),
+        }
+    }
+}
+
+/// ローカル 4x4 変換行列を付与する Havok コリジョン形状ラッパー。
+///
+/// 参照元: `references/nifxml/nif.xml:L3029` (`bhkTransformShape`)
+#[derive(Clone, Debug, PartialEq)]
+pub struct BhkTransformShape {
+    /// 変換対象の子シェイプへのブロックインデックス (Ref template="bhkShape")
+    pub shape: i32,
+    /// シェイプのマテリアル種別
+    pub material: Fallout3HavokMaterial,
+    /// コリジョン球半径 (通常 0.1)
+    pub radius: f32,
+    /// 予約・未使用領域 (8 バイト)
+    pub unused_01: [u8; 8],
+    /// 4x4 変換行列 (16要素 float)
+    pub transform: [f32; 16],
+}
+
+impl BhkTransformShape {
+    pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let shape = reader.read_i32::<LittleEndian>()?;
+        let mat_val = reader.read_u32::<LittleEndian>()?;
+        let material = Fallout3HavokMaterial::from(mat_val);
+        let radius = reader.read_f32::<LittleEndian>()?;
+        let mut unused_01 = [0u8; 8];
+        reader.read_exact(&mut unused_01)?;
+        let mut transform = [0.0f32; 16];
+        for val in &mut transform {
+            *val = reader.read_f32::<LittleEndian>()?;
+        }
+
+        Ok(BhkTransformShape {
+            shape,
+            material,
+            radius,
+            unused_01,
+            transform,
+        })
+    }
+}
+
+/// NiTriStripsData をジオメトリデータとして参照する静的メッシュコリジョン形状。
+///
+/// 参照元: `references/nifxml/nif.xml:L3207` (`bhkNiTriStripsShape`)
+#[derive(Clone, Debug, PartialEq)]
+pub struct BhkNiTriStripsShape {
+    /// シェイプのマテリアル種別
+    pub material: Fallout3HavokMaterial,
+    /// コリジョン球半径 (通常 0.1)
+    pub radius: f32,
+    /// 予約・未使用領域 (20 バイト)
+    pub unused_01: [u8; 20],
+    /// 拡張バッファ設定 (デフォルト 1)
+    pub grow_by: u32,
+    /// スケールベクトル (XYZW)
+    pub scale: [f32; 4],
+    /// NiTriStripsData へのブロックインデックス列
+    pub strips_data: Vec<i32>,
+    /// HavokFilter 配列
+    pub filters: Vec<u32>,
+}
+
+impl BhkNiTriStripsShape {
+    pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let mat_val = reader.read_u32::<LittleEndian>()?;
+        let material = Fallout3HavokMaterial::from(mat_val);
+        let radius = reader.read_f32::<LittleEndian>()?;
+        let mut unused_01 = [0u8; 20];
+        reader.read_exact(&mut unused_01)?;
+        let grow_by = reader.read_u32::<LittleEndian>()?;
+
+        let mut scale = [0.0f32; 4];
+        for val in &mut scale {
+            *val = reader.read_f32::<LittleEndian>()?;
+        }
+
+        let num_strips_data = reader.read_u32::<LittleEndian>()? as usize;
+        let mut strips_data = Vec::with_capacity(num_strips_data);
+        for _ in 0..num_strips_data {
+            strips_data.push(reader.read_i32::<LittleEndian>()?);
+        }
+
+        let num_filters = reader.read_u32::<LittleEndian>()? as usize;
+        let mut filters = Vec::with_capacity(num_filters);
+        for _ in 0..num_filters {
+            filters.push(reader.read_u32::<LittleEndian>()?);
+        }
+
+        Ok(BhkNiTriStripsShape {
+            material,
+            radius,
+            unused_01,
+            grow_by,
+            scale,
+            strips_data,
+            filters,
+        })
+    }
+}
+
+/// トリガーゾーンやイベント領域用の任意形状ファントムオブジェクト。
+///
+/// 参照元: `references/nifxml/nif.xml:L2790` (`bhkSimpleShapePhantom`)
+#[derive(Clone, Debug, PartialEq)]
+pub struct BhkSimpleShapePhantom {
+    /// ワールドオブジェクト共通ヘッダー (shape, フィルター等)
+    pub common: BhkWorldObjectCommon,
+    /// 予約・未使用領域 (8 バイト)
+    pub unused_01: [u8; 8],
+    /// 4x4 変換行列 (16要素 float)
+    pub transform: [f32; 16],
+}
+
+impl BhkSimpleShapePhantom {
+    pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let common = BhkWorldObjectCommon::read(reader)?;
+        let mut unused_01 = [0u8; 8];
+        reader.read_exact(&mut unused_01)?;
+        let mut transform = [0.0f32; 16];
+        for val in &mut transform {
+            *val = reader.read_f32::<LittleEndian>()?;
+        }
+
+        Ok(BhkSimpleShapePhantom {
+            common,
+            unused_01,
+            transform,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

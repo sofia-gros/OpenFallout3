@@ -5,27 +5,39 @@
 use bytemuck::{Pod, Zeroable};
 use crate::vertex::Vertex;
 
-/// モデルおよびアルファテスト用 Uniform バッファ構造体。
+/// モデル、マテリアル、発光およびアルファテスト用 Uniform バッファ構造体 (112 バイト)。
 ///
-/// 参照元: `references/nifskope/build/nif.xml:L1518` (`AlphaFlags`), `references/nifskope/src/gl/glproperty.cpp:L204`
+/// 参照元:
+/// - `references/nifskope/build/nif.xml:L1518` (`AlphaFlags`), `references/nifskope/src/gl/glproperty.cpp:L204`
+/// - `references/nifxml/nif.xml:L4363` (`NiMaterialProperty`)
+/// - `references/nifxml/nif.xml:L6307` (`BSShaderTextureSet`)
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct ModelUniform {
-    /// ワールド変換行列 (4x4)
+    /// ワールド変換行列 (4x4, 64バイト)
     pub world: [f32; 16],
+    /// スペキュラ反射色 (RGB) および光沢度指数 (W: glossiness, 16バイト)
+    pub specular_color: [f32; 4],
+    /// 自己発光色 (RGB) および発光乗算係数 (W: emissive_mult, 16バイト)
+    pub emissive_color: [f32; 4],
     /// アルファテスト有効化フラグ (0: 無効, 1: 有効)
     pub alpha_test: u32,
     /// アルファテスト比較関数 (0..7: TestFunction)
     pub alpha_test_func: u32,
     /// アルファテスト閾値 (0.0 .. 1.0)
     pub alpha_threshold: f32,
-    /// 16バイトアライメント用パディング
-    pub _padding: u32,
+    /// グローマップ有効化フラグ (0: 無効, 1: 有効)
+    pub has_glow_map: u32,
 }
 
 impl ModelUniform {
-    /// ワールド変換行列と NiAlphaProperty から ModelUniform を構築する。
-    pub fn new(world_mat: glam::Mat4, alpha_prop: Option<&fo3_nif::NiAlphaProperty>) -> Self {
+    /// ワールド変換行列、NiAlphaProperty、NiMaterialProperty から ModelUniform を構築する。
+    pub fn new(
+        world_mat: glam::Mat4,
+        alpha_prop: Option<&fo3_nif::NiAlphaProperty>,
+        material_prop: Option<&fo3_nif::NiMaterialProperty>,
+        has_glow_map: bool,
+    ) -> Self {
         let (alpha_test, alpha_test_func, alpha_threshold) = if let Some(alpha) = alpha_prop {
             if alpha.is_test_enabled() {
                 (1, alpha.test_func() as u32, alpha.threshold_normalized())
@@ -36,12 +48,33 @@ impl ModelUniform {
             (0, 0, 0.0)
         };
 
+        let (specular_color, emissive_color) = if let Some(mat) = material_prop {
+            (
+                [
+                    mat.specular_color.r,
+                    mat.specular_color.g,
+                    mat.specular_color.b,
+                    if mat.glossiness > 0.0 { mat.glossiness } else { 32.0 },
+                ],
+                [
+                    mat.emissive_color.r,
+                    mat.emissive_color.g,
+                    mat.emissive_color.b,
+                    if mat.emissive_mult > 0.0 { mat.emissive_mult } else { 1.0 },
+                ],
+            )
+        } else {
+            ([1.0, 1.0, 1.0, 32.0], [0.0, 0.0, 0.0, 1.0])
+        };
+
         Self {
             world: world_mat.to_cols_array(),
+            specular_color,
+            emissive_color,
             alpha_test,
             alpha_test_func,
             alpha_threshold,
-            _padding: 0,
+            has_glow_map: if has_glow_map { 1 } else { 0 },
         }
     }
 }
@@ -108,10 +141,10 @@ impl RenderContext {
             }],
         });
 
-        // Group 2: Diffuse Texture (0) + Sampler (1) + Normal Map Texture (2)
-        // 参照元: references/openmw/components/nifosg/nifloader.cpp:L2401-2426
+        // Group 2: Diffuse Texture (0) + Sampler (1) + Normal Map Texture (2) + Glow Map Texture (3)
+        // 参照元: references/openmw/components/nifosg/nifloader.cpp:L2401-2426, references/nifxml/nif.xml:L6307
         let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Texture Bind Group Layout (Diffuse + Normal)"),
+            label: Some("Texture Bind Group Layout (Diffuse + Normal + Glow)"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -131,6 +164,16 @@ impl RenderContext {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         multisampled: false,

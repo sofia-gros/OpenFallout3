@@ -176,3 +176,57 @@ hkPackedNiTriStripsData (11 + メッシュバイト)
 - 正規化数: `exp = (e + 112) << 23`, `mant = m << 13`
 - 非正規化数: ゼロでない仮数をシフトして正規化指数を算出
 - ゼロ / 無限大 / NaN: 符号および特殊ビットパターンを保持
+
+---
+
+### 2.6 bhkConvexTransformShape (80 bytes)
+`bhkShape` -> `bhkSphereRepShape` -> `bhkConvexShape` -> `bhkConvexTransformShape`
+- 参照元: `references/nifxml/nif.xml:L3107`
+
+| オフセット | 型 | フィールド名 | 説明 |
+|---|---|---|---|
+| 0 | `i32` | `shape` | 内包される凸形状 (`bhkConvexShape`) への参照 (Ref) |
+| 4 | `u32` | `material` | `Fallout3HavokMaterial` |
+| 8 | `f32` | `radius` | コリジョン半径シェル (通常 0.05) |
+| 12 | `[u8; 8]` | `unused01` | 未使用 8 バイト |
+| 20 | `[f32; 16]`| `transform` | 局所変換 4x4 行列 (`Matrix44`, 行優先または列優先) |
+
+合計サイズ: 4 + 4 + 4 + 8 + 64 = 84 バイト (4バイト shape ref + 80バイト)。実アセットと完全一致。
+
+---
+
+### 2.7 bhkConvexListShape (可変長)
+`bhkShape` -> `bhkSphereRepShape` -> `bhkConvexShape` -> `bhkConvexListShape`
+- 参照元: `references/nifxml/nif.xml:L6835`
+
+| オフセット | 型 | フィールド名 | 説明 |
+|---|---|---|---|
+| 0 | `u32` | `num_sub_shapes` | 子凸形状数 (1～255) |
+| 4 | `[i32; N]` | `sub_shapes` | 各子凸形状へのブロックインデックス (Ref) |
+| 4 + 4*N | `u32` | `material` | `Fallout3HavokMaterial` |
+| 8 + 4*N | `f32` | `radius` | 半径 |
+| 12 + 4*N | `u32` | `unknown_int1` | 未知 uint |
+| 16 + 4*N | `f32` | `unknown_float1` | 未知 float |
+| 20 + 4*N | `[u32; 3]` | `child_shape_prop` | `bhkWorldObjCInfoProperty` (12バイト) |
+| 32 + 4*N | `u8` | `use_cached_aabb` | キャッシュ AABB 使用フラグ (bool) |
+| 33 + 4*N | `f32` | `closest_point_min_distance` | 最近接点最小距離 |
+
+---
+
+### 2.8 Fallout 3 コリジョン列挙型
+
+#### Fallout3HavokMaterial (u32)
+- 参照元: `references/nifxml/nif.xml:L444`
+- 0: Stone, 1: Cloth, 2: Dirt, 3: Glass, 4: Grass, 5: Metal, 6: Organic, 7: Skin, 8: Water, 9: Wood,
+  10: HeavyStone, 11: HeavyMetal, 12: HeavyWood, 13: Chain, 14: Bottlecap, 15: Elevator, 16: HollowMetal,
+  17: SheetMetal, 18: Sand, 19: BrokenConcrete, 20: VehicleBody, 21: VehiclePartSolid, 22: VehiclePartHollow,
+  23: Barrel, 24: Bottle, 25: SodaCan, 26: Pistol, 27: Rifle, 28: ShoppingCart, 29: Lunchbox,
+  30: BabyRattle, 31: RubberBall, 32: StonePlatform, 33: ClothPlatform, 34: DirtPlatform, etc.
+
+#### Fallout3Layer (u8)
+- 参照元: `references/nifxml/nif.xml:L719`
+- 0: Unidentified, 1: Static (背景床・壁), 2: AnimStatic, 3: Transparent, 4: Clutter (拾える小物),
+  5: Weapon, 6: Projectile, 7: Spell, 8: Biped (アクター・NPC), 9: Trees, 10: Props, 11: Water,
+  12: Trigger, 13: Terrain, 14: Trap, 15: NonCollidable, 17: Ground, 18: Portal, 27: InvisibleWall,
+  29: DeadBip, 30: CharController (キャラクター当たり判定), 34: DoorDetection (ドア検知), etc.
+

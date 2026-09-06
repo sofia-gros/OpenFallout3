@@ -88,6 +88,13 @@ impl NifFile {
                         data: block_bytes,
                     },
                 },
+                "BSShaderNoLightingProperty" => match BSShaderNoLightingProperty::read(&mut cursor) {
+                    Ok(prop) => NifBlock::BSShaderNoLightingProperty(prop),
+                    Err(_) => NifBlock::Unknown {
+                        type_name: block_type_name.clone(),
+                        data: block_bytes,
+                    },
+                },
                 "BSShaderTextureSet" => match BSShaderTextureSet::read(&mut cursor) {
                     Ok(set) => NifBlock::BSShaderTextureSet(set),
                     Err(_) => NifBlock::Unknown {
@@ -109,10 +116,62 @@ impl NifFile {
                         data: block_bytes,
                     },
                 },
+                "NiStencilProperty" => match NiStencilProperty::read(&mut cursor) {
+                    Ok(sten) => NifBlock::NiStencilProperty(sten),
+                    Err(_) => NifBlock::Unknown {
+                        type_name: block_type_name.clone(),
+                        data: block_bytes,
+                    },
+                },
+                "BSXFlags" => match BSXFlags::read(&mut cursor) {
+                    Ok(flags) => NifBlock::BSXFlags(flags),
+                    Err(_) => NifBlock::Unknown {
+                        type_name: block_type_name.clone(),
+                        data: block_bytes,
+                    },
+                },
+                "NiStringExtraData" => match NiStringExtraData::read(&mut cursor) {
+                    Ok(extra) => NifBlock::NiStringExtraData(extra),
+                    Err(_) => NifBlock::Unknown {
+                        type_name: block_type_name.clone(),
+                        data: block_bytes,
+                    },
+                },
+                "NiIntegerExtraData" => match NiIntegerExtraData::read(&mut cursor) {
+                    Ok(extra) => NifBlock::NiIntegerExtraData(extra),
+                    Err(_) => NifBlock::Unknown {
+                        type_name: block_type_name.clone(),
+                        data: block_bytes,
+                    },
+                },
+                "NiFloatExtraData" => match NiFloatExtraData::read(&mut cursor) {
+                    Ok(extra) => NifBlock::NiFloatExtraData(extra),
+                    Err(_) => NifBlock::Unknown {
+                        type_name: block_type_name.clone(),
+                        data: block_bytes,
+                    },
+                },
+                "BSBound" => match BSBound::read(&mut cursor) {
+                    Ok(bound) => NifBlock::BSBound(bound),
+                    Err(_) => NifBlock::Unknown {
+                        type_name: block_type_name.clone(),
+                        data: block_bytes,
+                    },
+                },
                 "bhkCollisionObject" => match BhkCollisionObject::read(&mut cursor) {
                     Ok(obj) => NifBlock::BhkCollisionObject(obj),
                     Err(e) => {
                         eprintln!("[WARN] bhkCollisionObjectパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "bhkSPCollisionObject" => match BhkCollisionObject::read(&mut cursor) {
+                    Ok(obj) => NifBlock::BhkSPCollisionObject(obj),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkSPCollisionObjectパース失敗: {:?}", e);
                         NifBlock::Unknown {
                             type_name: block_type_name.clone(),
                             data: block_bytes,
@@ -153,6 +212,16 @@ impl NifFile {
                     Ok(shape) => NifBlock::BhkPackedNiTriStripsShape(shape),
                     Err(e) => {
                         eprintln!("[WARN] bhkPackedNiTriStripsShapeパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "bhkNiTriStripsShape" => match BhkNiTriStripsShape::read(&mut cursor) {
+                    Ok(shape) => NifBlock::BhkNiTriStripsShape(shape),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkNiTriStripsShapeパース失敗: {:?}", e);
                         NifBlock::Unknown {
                             type_name: block_type_name.clone(),
                             data: block_bytes,
@@ -209,6 +278,36 @@ impl NifFile {
                         }
                     }
                 },
+                "bhkConvexTransformShape" => match BhkConvexTransformShape::read(&mut cursor) {
+                    Ok(shape) => NifBlock::BhkConvexTransformShape(shape),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkConvexTransformShapeパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "bhkTransformShape" => match BhkTransformShape::read(&mut cursor) {
+                    Ok(shape) => NifBlock::BhkTransformShape(shape),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkTransformShapeパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "bhkConvexListShape" => match BhkConvexListShape::read(&mut cursor) {
+                    Ok(shape) => NifBlock::BhkConvexListShape(shape),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkConvexListShapeパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
                 "bhkListShape" => match BhkListShape::read(&mut cursor) {
                     Ok(shape) => NifBlock::BhkListShape(shape),
                     Err(e) => {
@@ -219,10 +318,40 @@ impl NifFile {
                         }
                     }
                 },
+                "bhkSimpleShapePhantom" => match BhkSimpleShapePhantom::read(&mut cursor) {
+                    Ok(phantom) => NifBlock::BhkSimpleShapePhantom(phantom),
+                    Err(e) => {
+                        eprintln!("[WARN] bhkSimpleShapePhantomパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
                 "bhkBlendCollisionObject" => match BhkBlendCollisionObject::read(&mut cursor) {
                     Ok(obj) => NifBlock::BhkBlendCollisionObject(obj),
                     Err(e) => {
                         eprintln!("[WARN] bhkBlendCollisionObjectパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "NiSkinInstance" => match NiSkinInstance::read(&mut cursor) {
+                    Ok(inst) => NifBlock::NiSkinInstance(inst),
+                    Err(e) => {
+                        eprintln!("[WARN] NiSkinInstanceパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "NiSkinPartition" => match NiSkinPartition::read(&mut cursor) {
+                    Ok(part) => NifBlock::NiSkinPartition(part),
+                    Err(e) => {
+                        eprintln!("[WARN] NiSkinPartitionパース失敗: {:?}", e);
                         NifBlock::Unknown {
                             type_name: block_type_name.clone(),
                             data: block_bytes,

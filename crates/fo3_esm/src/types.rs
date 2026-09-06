@@ -64,10 +64,13 @@ pub const REC_KEYM: FourCC = FourCC(*b"KEYM");
 pub const REC_WEAP: FourCC = FourCC(*b"WEAP");
 pub const REC_AMMO: FourCC = FourCC(*b"AMMO");
 pub const REC_ARMO: FourCC = FourCC(*b"ARMO");
+pub const REC_NPC_: FourCC = FourCC(*b"NPC_");
+pub const REC_CREA: FourCC = FourCC(*b"CREA");
 pub const REC_CELL: FourCC = FourCC(*b"CELL");
 pub const REC_WRLD: FourCC = FourCC(*b"WRLD");
 pub const REC_REFR: FourCC = FourCC(*b"REFR");
 pub const REC_ACHR: FourCC = FourCC(*b"ACHR");
+pub const REC_ACRE: FourCC = FourCC(*b"ACRE");
 pub const REC_LAND: FourCC = FourCC(*b"LAND");
 pub const REC_NAVM: FourCC = FourCC(*b"NAVM");
 pub const REC_LGTM: FourCC = FourCC(*b"LGTM");
@@ -106,6 +109,16 @@ pub const SUB_ATXT: FourCC = FourCC(*b"ATXT");
 pub const SUB_VTXT: FourCC = FourCC(*b"VTXT");
 pub const SUB_WNAM: FourCC = FourCC(*b"WNAM");
 pub const SUB_NAM2: FourCC = FourCC(*b"NAM2");
+pub const SUB_XTEL: FourCC = FourCC(*b"XTEL");
+pub const SUB_XLOC: FourCC = FourCC(*b"XLOC");
+pub const SUB_XESP: FourCC = FourCC(*b"XESP");
+pub const SUB_XMRK: FourCC = FourCC(*b"XMRK");
+pub const SUB_XOWN: FourCC = FourCC(*b"XOWN");
+pub const SUB_XRNK: FourCC = FourCC(*b"XRNK");
+pub const SUB_XCNT: FourCC = FourCC(*b"XCNT");
+pub const SUB_XEMI: FourCC = FourCC(*b"XEMI");
+pub const SUB_XLIG: FourCC = FourCC(*b"XLIG");
+pub const SUB_XRDS: FourCC = FourCC(*b"XRDS");
 
 /// 32-bit オブジェクト一意識別子 (FormID)。
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]

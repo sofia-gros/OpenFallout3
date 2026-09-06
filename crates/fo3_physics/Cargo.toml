@@ -1,0 +1,12 @@
+[package]
+name = "fo3_physics"
+version = "0.1.0"
+edition = "2021"
+description = "Fallout 3 (Gamebryo 2.6) 向け物理エンジン統合・キャラクタコントローラー基盤"
+
+[dependencies]
+fo3_gamebryo_core = { path = "../fo3_gamebryo_core" }
+fo3_nif = { path = "../fo3_nif" }
+rapier3d = { workspace = true }
+glam = { workspace = true }
+thiserror = { workspace = true }

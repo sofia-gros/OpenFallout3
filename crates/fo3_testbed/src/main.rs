@@ -206,8 +206,48 @@ fn dump_nif<R: std::io::BufRead>(reader: &mut R, title: &str) -> Result<(), Box<
                     println!("          Vert[0]: {:?}, Vert[last]: {:?}", first, last);
                 }
             }
+            NifBlock::BhkConvexTransformShape(ct) => {
+                println!("Shape: {} Material: {:#X} Radius: {:.3}", ct.shape, ct.material, ct.radius);
+            }
+            NifBlock::BhkConvexListShape(list) => {
+                println!("子凸形状数: {} Material: {:#X}", list.sub_shapes.len(), list.material);
+            }
             NifBlock::BhkListShape(list) => {
                 println!("子形状数: {} フィルター数: {}", list.sub_shapes.len(), list.filters.len());
+            }
+            NifBlock::BSShaderNoLightingProperty(prop) => {
+                println!("File: \"{}\" Clamp: {}", prop.file_name, prop.texture_clamp_mode);
+            }
+            NifBlock::NiStencilProperty(sten) => {
+                println!("Flags: {:#06X} DrawMode: {} DoubleSided: {}", sten.flags, sten.draw_mode(), sten.is_double_sided());
+            }
+            NifBlock::BSXFlags(bsx) => {
+                println!("Flags: {:#010X} Havok: {} Col: {} Anim: {}", bsx.flags, bsx.has_havok(), bsx.has_collision(), bsx.has_animation());
+            }
+            NifBlock::NiStringExtraData(extra) => {
+                let s = nif.get_string(extra.string_data_index).unwrap_or("");
+                println!("String: \"{}\"", s);
+            }
+            NifBlock::NiIntegerExtraData(extra) => {
+                println!("Int: {}", extra.integer_data);
+            }
+            NifBlock::NiFloatExtraData(extra) => {
+                println!("Float: {:.3}", extra.float_data);
+            }
+            NifBlock::BSBound(bound) => {
+                println!("Center: {:?} Dim: {:?}", bound.center, bound.dimensions);
+            }
+            NifBlock::BhkSPCollisionObject(obj) => {
+                println!("SP Target: {} Body: {}", obj.target, obj.body);
+            }
+            NifBlock::BhkTransformShape(ts) => {
+                println!("TransformShape Shape: {} Mat: {:?}", ts.shape, ts.material);
+            }
+            NifBlock::BhkNiTriStripsShape(ss) => {
+                println!("NiTriStripsShape Strips: {} Mat: {:?}", ss.strips_data.len(), ss.material);
+            }
+            NifBlock::BhkSimpleShapePhantom(p) => {
+                println!("SimpleShapePhantom Shape: {}", p.common.shape);
             }
             NifBlock::Unknown { type_name: _, data } => {
                 println!("(未対応/スキップ - {} バイト)", data.len());
@@ -958,6 +998,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             test_collision_lines(&args[2], &args[3])?;
         }
+        "nif-coverage" => {
+            if args.len() < 3 {
+                println!("使用法: nif-coverage <data_dir> [limit]");
+                return Ok(());
+            }
+            let limit = args.get(3).and_then(|s| s.parse::<usize>().ok()).unwrap_or(1000);
+            test_nif_coverage(&args[2], limit)?;
+        }
         _ => {
             if args[1].ends_with(".nif") {
                 test_nif(&args[1])?;
@@ -990,8 +1038,14 @@ fn test_collision_batch(data_dir: &str, limit: usize) -> Result<(), Box<dyn std:
     let mut count_sphere_shape = 0;
     let mut count_capsule_shape = 0;
     let mut count_convex_vertices = 0;
+    let mut count_convex_transform = 0;
+    let mut count_convex_list = 0;
     let mut count_list_shape = 0;
     let mut count_blend_collision_obj = 0;
+    let mut count_sp_collision_obj = 0;
+    let mut count_transform_shape = 0;
+    let mut count_ni_tri_strips_shape = 0;
+    let mut count_simple_shape_phantom = 0;
     let mut count_unknown_bhk = 0;
     let mut unknown_types = std::collections::BTreeMap::<String, usize>::new();
     let mut total_collision_triangles = 0;
@@ -1043,12 +1097,31 @@ fn test_collision_batch(data_dir: &str, limit: usize) -> Result<(), Box<dyn std:
                             count_convex_vertices += 1;
                             total_collision_vertices += s.vertices.len();
                         }
+                        NifBlock::BhkConvexTransformShape(_) => {
+                            count_convex_transform += 1;
+                        }
+                        NifBlock::BhkConvexListShape(_) => {
+                            count_convex_list += 1;
+                        }
                         NifBlock::BhkListShape(_) => {
                             count_list_shape += 1;
                         }
                         NifBlock::BhkBlendCollisionObject(_) => {
                             has_col = true;
                             count_blend_collision_obj += 1;
+                        }
+                        NifBlock::BhkSPCollisionObject(_) => {
+                            has_col = true;
+                            count_sp_collision_obj += 1;
+                        }
+                        NifBlock::BhkTransformShape(_) => {
+                            count_transform_shape += 1;
+                        }
+                        NifBlock::BhkNiTriStripsShape(_) => {
+                            count_ni_tri_strips_shape += 1;
+                        }
+                        NifBlock::BhkSimpleShapePhantom(_) => {
+                            count_simple_shape_phantom += 1;
                         }
                         NifBlock::Unknown { type_name, .. } => {
                             if type_name.starts_with("bhk") || type_name.starts_with("hk") {
@@ -1065,6 +1138,10 @@ fn test_collision_batch(data_dir: &str, limit: usize) -> Result<(), Box<dyn std:
             }
         }
 
+        if total_meshes % 1000 == 0 {
+            println!("進捗: {} / {} メッシュ処理中 (コリジョン含有: {})...", total_meshes, limit, meshes_with_collision);
+        }
+
         if total_meshes >= limit {
             break;
         }
@@ -1074,16 +1151,22 @@ fn test_collision_batch(data_dir: &str, limit: usize) -> Result<(), Box<dyn std:
     println!("コリジョン含有メッシュ数: {} ({:.1}%)", meshes_with_collision, (meshes_with_collision as f64 / total_meshes as f64) * 100.0);
     println!("パース成功ブロック内訳:");
     println!("  bhkCollisionObject:          {} 件", count_collision_obj);
+    println!("  bhkSPCollisionObject:        {} 件", count_sp_collision_obj);
     println!("  bhkBlendCollisionObject:     {} 件", count_blend_collision_obj);
     println!("  bhkRigidBody / T:            {} 件", count_rigid_body);
     println!("  bhkMoppBvTreeShape:          {} 件", count_mopp);
     println!("  bhkPackedNiTriStripsShape:   {} 件", count_packed_shape);
+    println!("  bhkNiTriStripsShape:         {} 件", count_ni_tri_strips_shape);
     println!("  hkPackedNiTriStripsData:     {} 件 (うち圧縮半精度: {} 件)", count_packed_data, count_compressed_data);
     println!("  bhkBoxShape:                 {} 件", count_box_shape);
     println!("  bhkSphereShape:              {} 件", count_sphere_shape);
     println!("  bhkCapsuleShape:             {} 件", count_capsule_shape);
     println!("  bhkConvexVerticesShape:      {} 件", count_convex_vertices);
+    println!("  bhkConvexTransformShape:     {} 件", count_convex_transform);
+    println!("  bhkTransformShape:           {} 件", count_transform_shape);
+    println!("  bhkConvexListShape:          {} 件", count_convex_list);
     println!("  bhkListShape:                {} 件", count_list_shape);
+    println!("  bhkSimpleShapePhantom:       {} 件", count_simple_shape_phantom);
     println!("抽出コリジョン総ポリゴン数:");
     println!("  総三角形数:                 {} 枚", total_collision_triangles);
     println!("  総頂点数:                   {} 点", total_collision_vertices);
@@ -1107,6 +1190,36 @@ fn test_collision_lines(data_dir: &str, relative_path: &str) -> Result<(), Box<d
     let nif = NifFile::read(&mut cursor)?;
     println!("ブロック総数: {}", nif.blocks.len());
 
+    let col_data = fo3_nif::extract_collision_data(&nif);
+    println!("抽出剛体数 (RigidBody): {} 体", col_data.bodies.len());
+    for (b_i, body) in col_data.bodies.iter().enumerate() {
+        println!(
+            "  [Body {:02}] 質量: {:.1}kg | 摩擦: {:.2} | 反発: {:.2} | レイヤー: {:?} | 位置: [{:.1}, {:.1}, {:.1}]",
+            b_i, body.mass, body.friction, body.restitution, body.layer,
+            body.translation[0], body.translation[1], body.translation[2],
+        );
+        match &body.shape {
+            fo3_nif::CollisionShape::TriMesh { vertices, indices, material } => {
+                println!("    -> TriMesh: 頂点数 {}, 三角形数 {}, 材質: {:?}", vertices.len(), indices.len(), material);
+            }
+            fo3_nif::CollisionShape::Box { half_extents, center, material } => {
+                println!("    -> Box: 半径 [{:.1}, {:.1}, {:.1}], 中心 [{:.1}, {:.1}, {:.1}], 材質: {:?}", half_extents[0], half_extents[1], half_extents[2], center[0], center[1], center[2], material);
+            }
+            fo3_nif::CollisionShape::Sphere { center, radius, material } => {
+                println!("    -> Sphere: 半径 {:.1}, 中心 [{:.1}, {:.1}, {:.1}], 材質: {:?}", radius, center[0], center[1], center[2], material);
+            }
+            fo3_nif::CollisionShape::Capsule { p1, p2, radius, material } => {
+                println!("    -> Capsule: 半径 {:.1}, Pt1 [{:.1}, {:.1}, {:.1}], Pt2 [{:.1}, {:.1}, {:.1}], 材質: {:?}", radius, p1[0], p1[1], p1[2], p2[0], p2[1], p2[2], material);
+            }
+            fo3_nif::CollisionShape::ConvexHull { vertices, material } => {
+                println!("    -> ConvexHull: 頂点数 {}, 材質: {:?}", vertices.len(), material);
+            }
+            fo3_nif::CollisionShape::Compound(children) => {
+                println!("    -> Compound: 子形状数 {}", children.len());
+            }
+        }
+    }
+
     let lines = fo3_render::extract_collision_lines(&nif);
     println!("抽出コリジョンライン頂点数: {} 点 ({} 本の線分)", lines.len(), lines.len() / 2);
 
@@ -1124,6 +1237,83 @@ fn test_collision_lines(data_dir: &str, relative_path: &str) -> Result<(), Box<d
         println!("コリジョン AABB Size: [{:.3}, {:.3}, {:.3}]", size.x, size.y, size.z);
     } else {
         println!("警告: コリジョンラインが 0 件でした。コリジョンブロックが存在しないか未対応です。");
+    }
+
+    Ok(())
+}
+
+/// NIF ブロック型のパースカバレッジ（網羅率）を一括調査する。
+fn test_nif_coverage(data_dir: &str, limit: usize) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== NIF ブロック型パース網羅率（カバレッジ）検証 (最大 {} ファイル) ===", limit);
+    let mut vfs = create_vfs(data_dir)?;
+
+    let mesh_bsa_path = Path::new(data_dir).join("Fallout - Meshes.bsa");
+    let bsa = BsaArchive::open(&mesh_bsa_path)?;
+    let files = bsa.list_files();
+
+    let mut scanned_files = 0;
+    let mut parse_failed_files = 0;
+    let mut total_blocks = 0;
+    let mut parsed_blocks = 0;
+    let mut unknown_blocks = 0;
+
+    let mut parsed_type_counts = std::collections::BTreeMap::<String, usize>::new();
+    let mut unknown_type_counts = std::collections::BTreeMap::<String, usize>::new();
+
+    for file_path in files {
+        if !file_path.ends_with(".nif") {
+            continue;
+        }
+
+        scanned_files += 1;
+        if let Ok(bytes) = vfs.read(file_path) {
+            let mut cursor = Cursor::new(bytes);
+            match NifFile::read(&mut cursor) {
+                Ok(nif) => {
+                    for (i, block) in nif.blocks.iter().enumerate() {
+                        total_blocks += 1;
+                        let type_name = nif.header.block_types[nif.header.block_type_indices[i] as usize].clone();
+                        match block {
+                            NifBlock::Unknown { .. } => {
+                                unknown_blocks += 1;
+                                *unknown_type_counts.entry(type_name).or_insert(0) += 1;
+                            }
+                            _ => {
+                                parsed_blocks += 1;
+                                *parsed_type_counts.entry(type_name).or_insert(0) += 1;
+                            }
+                        }
+                    }
+                }
+                Err(_) => {
+                    parse_failed_files += 1;
+                }
+            }
+        }
+
+        if scanned_files >= limit {
+            break;
+        }
+    }
+
+    println!("\n【走査結果概要】");
+    println!("  走査 NIF ファイル数: {} 件 (パースエラー: {} 件)", scanned_files, parse_failed_files);
+    println!("  走査ブロック総数:    {} 個", total_blocks);
+    println!("  パース成功ブロック:  {} 個 ({:.2}%)", parsed_blocks, (parsed_blocks as f64 / total_blocks as f64) * 100.0);
+    println!("  未パース (Unknown):  {} 個 ({:.2}%)", unknown_blocks, (unknown_blocks as f64 / total_blocks as f64) * 100.0);
+
+    println!("\n【パース成功ブロック型一覧 (上位 20 種)】");
+    let mut sorted_parsed: Vec<_> = parsed_type_counts.into_iter().collect();
+    sorted_parsed.sort_by(|a, b| b.1.cmp(&a.1));
+    for (t, c) in sorted_parsed.iter().take(20) {
+        println!("  - {:<30}: {:>6} 個", t, c);
+    }
+
+    println!("\n【未対応 (Unknown) ブロック型一覧 (頻度順)】");
+    let mut sorted_unknown: Vec<_> = unknown_type_counts.into_iter().collect();
+    sorted_unknown.sort_by(|a, b| b.1.cmp(&a.1));
+    for (t, c) in &sorted_unknown {
+        println!("  - {:<30}: {:>6} 個", t, c);
     }
 
     Ok(())

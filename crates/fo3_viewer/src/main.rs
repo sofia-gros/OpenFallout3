@@ -24,10 +24,13 @@ use std::sync::Arc;
 use fo3_bsa::BsaArchive;
 use fo3_esm::{CellLighting, CellRecord, EsmReader, LandRecord, RefrRecord};
 use fo3_gamebryo_core::NiTransform;
+use fo3_nif::collision::extract_collision_data;
 use fo3_nif::NifFile;
+use fo3_physics::{RapierCharacterController, RapierPhysicsWorld};
 use fo3_render::{LightingUniform, OrbitCamera, PlacedPointLight, RenderContext, RenderScene};
 use fo3_vfs::VfsManager;
 use pollster::FutureExt;
+use std::time::Instant;
 use wgpu::util::DeviceExt;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -35,6 +38,15 @@ use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
+
+/// カメラの動作モード。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CameraMode {
+    /// オービットカメラ（ターゲット注視・全体周回）
+    Orbit,
+    /// FPS ウォークスルー歩行モード（物理エンジン + キャラクタコントローラー）
+    Walkthrough,
+}
 
 /// ビューアーの表示対象。
 #[derive(Clone, Debug)]
@@ -64,6 +76,19 @@ struct ViewerState {
     show_collision: bool,
     enable_fog: bool,
     headlight: bool,
+    // カメラおよび物理
+    camera_mode: CameraMode,
+    physics_world: RapierPhysicsWorld,
+    character_controller: RapierCharacterController,
+    initial_spawn_point: glam::Vec3,
+    vertical_velocity: f32,
+    last_frame_time: Instant,
+    // キー入力状態
+    key_forward: bool,
+    key_backward: bool,
+    key_left: bool,
+    key_right: bool,
+    key_jump: bool,
     // マウス入力状態
     left_mouse_down: bool,
     right_mouse_down: bool,
@@ -144,7 +169,7 @@ impl ViewerState {
         }
 
         // 表示ターゲットに応じたシーンの構築
-        let (scene, cell_lighting, placed_lights, clear_color) = match target {
+        let (scene, cell_lighting, placed_lights, clear_color, physics_world, door_spawn_point) = match target {
             ViewerTarget::Mesh(nif_path) => {
                 println!("VFS から NIF ファイルを取得中: {}", nif_path);
                 let nif_bytes = vfs.read(nif_path).expect("Failed to read NIF from VFS");
@@ -152,6 +177,14 @@ impl ViewerState {
                 let nif_file = NifFile::read(&mut cursor).expect("Failed to parse NIF");
                 println!("NIF パース成功 (ブロック数: {})。GPU シーンを構築中...", nif_file.blocks.len());
                 let scene = RenderScene::from_nif(&device, &queue, &context, &nif_file, &mut vfs);
+
+                let mut physics_world = RapierPhysicsWorld::new();
+                let col_data = extract_collision_data(&nif_file);
+                if !col_data.bodies.is_empty() {
+                    physics_world.add_nif_collision(&col_data, glam::Vec3::ZERO, glam::Quat::IDENTITY);
+                    println!("物理ワールド登録: 単体メッシュ コリジョン剛体数 {}", col_data.bodies.len());
+                }
+
                 (
                     scene,
                     None,
@@ -162,6 +195,8 @@ impl ViewerState {
                         b: 0.15,
                         a: 1.0,
                     },
+                    physics_world,
+                    None,
                 )
             }
             ViewerTarget::Cell(..) | ViewerTarget::World(..) => {
@@ -214,6 +249,8 @@ impl ViewerState {
                 println!("3D モデル保持レコード (STAT, SCOL, DOOR, ACTI, FURN, etc.) を一括走査中...");
                 let model_map = esm_reader.read_all_models_map().expect("Failed to read models map");
                 println!("モデルマップ登録件数: {} 件", model_map.len());
+                let (npc_map, armor_map) = esm_reader.read_npc_and_armor_map().unwrap_or_default();
+                println!("アクター定義: {} 件, 防具定義: {} 件", npc_map.len(), armor_map.len());
                 let light_map = esm_reader.read_light_map().unwrap_or_default();
                 println!("光源レコード (LIGHT) 登録件数: {} 件", light_map.len());
 
@@ -222,10 +259,36 @@ impl ViewerState {
                 let mut placed_lights: Vec<PlacedPointLight> = Vec::new();
                 let mut skipped_markers = 0;
                 let mut primary_lighting: Option<CellLighting> = None;
+                let mut door_spawn_point: Option<(glam::Vec3, f32)> = None;
 
                 for (cell, refrs, _) in &cells {
                     if primary_lighting.is_none() && cell.lighting.is_some() {
                         primary_lighting = cell.lighting.clone();
+                    }
+
+                    // 出入口ドア (XTEL) またはプレイヤー出現ポイントの検索
+                    // 外部洞窟出口 (CaveDoor / ExitDoor) ではなく、Vault 内部居住区への連絡ドアを優先する
+                    if door_spawn_point.is_none() {
+                        let mut fallback_door = None;
+                        for refr in refrs {
+                            if refr.teleport.is_some() {
+                                let is_exit = refr.edid.to_ascii_lowercase().contains("cave")
+                                    || refr.edid.to_ascii_lowercase().contains("exit");
+                                let door_pos = glam::Vec3::new(refr.position[0], refr.position[1], refr.position[2]);
+                                let yaw = refr.rotation[2];
+                                if is_exit {
+                                    if fallback_door.is_none() {
+                                        fallback_door = Some((door_pos, yaw));
+                                    }
+                                } else {
+                                    door_spawn_point = Some((door_pos, yaw));
+                                    break;
+                                }
+                            }
+                        }
+                        if door_spawn_point.is_none() {
+                            door_spawn_point = fallback_door;
+                        }
                     }
 
                     let mut cell_items: Vec<(Arc<NifFile>, NiTransform)> = Vec::new();
@@ -246,28 +309,45 @@ impl ViewerState {
                             });
                         }
 
-                        // 配置メッシュの収集
-                        if let Some(obj_info) = model_map.get(&refr.base_object) {
+                        // 3D モデルパスの決定 (通常オブジェクトまたは ACHR アクター)
+                        let mesh_file_path = if let Some(obj_info) = model_map.get(&refr.base_object) {
                             if obj_info.model.is_empty() {
-                                continue;
-                            }
-
-                            // エディタ専用マーカーや光線エフェクトを除外
-                            if is_editor_marker_or_effect(&obj_info.edid, &obj_info.model) {
+                                None
+                            } else if is_editor_marker_or_effect(&obj_info.edid, &obj_info.model) {
                                 skipped_markers += 1;
-                                continue;
+                                None
+                            } else {
+                                Some(obj_info.model.clone())
                             }
+                        } else if let Some(npc) = npc_map.get(&refr.base_object) {
+                            // NPC_ のデフォルト装備防具から NIF パスを解決
+                            npc.default_armor.and_then(|armo_id| armor_map.get(&armo_id)).and_then(|armo| {
+                                let m = if npc.is_female && !armo.female_model.is_empty() {
+                                    &armo.female_model
+                                } else {
+                                    &armo.male_model
+                                };
+                                if !m.is_empty() {
+                                    Some(m.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                        } else {
+                            None
+                        };
 
-                            let model_key = obj_info.model.to_ascii_lowercase();
+                        if let Some(model_path) = mesh_file_path {
+                            let model_key = model_path.to_ascii_lowercase();
                             let nif = if let Some(n) = nif_cache.get(&model_key) {
                                 n.clone()
                             } else {
-                                let mesh_path = if model_key.starts_with("meshes\\") || model_key.starts_with("meshes/") {
-                                    obj_info.model.clone()
+                                let path = if model_key.starts_with("meshes\\") || model_key.starts_with("meshes/") {
+                                    model_path.clone()
                                 } else {
-                                    format!("meshes\\{}", obj_info.model)
+                                    format!("meshes\\{}", model_path)
                                 };
-                                match vfs.read(&mesh_path) {
+                                match vfs.read(&path) {
                                     Ok(bytes) => {
                                         let mut cursor = Cursor::new(bytes);
                                         match NifFile::read(&mut cursor) {
@@ -277,7 +357,7 @@ impl ViewerState {
                                                 arc
                                             }
                                             Err(e) => {
-                                                eprintln!("警告: メッシュ \"{}\" のパースに失敗しました（スキップします）: {}", mesh_path, e);
+                                                eprintln!("警告: メッシュ \"{}\" のパースに失敗しました（スキップします）: {}", path, e);
                                                 continue;
                                             }
                                         }
@@ -352,7 +432,36 @@ impl ViewerState {
                     }
                 };
 
-                (scene, primary_lighting, placed_lights, clear_color)
+                println!("セル内の Havok コリジョン情報を物理ワールドに登録中...");
+                let mut physics_world = RapierPhysicsWorld::new();
+                let mut total_colliders = 0;
+
+                // 1. 地形 (LAND) コライダーの登録
+                for (_, land_info) in &cell_inputs {
+                    if let Some((land, gx, gy)) = land_info {
+                        let heights = land.compute_heights();
+                        if physics_world.add_land_collision(&heights, *gx, *gy).is_some() {
+                            total_colliders += 1;
+                        }
+                    }
+                }
+
+                // 2. 配置オブジェクト (REFR) コライダーの登録
+                for (nif, world_transform) in cell_inputs.iter().flat_map(|(items, _)| items.iter()) {
+                    let col_data = extract_collision_data(nif);
+                    if !col_data.bodies.is_empty() {
+                        total_colliders += col_data.bodies.len();
+                        let quat = glam::Quat::from_mat3(&world_transform.rotation);
+                        physics_world.add_nif_collision(
+                            &col_data,
+                            world_transform.translation,
+                            quat,
+                        );
+                    }
+                }
+                println!("物理ワールド構築完了: 登録剛体数 {}", total_colliders);
+
+                (scene, primary_lighting, placed_lights, clear_color, physics_world, door_spawn_point)
             }
         };
 
@@ -429,14 +538,51 @@ impl ViewerState {
         });
 
         println!("\n=== 操作ガイド ===");
-        println!("  左ドラッグ:       カメラ回転 (Orbit)");
-        println!("  右ドラッグ:       カメラ平行移動 (Pan)");
-        println!("  ホイール:         ズームイン / アウト");
-        println!("  R キー:           カメラ自動再フォーカス (Reset)");
-        println!("  C キー:           Havok コリジョンワイヤーフレーム重畳表示切替 (Collision ON/OFF)");
-        println!("  F キー:           セル環境フォグ表示切替 (Fog ON/OFF)");
-        println!("  L キー:           ビューア補助ヘッドライト切替 (Light ON/OFF)");
-        println!("  Esc キー:         終了\n");
+        println!("  Tab / M キー:     カメラモード切替 [オービット周回 ⇔ FPS歩行モード]");
+        println!("  -- オービットモード (Orbit) --");
+        println!("    左ドラッグ:     カメラ回転 (Yaw / Pitch)");
+        println!("    右ドラッグ:     カメラ平行移動 (Pan)");
+        println!("    ホイール:       ズームイン / アウト");
+        println!("    R キー:         カメラ自動再フォーカス (Reset)");
+        println!("  -- FPS歩行モード (Walkthrough / Physics) --");
+        println!("    WASD キー:      前後・左右移動 (コリジョン・階段昇降対応)");
+        println!("    Space キー:     ジャンプ / 上昇");
+        println!("    マウス移動:     視線方向回転 (Look)");
+        println!("  -- 共通 --");
+        println!("    C キー:         Havok コリジョンワイヤーフレーム表示切替 (Collision ON/OFF)");
+        println!("    F キー:         セル環境フォグ表示切替 (Fog ON/OFF)");
+        println!("    L キー:         ビューア補助ヘッドライト切替 (Light ON/OFF)");
+        println!("    Esc キー:       終了\n");
+
+        // キャラクタコントローラーの初期配置
+        // 1. セル内の出入口ドア (XTEL) があれば、外から室内（セル中心方向）へ入ってきた位置にオフセットしてスポーン
+        // 2. なければセル中心から下向きにレイキャストを飛ばして床コリジョンを検出
+        let spawn_pos = if let Some((door_pos, _)) = door_spawn_point {
+            // ドアから室内（セル中心）へ向かう水平方向ベクトル
+            let to_center = scene.bounds_center - door_pos;
+            let into_room = if to_center.x.hypot(to_center.y) > 1.0 {
+                glam::Vec3::new(to_center.x, to_center.y, 0.0).normalize()
+            } else {
+                glam::Vec3::X
+            };
+            let pos = door_pos + into_room * 80.0 + glam::Vec3::new(0.0, 0.0, 65.0);
+            println!("出入口ドアから室内方向への初期スポーン地点を設定: {:?}", pos);
+            // カメラの向きも室内方向に向ける
+            camera.yaw = into_room.y.atan2(into_room.x);
+            camera.pitch = 0.0;
+            pos
+        } else {
+            let ray_origin = scene.bounds_center + glam::Vec3::new(0.0, 0.0, scene.bounds_radius * 0.5);
+            let ray_dir = glam::Vec3::new(0.0, 0.0, -1.0);
+            if let Some(hit) = physics_world.cast_ray(ray_origin, ray_dir, scene.bounds_radius * 2.0) {
+                println!("レイキャストによる安全な床面検出に成功: Z = {:.1}", hit.point.z);
+                hit.point + glam::Vec3::new(0.0, 0.0, 65.0)
+            } else {
+                scene.bounds_center + glam::Vec3::new(0.0, 0.0, 64.0)
+            }
+        };
+
+        let character_controller = RapierCharacterController::new(spawn_pos);
 
         ViewerState {
             window,
@@ -458,6 +604,17 @@ impl ViewerState {
             show_collision: false,
             enable_fog,
             headlight: false,
+            camera_mode: CameraMode::Orbit,
+            physics_world,
+            character_controller,
+            initial_spawn_point: spawn_pos,
+            vertical_velocity: 0.0,
+            last_frame_time: Instant::now(),
+            key_forward: false,
+            key_backward: false,
+            key_left: false,
+            key_right: false,
+            key_jump: false,
             left_mouse_down: false,
             right_mouse_down: false,
             last_mouse_pos: None,
@@ -480,6 +637,68 @@ impl ViewerState {
     }
 
     fn update(&mut self) {
+        let now = Instant::now();
+        let dt = (now - self.last_frame_time).as_secs_f32().clamp(0.001, 0.1);
+        self.last_frame_time = now;
+
+        // FPS ウォークスルー歩行モード時の物理シミュレーション
+        if self.camera_mode == CameraMode::Walkthrough {
+            // 水平面上の移動方向（カメラのヨー角から計算: Z-up 右手系）
+            let forward = glam::Vec3::new(self.camera.yaw.cos(), self.camera.yaw.sin(), 0.0).normalize();
+            let right = glam::Vec3::new(self.camera.yaw.sin(), -self.camera.yaw.cos(), 0.0).normalize();
+
+            let mut move_dir = glam::Vec3::ZERO;
+            if self.key_forward {
+                move_dir += forward;
+            }
+            if self.key_backward {
+                move_dir -= forward;
+            }
+            if self.key_right {
+                move_dir += right;
+            }
+            if self.key_left {
+                move_dir -= right;
+            }
+
+            let move_speed = 300.0; // ゲーム単位/秒 (約 4.3 m/s)
+            let horiz_velocity = if move_dir.length_squared() > 0.001 {
+                move_dir.normalize() * move_speed
+            } else {
+                glam::Vec3::ZERO
+            };
+
+            // 重力とジャンプ
+            let gravity = -980.0; // 重力加速度 (約 -14 m/s^2)
+            if self.character_controller.is_grounded {
+                if self.key_jump {
+                    self.vertical_velocity = 350.0; // ジャンプ初速
+                } else {
+                    self.vertical_velocity = -10.0; // 地面スナップ維持のための微小押し下げ
+                }
+            } else {
+                self.vertical_velocity += gravity * dt;
+                self.vertical_velocity = self.vertical_velocity.clamp(-1200.0, 500.0);
+            }
+
+            let desired_translation = (horiz_velocity + glam::Vec3::new(0.0, 0.0, self.vertical_velocity)) * dt;
+
+            // 物理エンジンによる移動計算 (階段自動昇降・衝突スライド・接地判定)
+            self.character_controller.step_move(
+                dt,
+                desired_translation,
+                &self.physics_world.rigid_body_set,
+                &self.physics_world.collider_set,
+                &self.physics_world.query_pipeline,
+            );
+
+            // カメラの目の高さをキャラクタ位置 + 55 単位（プレイヤーアイレベル 約 119）に設定
+            let eye_level = self.character_controller.position + glam::Vec3::new(0.0, 0.0, 55.0);
+            self.camera.override_eye = Some(eye_level);
+        } else {
+            self.camera.override_eye = None;
+        }
+
         let uniform = self.camera.build_uniform();
         self.queue.write_buffer(
             &self.camera_buffer,
@@ -549,7 +768,7 @@ impl ViewerState {
             });
 
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            self.scene.render(&mut render_pass, &self.context);
+            self.scene.render_with_camera_pos(&mut render_pass, &self.context, Some(self.camera.eye_position()));
 
             if self.show_collision {
                 self.scene.render_collision(&mut render_pass, &self.context);
@@ -618,12 +837,23 @@ impl ApplicationHandler for App {
                     let dx = (position.x - last_x) as f32;
                     let dy = (position.y - last_y) as f32;
 
-                    if state.left_mouse_down {
-                        state.camera.rotate(dx, dy);
-                        state.window.request_redraw();
-                    } else if state.right_mouse_down {
-                        state.camera.pan(dx, dy);
-                        state.window.request_redraw();
+                    match state.camera_mode {
+                        CameraMode::Orbit => {
+                            if state.left_mouse_down {
+                                state.camera.rotate(dx, dy);
+                                state.window.request_redraw();
+                            } else if state.right_mouse_down {
+                                state.camera.pan(dx, dy);
+                                state.window.request_redraw();
+                            }
+                        }
+                        CameraMode::Walkthrough => {
+                            // FPS 視点回転 (左ドラッグまたは右ドラッグで視線回転)
+                            if state.left_mouse_down || state.right_mouse_down {
+                                state.camera.rotate(dx, dy);
+                                state.window.request_redraw();
+                            }
+                        }
                     }
                 }
                 state.last_mouse_pos = Some((position.x, position.y));
@@ -637,11 +867,43 @@ impl ApplicationHandler for App {
                 state.window.request_redraw();
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                if event.state == ElementState::Pressed {
-                    if let PhysicalKey::Code(key) = event.physical_key {
+                let pressed = event.state == ElementState::Pressed;
+                if let PhysicalKey::Code(key) = event.physical_key {
+                    // WASD / Space の移動キー追跡
+                    match key {
+                        KeyCode::KeyW => state.key_forward = pressed,
+                        KeyCode::KeyS => state.key_backward = pressed,
+                        KeyCode::KeyA => state.key_left = pressed,
+                        KeyCode::KeyD => state.key_right = pressed,
+                        KeyCode::Space => state.key_jump = pressed,
+                        _ => {}
+                    }
+
+                    if pressed {
                         match key {
+                            KeyCode::Tab | KeyCode::KeyM => {
+                                state.camera_mode = match state.camera_mode {
+                                    CameraMode::Orbit => {
+                                        println!("\n[カメラモード] FPS ウォークスルー歩行モード (物理演算 & KCC 有効) に切り替えました。");
+                                        println!("  WASD: 移動, Space: ジャンプ, マウスドラッグ: 視線変更, Tab/M: オービット復帰");
+                                        // ロード時に決定した出入口ドア等の安全な初期スポーン地点に配置
+                                        state.character_controller.position = state.initial_spawn_point;
+                                        state.vertical_velocity = 0.0;
+                                        CameraMode::Walkthrough
+                                    }
+                                    CameraMode::Walkthrough => {
+                                        println!("\n[カメラモード] オービットカメラ (全体周回) に切り替えました。");
+                                        // キャラクタの現在位置にカメラの注視点を合わせる
+                                        state.camera.target = state.character_controller.position;
+                                        CameraMode::Orbit
+                                    }
+                                };
+                                state.window.request_redraw();
+                            }
                             KeyCode::KeyR => {
                                 state.camera.focus(state.scene.bounds_center, state.scene.bounds_radius);
+                                state.character_controller.position = state.scene.bounds_center + glam::Vec3::new(0.0, 0.0, 64.0);
+                                state.vertical_velocity = 0.0;
                                 state.window.request_redraw();
                             }
                             KeyCode::KeyC => {
@@ -675,8 +937,15 @@ impl ApplicationHandler for App {
                         }
                     }
                 }
+                state.window.request_redraw();
             }
             _ => {}
+        }
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(ref state) = self.state {
+            state.window.request_redraw();
         }
     }
 }

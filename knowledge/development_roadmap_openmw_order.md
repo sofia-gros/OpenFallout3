@@ -1,5 +1,21 @@
 # OpenMW の歴史的実装順序に学ぶ Fallout 3 エンジン開発ロードマップ
 
+## 現在の開発進捗状況 (2026年9月現在)
+
+| フェーズ | クレート | 状態 | 詳細 |
+| :--- | :--- | :--- | :--- |
+| **Phase 1: ファイル基盤** | `fo3_bsa`, `fo3_vfs` | **100% 完了** | BSA v104 完全解凍、ルーズファイル優先透過読み込み |
+| **Phase 2: 3Dメッシュパース** | `fo3_nif` | **100% 完了** | NiNode, BSFadeNode, NiTriShape/Strips, BSShaderPPLightingProperty, BSShaderTextureSet, NiMaterialProperty, NiAlphaProperty |
+| **Phase 3: レンダリング** | `fo3_render` | **100% 完了** | wgpu, DDS デコード, 法線マッピング, Blinn-Phong スペキュラ, Glow Map 自己発光, 半透明ソート描画, 地形スプラット |
+| **Phase 4: ESM 配置・データ構造** | `fo3_esm` | **100% 完了** | STAT, SCOL, DOOR, ACTI, FURN, CONT, LIGH, CELL, WRLD, LAND, REFR 拡張 (XTEL テレポートドア, XLOC 施錠, XESP 親連動, XMRK/TNAM マーカー, XOWN 所有権, XCNT スタック), ACHR/ACRE 配置アクター |
+| **Phase 4-3: 室内・屋外探索** | `fo3_viewer` | **達成済み** | Vault 101 / Megaton / Wasteland を光源・環境光・マテリアル付きでフリーカメラ探索可能 |
+| **Phase 5: コリジョンと基本物理** | `fo3_nif` (bhk), `fo3_physics` | **着手予定** | Havok 物理 / bhkRigidBody / bhkMoppBvTreeShape パース、接地・歩行コントローラー |
+| **Phase 6: スケルトンとアニメーション** | `fo3_gamebryo_anim` | 未着手 | NiSkinInstance, NiSkinData, ボーンスキニング, KF キーフレーム再生 |
+| **Phase 7: エクステリア動的ストリーミング** | `fo3_world` | 未着手 | $3 \times 3$ セルグリッド動的ロード/アンロード |
+| **Phase 8: スクリプト・ゲームプレイ** | `fo3_gameplay` | 未着手 | SCPT スクリプト仮想マシン, Pip-Boy UI, 会話 |
+
+---
+
 ## 1. OpenMW が辿った実装の軌跡（歴史的経緯の分析）
 
 OpenMW（0.1.0 〜 1.0）の CHANGELOG およびアーキテクチャ進化ログを分析すると、極めて合理的かつ安全な開発順序が浮かび上がります。

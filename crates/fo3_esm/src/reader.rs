@@ -12,13 +12,15 @@ use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::header::{GroupHeader, RecordHeader};
 use crate::records::{
-    CellRecord, LandRecord, LightRecord, LtexRecord, RefrRecord, StatRecord, Tes4Header, TextureSetRecord, WorldRecord,
+    ArmorRecord, CellRecord, LandRecord, LightRecord, LtexRecord, NpcRecord, RefrRecord, StatRecord,
+    Tes4Header, TextureSetRecord, WorldRecord,
 };
 use crate::subrecord::{parse_subrecords, Subrecord};
 use crate::types::{
-    FormId, FourCC, REC_ACTI, REC_ALCH, REC_AMMO, REC_ARMO, REC_BOOK, REC_CELL, REC_CONT,
-    REC_DOOR, REC_FURN, REC_KEYM, REC_LAND, REC_LIGH, REC_LTEX, REC_MISC, REC_MSTT, REC_REFR, REC_SCOL, REC_STAT,
-    REC_TERM, REC_TES4, REC_TXST, REC_WEAP, REC_WRLD, SUB_EDID, SUB_MODL,
+    FormId, FourCC, REC_ACHR, REC_ACRE, REC_ACTI, REC_ALCH, REC_AMMO, REC_ARMO, REC_BOOK, REC_CELL,
+    REC_CONT, REC_DOOR, REC_FURN, REC_KEYM, REC_LAND, REC_LIGH, REC_LTEX, REC_MISC, REC_MSTT,
+    REC_NPC_, REC_REFR, REC_SCOL, REC_STAT, REC_TERM, REC_TES4, REC_TXST, REC_WEAP, REC_WRLD,
+    SUB_EDID, SUB_MODL,
 };
 
 /// 配置元ベースオブジェクトのメタ情報（モデルパス、エディタID、レコード型）。
@@ -454,6 +456,57 @@ impl<R: Read + Seek> EsmReader<R> {
         Ok(map)
     }
 
+    /// ESM 内の NPC_ (NPC定義) および ARMO (防具定義) を一括収集する。
+    pub fn read_npc_and_armor_map(&mut self) -> io::Result<(HashMap<FormId, NpcRecord>, HashMap<FormId, ArmorRecord>)> {
+        let mut npcs = HashMap::new();
+        let mut armors = HashMap::new();
+
+        let start_pos = 24 + self.header_record.data_size as u64;
+        self.reader.seek(SeekFrom::Start(start_pos))?;
+
+        while let Some(entry) = self.read_next_entry()? {
+            match entry {
+                EsmEntry::Group(group) => {
+                    let rtype = group.target_record_type();
+                    if rtype == Some(REC_NPC_) || rtype == Some(REC_ARMO) {
+                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        while self.reader.stream_position()? < group_end {
+                            if let Some(inner) = self.read_next_entry()? {
+                                match inner {
+                                    EsmEntry::Record(header, subs) => {
+                                        if header.type_id == REC_NPC_ {
+                                            if let Ok(npc) = NpcRecord::from_record(&header, &subs) {
+                                                npcs.insert(header.form_id, npc);
+                                            }
+                                        } else if header.type_id == REC_ARMO {
+                                            if let Ok(armor) = ArmorRecord::from_record(&header, &subs) {
+                                                armors.insert(header.form_id, armor);
+                                            }
+                                        }
+                                    }
+                                    EsmEntry::Group(child_group) => {
+                                        let skip = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        self.skip(skip)?;
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+                    let remaining = group.group_size as u64 - GroupHeader::SIZE as u64;
+                    self.skip(remaining)?;
+                }
+                EsmEntry::Record(rec, _) => {
+                    self.skip(rec.data_size as u64)?;
+                }
+            }
+        }
+
+        Ok((npcs, armors))
+    }
+
     /// 指定された EDID を持つ CELL レコード、その子 REFR レコード群、および地形 LAND レコード（存在する場合）を検索・取得する。
     ///
     /// 内部セル（トップレベル CELL グループ）および外部セル（WRLD グループ配下）の双方を走査する。
@@ -581,7 +634,7 @@ impl<R: Read + Seek> EsmReader<R> {
                     self.collect_children_in_group(inner_end, refrs, land)?;
                 }
                 EsmEntry::Record(header, subrecords) => {
-                    if header.type_id == REC_REFR {
+                    if header.type_id == REC_REFR || header.type_id == REC_ACHR || header.type_id == REC_ACRE {
                         refrs.push(RefrRecord::from_record(&header, &subrecords)?);
                     } else if header.type_id == REC_LAND {
                         if land.is_none() {
@@ -1076,5 +1129,117 @@ mod tests {
         assert_eq!(heights[1], 816.0);
         // y=1, x=0: row_offset = 101 + 1 = 102, height = 102 * 8 = 816
         assert_eq!(heights[LAND_VERTS_PER_SIDE], 816.0);
+    }
+
+    /// REFR 拡張サブレコード (XTEL, XLOC, XESP, XMRK, TNAM, XOWN, XRNK, XCNT) のパース検証。
+    #[test]
+    fn test_refr_extended_subrecords() {
+        use crate::types::{
+            SUB_TNAM, SUB_XCNT, SUB_XESP, SUB_XLOC, SUB_XMRK, SUB_XOWN, SUB_XRNK, SUB_XTEL,
+        };
+        use crate::records::refr::{EnableParent, LockData, TeleportDoor};
+
+        let refr_header = RecordHeader {
+            type_id: REC_REFR,
+            data_size: 0,
+            flags: 0,
+            form_id: FormId(0x00011111),
+            vc_info: 0,
+            form_version: 15,
+            vc_info2: 0,
+        };
+
+        // XTEL (32 bytes): dest_door(0x00022222), pos(10.0, 20.0, 30.0), rot(0.5, 0.6, 0.7), flags(1)
+        let mut xtel_data = Vec::new();
+        xtel_data.extend_from_slice(&0x00022222u32.to_le_bytes());
+        xtel_data.extend_from_slice(&10.0f32.to_le_bytes());
+        xtel_data.extend_from_slice(&20.0f32.to_le_bytes());
+        xtel_data.extend_from_slice(&30.0f32.to_le_bytes());
+        xtel_data.extend_from_slice(&0.5f32.to_le_bytes());
+        xtel_data.extend_from_slice(&0.6f32.to_le_bytes());
+        xtel_data.extend_from_slice(&0.7f32.to_le_bytes());
+        xtel_data.extend_from_slice(&1u32.to_le_bytes());
+
+        // XLOC (12 bytes): lock_level(50), pad[3], key(0x00033333), flags(0)
+        let mut xloc_data = vec![50u8, 0, 0, 0];
+        xloc_data.extend_from_slice(&0x00033333u32.to_le_bytes());
+        xloc_data.extend_from_slice(&0u32.to_le_bytes());
+
+        // XESP (8 bytes): parent(0x00044444), flags(0x01 = Inversed)
+        let mut xesp_data = Vec::new();
+        xesp_data.extend_from_slice(&0x00044444u32.to_le_bytes());
+        xesp_data.extend_from_slice(&1u32.to_le_bytes());
+
+        let subs = vec![
+            Subrecord {
+                type_id: SUB_EDID,
+                data: b"VaultExitDoor\0".to_vec(),
+            },
+            Subrecord {
+                type_id: SUB_XTEL,
+                data: xtel_data,
+            },
+            Subrecord {
+                type_id: SUB_XLOC,
+                data: xloc_data,
+            },
+            Subrecord {
+                type_id: SUB_XESP,
+                data: xesp_data,
+            },
+            Subrecord {
+                type_id: SUB_XMRK,
+                data: Vec::new(),
+            },
+            Subrecord {
+                type_id: SUB_TNAM,
+                data: 5u16.to_le_bytes().to_vec(),
+            },
+            Subrecord {
+                type_id: SUB_XOWN,
+                data: 0x00055555u32.to_le_bytes().to_vec(),
+            },
+            Subrecord {
+                type_id: SUB_XRNK,
+                data: 2i32.to_le_bytes().to_vec(),
+            },
+            Subrecord {
+                type_id: SUB_XCNT,
+                data: 50i32.to_le_bytes().to_vec(),
+            },
+        ];
+
+        let refr = RefrRecord::from_record(&refr_header, &subs).unwrap();
+        assert_eq!(refr.form_id, FormId(0x00011111));
+        assert_eq!(refr.edid, "VaultExitDoor");
+        assert_eq!(
+            refr.teleport,
+            Some(TeleportDoor {
+                dest_door: FormId(0x00022222),
+                dest_pos: [10.0, 20.0, 30.0],
+                dest_rot: [0.5, 0.6, 0.7],
+                flags: 1,
+            })
+        );
+        assert_eq!(
+            refr.lock,
+            Some(LockData {
+                lock_level: 50,
+                key: Some(FormId(0x00033333)),
+                flags: 0,
+            })
+        );
+        assert_eq!(
+            refr.enable_parent,
+            Some(EnableParent {
+                parent: FormId(0x00044444),
+                flags: 1,
+            })
+        );
+        assert!(refr.is_map_marker);
+        assert_eq!(refr.map_marker_type, Some(5));
+        assert_eq!(refr.owner, Some(FormId(0x00055555)));
+        assert_eq!(refr.faction_rank, Some(2));
+        assert_eq!(refr.count, 50);
     }
 }

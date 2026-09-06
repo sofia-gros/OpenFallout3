@@ -166,3 +166,46 @@ void Matrix::fromEuler( float x, float y, float z )
 2. **`NiAVObject::flags` ビット 0 (`0x0001`)**:
    - `flags & 0x0001 != 0` の場合、`Hidden` (App Culled: アプリケーション側で非表示指定) であるため描画をスキップする。
 ゲーム内の座標系は右手系 Z-up ($X$: 東/右, $Y$: 北/前, $Z$: 上) であり、NIF 内部のジオメトリ座標系と一致します。
+
+---
+
+## 7. REFR / ACHR / ACRE 拡張サブレコード詳細仕様
+
+配置参照レコード（`REFR`）およびアクター・クリーチャー配置（`ACHR`, `ACRE`）に付与される主要サブレコードのバイナリレイアウト。
+
+一次文献:
+- `references/openmw/components/esm4/loadrefr.hpp`, `loadrefr.cpp`
+- `references/openmw/components/esm4/loadachr.hpp`, `loadachr.cpp`
+- `references/openmw/components/esm4/reference.hpp`
+
+### ① `XTEL` (ドアのテレポート先定義, 28 または 32 バイト)
+ドアオブジェクト（`DOOR`）を通過した際の遷移先ドアおよび出現位置。
+- `dest_door`: `FormId` (4 bytes, 遷移先のドア `REFR` の FormId)
+- `dest_pos`: `[f32; 3]` (12 bytes, 出現位置 XYZ)
+- `dest_rot`: `[f32; 3]` (12 bytes, 出現姿勢オイラー角 XYZ ラジアン)
+- `flags`: `u32` (4 bytes, 32 バイト時のみ。`0x01`: No Alarm 等)
+
+### ② `XLOC` (施錠データ, 12 / 16 / 20 バイト)
+ドアやコンテナなどの施錠情報。
+- `lock_level`: `u8` (バイト 0: 0=Very Easy, 25=Easy, 50=Average, 75=Hard, 100=Very Hard, 255=要キー/施錠解除不可)
+- `unused`: `[u8; 3]` (バイト 1..3)
+- `key`: `FormId` (バイト 4..7: 解錠キーアイテムの FormId。0 の場合はキー不要)
+- `flags`: `u32` (バイト 8..11: 施錠フラグ)
+
+### ③ `XESP` (Enable Parent, 8 バイト)
+親オブジェクトの有効化・無効化状態と連動する設定。
+- `parent`: `FormId` (4 bytes: 連動親オブジェクトの FormId)
+- `flags`: `u32` (4 bytes: `0x01` = Inversed: 逆連動, `0x02` = PopIn)
+
+### ④ `XMRK` / `TNAM` (マップマーカー)
+ファストトラベルやマップ上に表示されるマーカー。
+- `XMRK`: 0 バイト（存在することで MapMarker であることを示すフラグ）
+- `TNAM`: 2 バイト (`u16`) または FormId（マーカーの種別・アイコン定義）
+
+### ⑤ `XOWN` / `XRNK` (所有権情報)
+- `XOWN`: `FormId` (4 bytes: 所有者 NPC または Faction の FormId)
+- `XRNK`: `i32` (4 bytes: 必要ファクションランク)
+
+### ⑥ `XCNT` (配置スタック数)
+- `count`: `i32` (4 bytes: ワールドに配置されたアイテムの個数。省略時は 1)
+

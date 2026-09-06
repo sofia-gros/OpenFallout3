@@ -55,6 +55,7 @@ impl RenderScene {
         let mut texture_cache: HashMap<String, GpuTexture> = HashMap::new();
         let default_texture = GpuTexture::create_default_white(device, queue);
         let default_normal_texture = GpuTexture::create_default_normal(device, queue);
+        let default_glow_texture = GpuTexture::create_default_black(device, queue);
 
         // ルートブロック（通常 0 番）からトラバース開始
         let root_transform = NiTransform::default();
@@ -62,6 +63,7 @@ impl RenderScene {
             traverse_block(
                 0,
                 &root_transform,
+                None,
                 None,
                 nif,
                 vfs,
@@ -72,6 +74,7 @@ impl RenderScene {
                 &mut texture_cache,
                 &default_texture,
                 &default_normal_texture,
+                &default_glow_texture,
             );
         }
 
@@ -142,6 +145,7 @@ impl RenderScene {
         let mut texture_cache: HashMap<String, GpuTexture> = HashMap::new();
         let default_texture = GpuTexture::create_default_white(device, queue);
         let default_normal_texture = GpuTexture::create_default_normal(device, queue);
+        let default_glow_texture = GpuTexture::create_default_black(device, queue);
 
         let mut min = Vec3::splat(f32::MAX);
         let mut max = Vec3::splat(f32::MIN);
@@ -188,7 +192,7 @@ impl RenderScene {
                             .and_then(|p| texture_cache.get(p))
                             .unwrap_or(&default_normal_texture);
 
-                        let model_uniform = ModelUniform::new(glam::Mat4::IDENTITY, None);
+                        let model_uniform = ModelUniform::new(glam::Mat4::IDENTITY, None, None, false);
                         let model_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&format!("Model Uniform Buffer: Landscape Q{}", q)),
                             contents: bytemuck::bytes_of(&model_uniform),
@@ -219,6 +223,10 @@ impl RenderScene {
                                 wgpu::BindGroupEntry {
                                     binding: 2,
                                     resource: wgpu::BindingResource::TextureView(&normal_texture.view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 3,
+                                    resource: wgpu::BindingResource::TextureView(&default_glow_texture.view),
                                 },
                             ],
                         });
@@ -280,7 +288,7 @@ impl RenderScene {
                             .and_then(|p| texture_cache.get(p))
                             .unwrap_or(&default_normal_texture);
 
-                        let model_uniform = ModelUniform::new(glam::Mat4::IDENTITY, None);
+                        let model_uniform = ModelUniform::new(glam::Mat4::IDENTITY, None, None, false);
                         let model_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&format!("Model Uniform Buffer: Landscape Layer Q{}_{}", layer.quadrant, l_idx)),
                             contents: bytemuck::bytes_of(&model_uniform),
@@ -311,6 +319,10 @@ impl RenderScene {
                                 wgpu::BindGroupEntry {
                                     binding: 2,
                                     resource: wgpu::BindingResource::TextureView(&normal_texture.view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 3,
+                                    resource: wgpu::BindingResource::TextureView(&default_glow_texture.view),
                                 },
                             ],
                         });
@@ -351,16 +363,18 @@ impl RenderScene {
                         0,
                         world_transform,
                         None,
+                        None,
                         nif,
                         vfs,
                         device,
-                    queue,
-                    context,
-                    &mut meshes,
-                    &mut texture_cache,
-                    &default_texture,
-                    &default_normal_texture,
-                );
+                        queue,
+                        context,
+                        &mut meshes,
+                        &mut texture_cache,
+                        &default_texture,
+                        &default_normal_texture,
+                        &default_glow_texture,
+                    );
 
                 // コリジョンワイヤーフレームの抽出
                 let col_lines = extract_collision_lines(nif);
@@ -413,6 +427,17 @@ impl RenderScene {
     /// シーン内のすべてのメッシュを描画する（不透明パス → 半透明パス）。
     /// 参照元: Gamebryo 2.6 レンダリング順序（不透明オブジェクトを先に深度書き込みありで描画し、その後半透明オブジェクトを合成）
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>, context: &'a RenderContext) {
+        self.render_with_camera_pos(render_pass, context, None);
+    }
+
+    /// カメラ位置を考慮してシーンを描画（半透明メッシュをカメラから遠い順にソートして合成）。
+    /// 参照元: Gamebryo 2.6 `NiAccumulator::RecordObject` (奥から手前へのソート描画)
+    pub fn render_with_camera_pos<'a>(
+        &'a self,
+        render_pass: &mut wgpu::RenderPass<'a>,
+        context: &'a RenderContext,
+        camera_pos: Option<Vec3>,
+    ) {
         // 1. 不透明メッシュ群の描画 (通常パイプライン: 深度書き込み有効)
         render_pass.set_pipeline(&context.pipeline);
         for mesh_node in self.meshes.iter().filter(|m| !m.is_transparent) {
@@ -425,7 +450,23 @@ impl RenderScene {
 
         // 2. 半透明メッシュ群の描画 (半透明パイプライン: 深度書き込み無効、アルファブレンド)
         render_pass.set_pipeline(&context.transparent_pipeline);
-        for mesh_node in self.meshes.iter().filter(|m| m.is_transparent) {
+        let mut transparent_meshes: Vec<&RenderMesh> = self.meshes.iter().filter(|m| m.is_transparent).collect();
+
+        // ソートが要求されている（!is_no_sorter()）かつカメラ座標が与えられている場合、カメラから遠い順（降順）にソート
+        // 参照元: references/nifskope/src/gl/glproperty.cpp:L230, Gamebryo 2.6 NiAlphaProperty
+        if let Some(cam) = camera_pos {
+            transparent_meshes.sort_by(|a, b| {
+                if a.alpha_sort && b.alpha_sort {
+                    let dist_a = a.world_center.distance_squared(cam);
+                    let dist_b = b.world_center.distance_squared(cam);
+                    dist_b.partial_cmp(&dist_a).unwrap_or(std::cmp::Ordering::Equal)
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            });
+        }
+
+        for mesh_node in transparent_meshes {
             render_pass.set_bind_group(1, &mesh_node.model_bind_group, &[]);
             render_pass.set_bind_group(2, &mesh_node.texture_bind_group, &[]);
             render_pass.set_vertex_buffer(0, mesh_node.mesh.vertex_buffer.slice(..));
@@ -449,6 +490,7 @@ fn traverse_block(
     block_index: i32,
     parent_world: &NiTransform,
     parent_alpha: Option<&fo3_nif::NiAlphaProperty>,
+    parent_material: Option<&fo3_nif::NiMaterialProperty>,
     nif: &NifFile,
     vfs: &mut VfsManager,
     device: &wgpu::Device,
@@ -458,6 +500,7 @@ fn traverse_block(
     texture_cache: &mut HashMap<String, GpuTexture>,
     default_texture: &GpuTexture,
     default_normal_texture: &GpuTexture,
+    default_glow_texture: &GpuTexture,
 ) {
     if block_index < 0 || block_index as usize >= nif.blocks.len() {
         return;
@@ -472,11 +515,13 @@ fn traverse_block(
             let local_transform = to_core_transform(&node.av);
             let world_transform = parent_world.compose(&local_transform);
             let current_alpha = find_alpha_property(&node.av.properties, nif).or(parent_alpha);
+            let current_material = find_material_property(&node.av.properties, nif).or(parent_material);
             for &child in &node.children {
                 traverse_block(
                     child,
                     &world_transform,
                     current_alpha,
+                    current_material,
                     nif,
                     vfs,
                     device,
@@ -486,6 +531,7 @@ fn traverse_block(
                     texture_cache,
                     default_texture,
                     default_normal_texture,
+                    default_glow_texture,
                 );
             }
         }
@@ -496,11 +542,13 @@ fn traverse_block(
             let local_transform = to_core_transform(&fade.node.av);
             let world_transform = parent_world.compose(&local_transform);
             let current_alpha = find_alpha_property(&fade.node.av.properties, nif).or(parent_alpha);
+            let current_material = find_material_property(&fade.node.av.properties, nif).or(parent_material);
             for &child in &fade.node.children {
                 traverse_block(
                     child,
                     &world_transform,
                     current_alpha,
+                    current_material,
                     nif,
                     vfs,
                     device,
@@ -510,6 +558,7 @@ fn traverse_block(
                     texture_cache,
                     default_texture,
                     default_normal_texture,
+                    default_glow_texture,
                 );
             }
         }
@@ -532,12 +581,14 @@ fn traverse_block(
                             &world_transform,
                             &shape.geom.av.properties,
                             parent_alpha,
+                            parent_material,
                             nif,
                             vfs,
                             queue,
                             texture_cache,
                             default_texture,
                             default_normal_texture,
+                            default_glow_texture,
                         );
                         out_meshes.push(render_mesh);
                     }
@@ -563,12 +614,14 @@ fn traverse_block(
                             &world_transform,
                             &strips.geom.av.properties,
                             parent_alpha,
+                            parent_material,
                             nif,
                             vfs,
                             queue,
                             texture_cache,
                             default_texture,
                             default_normal_texture,
+                            default_glow_texture,
                         );
                         out_meshes.push(render_mesh);
                     }
@@ -620,12 +673,14 @@ fn create_render_mesh(
     world_transform: &NiTransform,
     properties: &[i32],
     parent_alpha: Option<&fo3_nif::NiAlphaProperty>,
+    parent_material: Option<&fo3_nif::NiMaterialProperty>,
     nif: &NifFile,
     vfs: &mut VfsManager,
     queue: &wgpu::Queue,
     texture_cache: &mut HashMap<String, GpuTexture>,
     default_texture: &GpuTexture,
     default_normal_texture: &GpuTexture,
+    default_glow_texture: &GpuTexture,
 ) -> RenderMesh {
     // アルファプロパティの解決 (自身のプロパティ優先、無ければ親から継承)
     // 参照元: Gamebryo 2.6 NiAVObject::AttachProperty, Property Cascading
@@ -633,9 +688,22 @@ fn create_render_mesh(
     let is_transparent = effective_alpha.map_or(false, |a| a.is_blend_enabled());
     let alpha_sort = effective_alpha.map_or(false, |a| !a.is_no_sorter());
 
+    // マテリアルプロパティの解決 (スペキュラ、エミッシブ、光沢度: 自身のプロパティ優先、無ければ親から継承)
+    // 参照元: Gamebryo 2.6 NiMaterialProperty, Property Cascading, references/nifxml/nif.xml:L4363
+    let material_prop = find_material_property(properties, nif).or(parent_material);
+
+    // テクスチャ探索 (Slot 0: Diffuse, Slot 1: Normal Map, Slot 2: Glow Map)
+    // 参照元: references/openmw/components/nifosg/nifloader.cpp:L2401-2426, references/nifxml/nif.xml:L6307
+    let (diffuse_path, normal_path, glow_path) = find_texture_paths(properties, nif);
+    ensure_texture_cached(&diffuse_path, vfs, device, queue, texture_cache);
+    ensure_texture_cached(&normal_path, vfs, device, queue, texture_cache);
+    ensure_texture_cached(&glow_path, vfs, device, queue, texture_cache);
+
+    let has_glow_map = glow_path.is_some() && glow_path.as_ref().map_or(false, |p| texture_cache.contains_key(p));
+
     // Model Uniform バッファ作成
     let world_mat = world_transform.to_mat4();
-    let model_uniform = ModelUniform::new(world_mat, effective_alpha);
+    let model_uniform = ModelUniform::new(world_mat, effective_alpha, material_prop, has_glow_map);
     let model_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(&format!("Model Uniform Buffer: {}", name)),
         contents: bytemuck::bytes_of(&model_uniform),
@@ -651,12 +719,6 @@ fn create_render_mesh(
         }],
     });
 
-    // テクスチャ探索 (Slot 0: Diffuse, Slot 1: Normal Map)
-    // 参照元: references/openmw/components/nifosg/nifloader.cpp:L2401-2426
-    let (diffuse_path, normal_path) = find_texture_paths(properties, nif);
-    ensure_texture_cached(&diffuse_path, vfs, device, queue, texture_cache);
-    ensure_texture_cached(&normal_path, vfs, device, queue, texture_cache);
-
     let diffuse_tex = diffuse_path
         .as_ref()
         .and_then(|p| texture_cache.get(p))
@@ -665,6 +727,10 @@ fn create_render_mesh(
         .as_ref()
         .and_then(|p| texture_cache.get(p))
         .unwrap_or(default_normal_texture);
+    let glow_tex = glow_path
+        .as_ref()
+        .and_then(|p| texture_cache.get(p))
+        .unwrap_or(default_glow_texture);
 
     let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some(&format!("Texture Bind Group: {}", name)),
@@ -681,6 +747,10 @@ fn create_render_mesh(
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: wgpu::BindingResource::TextureView(&normal_tex.view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(&glow_tex.view),
             },
         ],
     });
@@ -725,31 +795,49 @@ fn ensure_texture_cached(
     }
 }
 
-/// マテリアルプロパティからディフューズ (スロット 0) と法線マップ (スロット 1) を取得。
-/// 参照元: references/openmw/components/nifosg/nifloader.cpp:L2401-2426
-fn find_texture_paths(properties: &[i32], nif: &NifFile) -> (Option<String>, Option<String>) {
+/// マテリアルプロパティからディフューズ (スロット 0)、法線マップ (スロット 1)、およびグローマップ (スロット 2) を取得。
+/// 参照元: references/openmw/components/nifosg/nifloader.cpp:L2401-2426, references/nifxml/nif.xml:L6307
+fn find_texture_paths(properties: &[i32], nif: &NifFile) -> (Option<String>, Option<String>, Option<String>) {
     for &prop_idx in properties {
         if prop_idx >= 0 && (prop_idx as usize) < nif.blocks.len() {
             if let NifBlock::BSShaderPPLightingProperty(ref shader_prop) = nif.blocks[prop_idx as usize] {
                 if shader_prop.texture_set >= 0 && (shader_prop.texture_set as usize) < nif.blocks.len() {
                     if let NifBlock::BSShaderTextureSet(ref tex_set) = nif.blocks[shader_prop.texture_set as usize] {
                         let diff = if !tex_set.textures.is_empty() && !tex_set.textures[0].is_empty() {
-                            Some(tex_set.textures[0].clone())
+                            Some(normalize_texture_path(&tex_set.textures[0]))
                         } else {
                             None
                         };
                         let norm = if tex_set.textures.len() > 1 && !tex_set.textures[1].is_empty() {
-                            Some(tex_set.textures[1].clone())
+                            Some(normalize_texture_path(&tex_set.textures[1]))
                         } else {
                             None
                         };
-                        return (diff, norm);
+                        let glow = if tex_set.textures.len() > 2 && !tex_set.textures[2].is_empty() {
+                            Some(normalize_texture_path(&tex_set.textures[2]))
+                        } else {
+                            None
+                        };
+                        return (diff, norm, glow);
                     }
                 }
             }
         }
     }
-    (None, None)
+    (None, None, None)
+}
+
+/// プロパティリストから NiMaterialProperty を検索する。
+/// 参照元: references/nifxml/nif.xml:L4363, Gamebryo 2.6 NiMaterialProperty
+fn find_material_property<'a>(properties: &[i32], nif: &'a NifFile) -> Option<&'a fo3_nif::NiMaterialProperty> {
+    for &prop_idx in properties {
+        if prop_idx >= 0 && (prop_idx as usize) < nif.blocks.len() {
+            if let NifBlock::NiMaterialProperty(ref mat) = nif.blocks[prop_idx as usize] {
+                return Some(mat);
+            }
+        }
+    }
+    None
 }
 
 /// プロパティリストから NiAlphaProperty を検索する。

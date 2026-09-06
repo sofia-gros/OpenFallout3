@@ -11,7 +11,7 @@
 
 use bytemuck::{Pod, Zeroable};
 use fo3_gamebryo_core::NiTransform;
-use fo3_nif::{NifBlock, NifFile};
+use fo3_nif::NifFile;
 use glam::Vec3;
 use std::f32::consts::PI;
 use wgpu::util::DeviceExt;
@@ -59,120 +59,73 @@ pub struct GpuCollisionMesh {
 
 /// 単一の NIF ファイルからコリジョンライン頂点群を抽出・構築する。
 pub fn extract_collision_lines(nif: &NifFile) -> Vec<CollisionVertex> {
+    let col_data = fo3_nif::extract_collision_data(nif);
     let mut vertices = Vec::new();
 
-    for block in &nif.blocks {
-        match block {
-            NifBlock::BhkCollisionObject(co) => {
-                if co.body >= 0 && (co.body as usize) < nif.blocks.len() {
-                    extract_body_lines(co.body as usize, nif, &mut vertices);
-                }
-            }
-            NifBlock::BhkBlendCollisionObject(bco) => {
-                if bco.col.body >= 0 && (bco.col.body as usize) < nif.blocks.len() {
-                    extract_body_lines(bco.col.body as usize, nif, &mut vertices);
-                }
-            }
-            _ => {}
-        }
+    for body in &col_data.bodies {
+        let offset = Vec3::new(body.translation[0], body.translation[1], body.translation[2]);
+        extract_shape_lines(&body.shape, offset, &mut vertices);
     }
 
     vertices
 }
 
-fn extract_body_lines(body_idx: usize, nif: &NifFile, out: &mut Vec<CollisionVertex>) {
-    let block = &nif.blocks[body_idx];
-    let (shape_idx, body_trans) = match block {
-        NifBlock::BhkRigidBody(rb) => (rb.world_obj.shape, Vec3::ZERO),
-        NifBlock::BhkRigidBodyT(rbt) => {
-            let t = Vec3::new(rbt.translation[0], rbt.translation[1], rbt.translation[2]) * HAVOK_SCALE;
-            (rbt.world_obj.shape, t)
-        }
-        _ => return,
-    };
+fn extract_shape_lines(shape: &fo3_nif::CollisionShape, offset: Vec3, out: &mut Vec<CollisionVertex>) {
+    match shape {
+        fo3_nif::CollisionShape::TriMesh { vertices, indices, .. } => {
+            let col = [0.0, 1.0, 0.4, 1.0]; // 明るいグリーン
+            for tri in indices {
+                let i0 = tri[0] as usize;
+                let i1 = tri[1] as usize;
+                let i2 = tri[2] as usize;
+                if i0 < vertices.len() && i1 < vertices.len() && i2 < vertices.len() {
+                    let v0 = Vec3::new(vertices[i0][0], vertices[i0][1], vertices[i0][2]) + offset;
+                    let v1 = Vec3::new(vertices[i1][0], vertices[i1][1], vertices[i1][2]) + offset;
+                    let v2 = Vec3::new(vertices[i2][0], vertices[i2][1], vertices[i2][2]) + offset;
 
-    if shape_idx >= 0 && (shape_idx as usize) < nif.blocks.len() {
-        extract_shape_lines(shape_idx as usize, body_trans, nif, out);
-    }
-}
-
-fn extract_shape_lines(shape_idx: usize, offset: Vec3, nif: &NifFile, out: &mut Vec<CollisionVertex>) {
-    let block = &nif.blocks[shape_idx];
-    match block {
-        NifBlock::BhkMoppBvTreeShape(mopp) => {
-            if mopp.shape >= 0 && (mopp.shape as usize) < nif.blocks.len() {
-                extract_shape_lines(mopp.shape as usize, offset, nif, out);
-            }
-        }
-        NifBlock::BhkPackedNiTriStripsShape(packed) => {
-            if packed.data >= 0 && (packed.data as usize) < nif.blocks.len() {
-                if let NifBlock::HkPackedNiTriStripsData(ref data) = nif.blocks[packed.data as usize] {
-                    // bhkPackedNiTriStripsShape の頂点は既にゲーム単位
-                    let col = [0.0, 1.0, 0.4, 1.0]; // 明るいグリーン
-                    for tri in &data.triangles {
-                        let i0 = tri.triangle[0] as usize;
-                        let i1 = tri.triangle[1] as usize;
-                        let i2 = tri.triangle[2] as usize;
-                        if i0 < data.vertices.len() && i1 < data.vertices.len() && i2 < data.vertices.len() {
-                            let v0 = Vec3::new(data.vertices[i0][0], data.vertices[i0][1], data.vertices[i0][2]) + offset;
-                            let v1 = Vec3::new(data.vertices[i1][0], data.vertices[i1][1], data.vertices[i1][2]) + offset;
-                            let v2 = Vec3::new(data.vertices[i2][0], data.vertices[i2][1], data.vertices[i2][2]) + offset;
-
-                            // 3 本のエッジを LineList に追加
-                            add_line(out, v0, v1, col);
-                            add_line(out, v1, v2, col);
-                            add_line(out, v2, v0, col);
-                        }
-                    }
+                    add_line(out, v0, v1, col);
+                    add_line(out, v1, v2, col);
+                    add_line(out, v2, v0, col);
                 }
             }
         }
-        NifBlock::BhkBoxShape(box_shape) => {
-            // 直方体: ハーフエクステントに HAVOK_SCALE を乗算
-            let ext = Vec3::new(box_shape.dimensions.x, box_shape.dimensions.y, box_shape.dimensions.z) * HAVOK_SCALE;
+        fo3_nif::CollisionShape::Box { half_extents, center, .. } => {
+            let ext = Vec3::new(half_extents[0], half_extents[1], half_extents[2]);
+            let c = Vec3::new(center[0], center[1], center[2]) + offset;
             let col = [0.0, 0.8, 1.0, 1.0]; // シアン
-            add_box_lines(out, offset - ext, offset + ext, col);
+            add_box_lines(out, c - ext, c + ext, col);
         }
-        NifBlock::BhkSphereShape(sphere) => {
-            // 球体
-            let r = sphere.radius * HAVOK_SCALE;
+        fo3_nif::CollisionShape::Sphere { center, radius, .. } => {
+            let c = Vec3::new(center[0], center[1], center[2]) + offset;
             let col = [1.0, 0.9, 0.0, 1.0]; // イエロー
-            add_sphere_lines(out, offset, r, col);
+            add_sphere_lines(out, c, *radius, col);
         }
-        NifBlock::BhkCapsuleShape(capsule) => {
-            // カプセル
-            let p1 = Vec3::new(capsule.first_point.x, capsule.first_point.y, capsule.first_point.z) * HAVOK_SCALE + offset;
-            let p2 = Vec3::new(capsule.second_point.x, capsule.second_point.y, capsule.second_point.z) * HAVOK_SCALE + offset;
-            let r = capsule.radius1 * HAVOK_SCALE;
+        fo3_nif::CollisionShape::Capsule { p1, p2, radius, .. } => {
+            let pt1 = Vec3::new(p1[0], p1[1], p1[2]) + offset;
+            let pt2 = Vec3::new(p2[0], p2[1], p2[2]) + offset;
             let col = [1.0, 0.3, 0.8, 1.0]; // マゼンタ
-            add_capsule_lines(out, p1, p2, r, col);
+            add_capsule_lines(out, pt1, pt2, *radius, col);
         }
-        NifBlock::BhkConvexVerticesShape(convex) => {
-            // 凸包頂点: 頂点群に HAVOK_SCALE を乗算
+        fo3_nif::CollisionShape::ConvexHull { vertices, .. } => {
             let col = [1.0, 0.5, 0.0, 1.0]; // オレンジ
-            let verts: Vec<Vec3> = convex.vertices.iter()
-                .map(|v| Vec3::new(v[0], v[1], v[2]) * HAVOK_SCALE + offset)
+            let verts: Vec<Vec3> = vertices.iter()
+                .map(|v| Vec3::new(v[0], v[1], v[2]) + offset)
                 .collect();
 
-            // 頂点間の接続 (各頂点を近傍頂点と結ぶ)
             for i in 0..verts.len() {
                 for j in (i + 1)..verts.len() {
                     let d = verts[i].distance(verts[j]);
-                    // 一定距離以下の頂点ペアをエッジとして描画 (簡易凸包ワイヤーフレーム)
-                    if d < (convex.radius * HAVOK_SCALE * 4.0).max(10.0) {
+                    if d < 40.0 {
                         add_line(out, verts[i], verts[j], col);
                     }
                 }
             }
         }
-        NifBlock::BhkListShape(list) => {
-            for &child_shape in &list.sub_shapes {
-                if child_shape >= 0 && (child_shape as usize) < nif.blocks.len() {
-                    extract_shape_lines(child_shape as usize, offset, nif, out);
-                }
+        fo3_nif::CollisionShape::Compound(children) => {
+            for child in children {
+                extract_shape_lines(child, offset, out);
             }
         }
-        _ => {}
     }
 }
 

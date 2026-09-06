@@ -21,10 +21,12 @@ struct LightingUniform {
 
 struct ModelUniform {
     world: mat4x4<f32>,
+    specular_color: vec4<f32>,
+    emissive_color: vec4<f32>,
     alpha_test: u32,
     alpha_test_func: u32,
     alpha_threshold: f32,
-    _padding: u32,
+    has_glow_map: u32,
 };
 
 @group(0) @binding(0)
@@ -42,6 +44,8 @@ var t_diffuse: texture_2d<f32>;
 var s_diffuse: sampler;
 @group(2) @binding(2)
 var t_normal: texture_2d<f32>;
+@group(2) @binding(3)
+var t_glow: texture_2d<f32>;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -142,12 +146,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let n_dot_l = max(dot(N, L), 0.0);
         diffuse_light += lighting.dir_light_color.rgb * n_dot_l;
 
-        // Blinn-Phong スペキュラ反射
+        // Blinn-Phong スペキュラ反射 (NiMaterialProperty::glossiness & specular_color)
+        // 参照元: Gamebryo 2.6 NiMaterialProperty, references/nifxml/nif.xml:L4363
         if (n_dot_l > 0.0 && gloss > 0.01) {
             let H = normalize(L + V);
             let n_dot_h = max(dot(N, H), 0.0);
-            let spec = pow(n_dot_h, 32.0) * gloss;
-            specular_light += lighting.dir_light_color.rgb * spec;
+            let glossiness = max(model.specular_color.w, 1.0);
+            let spec = pow(n_dot_h, glossiness) * gloss;
+            specular_light += lighting.dir_light_color.rgb * model.specular_color.rgb * spec;
         }
     }
 
@@ -173,14 +179,23 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             if (n_dot_l > 0.0 && gloss > 0.01) {
                 let H = normalize(L + V);
                 let n_dot_h = max(dot(N, H), 0.0);
-                let spec = pow(n_dot_h, 32.0) * (gloss * atten);
-                specular_light += pl.color_falloff.rgb * spec;
+                let glossiness = max(model.specular_color.w, 1.0);
+                let spec = pow(n_dot_h, glossiness) * (gloss * atten);
+                specular_light += pl.color_falloff.rgb * model.specular_color.rgb * spec;
             }
         }
     }
 
-    // 拡散光と鏡面反射光を合成
-    var lit_rgb = base_color.rgb * diffuse_light + specular_light;
+    // 4. 自己発光 (Emissive & Glow Map Slot 2)
+    // 参照元: references/nifxml/nif.xml:L6307, Gamebryo 2.6 NiMaterialProperty
+    var emissive_light = model.emissive_color.rgb * model.emissive_color.w;
+    if (model.has_glow_map != 0u) {
+        let glow_sample = textureSample(t_glow, s_diffuse, in.uv);
+        emissive_light = glow_sample.rgb * emissive_light;
+    }
+
+    // 拡散光、鏡面反射光、および自己発光を合成 (自己発光は Unlit)
+    var lit_rgb = base_color.rgb * diffuse_light + specular_light + emissive_light;
 
     // 4. フォグ計算
     // 参照元: Gamebryo 2.6 NiFogProperty, references/nifxml/nif.xml: NiFogProperty

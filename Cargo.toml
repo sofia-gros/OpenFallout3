@@ -9,6 +9,7 @@ members = [
     "crates/fo3_render",
     "crates/fo3_viewer",
     "crates/fo3_esm",
+    "crates/fo3_physics",
 ]
 
 [workspace.dependencies]
@@ -22,3 +23,4 @@ winit = "0.30"
 bytemuck = { version = "1.21", features = ["derive"] }
 ddsfile = "0.5"
 pollster = "0.4"
+rapier3d = "0.22"

@@ -35,6 +35,15 @@ impl Subrecord {
         cursor.read_u32::<LittleEndian>()
     }
 
+    /// i32 値として解釈。
+    pub fn as_i32(&self) -> io::Result<i32> {
+        if self.data.len() < 4 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Subrecord too small for i32"));
+        }
+        let mut cursor = Cursor::new(&self.data);
+        cursor.read_i32::<LittleEndian>()
+    }
+
     /// f32 値として解釈。
     pub fn as_f32(&self) -> io::Result<f32> {
         if self.data.len() < 4 {

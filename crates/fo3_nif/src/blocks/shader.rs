@@ -198,6 +198,111 @@ impl NiAlphaProperty {
     }
 }
 
+/// Bethesda 固有の非ライティングシェーダープロパティ。
+/// 主に発光オブジェクト、スカイボックス、UI、特殊エフェクト用。
+///
+/// 参照元:
+/// - `references/nifxml/nif.xml:L6233` (`BSShaderNoLightingProperty`)
+#[derive(Clone, Debug, PartialEq)]
+pub struct BSShaderNoLightingProperty {
+    pub net: NiObjectNET,
+    /// スムースシェーディングフラグ
+    pub shade_flags: u16,
+    pub shader_type: u32,
+    pub shader_flags: u32,
+    pub shader_flags2: u32,
+    pub env_map_scale: f32,
+    pub texture_clamp_mode: u32,
+    /// 発光テクスチャ（Glow Map）ファイルパス
+    pub file_name: String,
+    pub falloff_start_angle: f32,
+    pub falloff_stop_angle: f32,
+    pub falloff_start_opacity: f32,
+    pub falloff_stop_opacity: f32,
+}
+
+impl BSShaderNoLightingProperty {
+    pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let net = NiObjectNET::read(reader)?;
+        let shade_flags = reader.read_u16::<LittleEndian>()?;
+        let shader_type = reader.read_u32::<LittleEndian>()?;
+        let shader_flags = reader.read_u32::<LittleEndian>()?;
+        let shader_flags2 = reader.read_u32::<LittleEndian>()?;
+        let env_map_scale = reader.read_f32::<LittleEndian>()?;
+        let texture_clamp_mode = reader.read_u32::<LittleEndian>()?;
+        let file_name = read_sized_string(reader)?;
+        let falloff_start_angle = reader.read_f32::<LittleEndian>()?;
+        let falloff_stop_angle = reader.read_f32::<LittleEndian>()?;
+        let falloff_start_opacity = reader.read_f32::<LittleEndian>()?;
+        let falloff_stop_opacity = reader.read_f32::<LittleEndian>()?;
+
+        Ok(BSShaderNoLightingProperty {
+            net,
+            shade_flags,
+            shader_type,
+            shader_flags,
+            shader_flags2,
+            env_map_scale,
+            texture_clamp_mode,
+            file_name,
+            falloff_start_angle,
+            falloff_stop_angle,
+            falloff_start_opacity,
+            falloff_stop_opacity,
+        })
+    }
+}
+
+/// ステンシルおよび両面描画制御プロパティ。
+///
+/// 参照元:
+/// - `references/nifxml/nif.xml:L5147` (`NiStencilProperty`)
+/// - `references/nifxml/nif.xml:L1572` (`StencilFlags`)
+#[derive(Clone, Debug, PartialEq)]
+pub struct NiStencilProperty {
+    pub net: NiObjectNET,
+    /// ステンシルフラグ (`StencilFlags`: Bit 0=Enable, Bit 10-11=Draw Mode)
+    pub flags: u16,
+    pub stencil_ref: u32,
+    pub stencil_mask: u32,
+}
+
+impl NiStencilProperty {
+    pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let net = NiObjectNET::read(reader)?;
+        let flags = reader.read_u16::<LittleEndian>()?;
+        let stencil_ref = reader.read_u32::<LittleEndian>()?;
+        let stencil_mask = reader.read_u32::<LittleEndian>()?;
+
+        Ok(NiStencilProperty {
+            net,
+            flags,
+            stencil_ref,
+            stencil_mask,
+        })
+    }
+
+    /// ステンシルテストが有効か判定 (Bit 0)
+    #[inline]
+    pub fn is_stencil_enabled(&self) -> bool {
+        (self.flags & 0x0001) != 0
+    }
+
+    /// 描画モード (Draw Mode: 0=CCW, 1=CW, 2/3=Both/両面)
+    /// 参照元: `references/nifxml/nif.xml:L1578` (`StencilDrawMode`)
+    #[inline]
+    pub fn draw_mode(&self) -> u16 {
+        (self.flags >> 10) & 0x0003
+    }
+
+    /// 両面描画（カリング無効）が指定されているか判定
+    #[inline]
+    pub fn is_double_sided(&self) -> bool {
+        let mode = self.draw_mode();
+        mode == 2 || mode == 3 || mode == 0 // DRAW_BOTH または DRAW_DEFAULT
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
