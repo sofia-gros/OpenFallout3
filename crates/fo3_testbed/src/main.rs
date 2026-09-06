@@ -31,6 +31,7 @@ fn print_usage() {
     println!("  cargo run -p fo3_testbed -- esm-stat <path/to/file.esm> [limit]");
     println!("  cargo run -p fo3_testbed -- esm-cell <path/to/file.esm> <cell_edid>");
     println!("  cargo run -p fo3_testbed -- collision-batch <data_dir> [limit]");
+    println!("  cargo run -p fo3_testbed -- collision-lines <data_dir> <relative/path>");
 }
 
 fn test_nif(nif_path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -200,6 +201,9 @@ fn dump_nif<R: std::io::BufRead>(reader: &mut R, title: &str) -> Result<(), Box<
             }
             NifBlock::BhkConvexVerticesShape(convex) => {
                 println!("Radius: {:.3} 頂点数: {} 法線数: {}", convex.radius, convex.vertices.len(), convex.normals.len());
+                if let (Some(first), Some(last)) = (convex.vertices.first(), convex.vertices.last()) {
+                    println!("          Vert[0]: {:?}, Vert[last]: {:?}", first, last);
+                }
             }
             NifBlock::BhkListShape(list) => {
                 println!("子形状数: {} フィルター数: {}", list.sub_shapes.len(), list.filters.len());
@@ -818,6 +822,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let limit = args.get(3).and_then(|s| s.parse::<usize>().ok()).unwrap_or(100);
             test_collision_batch(&args[2], limit)?;
         }
+        "collision-lines" => {
+            if args.len() < 4 {
+                print_usage();
+                return Ok(());
+            }
+            test_collision_lines(&args[2], &args[3])?;
+        }
         _ => {
             if args[1].ends_with(".nif") {
                 test_nif(&args[1])?;
@@ -954,3 +965,38 @@ fn test_collision_batch(data_dir: &str, limit: usize) -> Result<(), Box<dyn std:
     println!("=== コリジョン一括検証完了 ===");
     Ok(())
 }
+
+/// 指定 NIF から Havok コリジョンワイヤーフレームラインを抽出し検証する。
+fn test_collision_lines(data_dir: &str, relative_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== コリジョンライン抽出検証: {} ===", relative_path);
+    let mut vfs = create_vfs(data_dir)?;
+
+    let bytes = vfs.read(relative_path)?;
+    println!("ファイルサイズ: {} バイト", bytes.len());
+
+    let mut cursor = Cursor::new(bytes);
+    let nif = NifFile::read(&mut cursor)?;
+    println!("ブロック総数: {}", nif.blocks.len());
+
+    let lines = fo3_render::extract_collision_lines(&nif);
+    println!("抽出コリジョンライン頂点数: {} 点 ({} 本の線分)", lines.len(), lines.len() / 2);
+
+    if !lines.is_empty() {
+        let (min, max) = lines.iter().fold(
+            (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
+            |(min, max), v| {
+                let p = Vec3::new(v.position[0], v.position[1], v.position[2]);
+                (min.min(p), max.max(p))
+            },
+        );
+        let size = max - min;
+        println!("コリジョン AABB Min: [{:.3}, {:.3}, {:.3}]", min.x, min.y, min.z);
+        println!("コリジョン AABB Max: [{:.3}, {:.3}, {:.3}]", max.x, max.y, max.z);
+        println!("コリジョン AABB Size: [{:.3}, {:.3}, {:.3}]", size.x, size.y, size.z);
+    } else {
+        println!("警告: コリジョンラインが 0 件でした。コリジョンブロックが存在しないか未対応です。");
+    }
+
+    Ok(())
+}
+

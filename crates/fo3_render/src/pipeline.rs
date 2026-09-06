@@ -6,6 +6,7 @@ use crate::vertex::Vertex;
 
 pub struct RenderContext {
     pub pipeline: wgpu::RenderPipeline,
+    pub collision_pipeline: wgpu::RenderPipeline,
     pub camera_bind_group_layout: wgpu::BindGroupLayout,
     pub model_bind_group_layout: wgpu::BindGroupLayout,
     pub texture_bind_group_layout: wgpu::BindGroupLayout,
@@ -148,8 +149,63 @@ impl RenderContext {
             cache: None,
         });
 
+        let collision_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Collision Line Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("collision_shader.wgsl").into()),
+        });
+
+        let collision_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Collision Pipeline Layout"),
+            bind_group_layouts: &[
+                &camera_bind_group_layout,
+                &model_bind_group_layout,
+            ],
+            push_constant_ranges: &[],
+        });
+
+        let collision_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Collision Line Render Pipeline"),
+            layout: Some(&collision_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &collision_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[crate::collision::CollisionVertex::desc()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &collision_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Self::DEPTH_FORMAT,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
         RenderContext {
             pipeline,
+            collision_pipeline,
             camera_bind_group_layout,
             model_bind_group_layout,
             texture_bind_group_layout,

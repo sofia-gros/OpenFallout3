@@ -12,6 +12,7 @@ use fo3_vfs::VfsManager;
 use glam::Vec3;
 use wgpu::util::DeviceExt;
 
+use crate::collision::{extract_collision_lines, GpuCollisionMesh};
 use crate::mesh::GpuMesh;
 use crate::pipeline::RenderContext;
 use crate::texture::GpuTexture;
@@ -27,6 +28,8 @@ pub struct RenderMesh {
 /// NIF から構築された完全な描画シーン。
 pub struct RenderScene {
     pub meshes: Vec<RenderMesh>,
+    /// Havok コリジョンワイヤーフレームメッシュ群
+    pub collision_meshes: Vec<GpuCollisionMesh>,
     /// シーン全体のバウンディング中心
     pub bounds_center: Vec3,
     /// シーン全体のバウンディング半径
@@ -65,11 +68,19 @@ impl RenderScene {
             );
         }
 
+        // コリジョンワイヤーフレームの抽出
+        let mut collision_meshes = Vec::new();
+        let col_lines = extract_collision_lines(nif);
+        if let Some(gpu_col) = GpuCollisionMesh::new(device, &context.model_bind_group_layout, &col_lines, &root_transform) {
+            collision_meshes.push(gpu_col);
+        }
+
         // バウンディング計算 (簡易 AABB から包含球を概算)
         let (bounds_center, bounds_radius) = calculate_scene_bounds(nif);
 
         RenderScene {
             meshes,
+            collision_meshes,
             bounds_center,
             bounds_radius,
         }
@@ -180,6 +191,7 @@ impl RenderScene {
         }
 
         // 2. 配置された 3D オブジェクト (REFR) の走査と登録
+        let mut collision_meshes = Vec::new();
         for (nif, world_transform) in placed_nifs {
             if !nif.blocks.is_empty() {
                 traverse_block(
@@ -195,6 +207,12 @@ impl RenderScene {
                     &default_texture,
                     &default_normal_texture,
                 );
+
+                // コリジョンワイヤーフレームの抽出
+                let col_lines = extract_collision_lines(nif);
+                if let Some(gpu_col) = GpuCollisionMesh::new(device, &context.model_bind_group_layout, &col_lines, world_transform) {
+                    collision_meshes.push(gpu_col);
+                }
 
                 let mat = world_transform.to_mat4();
                 for block in &nif.blocks {
@@ -235,6 +253,7 @@ impl RenderScene {
 
         RenderScene {
             meshes,
+            collision_meshes,
             bounds_center,
             bounds_radius,
         }
@@ -248,6 +267,16 @@ impl RenderScene {
             render_pass.set_vertex_buffer(0, mesh_node.mesh.vertex_buffer.slice(..));
             render_pass.set_index_buffer(mesh_node.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..mesh_node.mesh.num_elements, 0, 0..1);
+        }
+    }
+
+    /// シーン内のすべての Havok コリジョンワイヤーフレームを描画する。
+    pub fn render_collision<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>, context: &'a RenderContext) {
+        render_pass.set_pipeline(&context.collision_pipeline);
+        for col_mesh in &self.collision_meshes {
+            render_pass.set_bind_group(1, &col_mesh.model_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, col_mesh.vertex_buffer.slice(..));
+            render_pass.draw(0..col_mesh.num_vertices, 0..1);
         }
     }
 }

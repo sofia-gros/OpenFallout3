@@ -27,6 +27,16 @@ bhkPackedNiTriStripsShape (56 bytes)
 hkPackedNiTriStripsData (11 + メッシュバイト)
 ```
 
+### Havok 単位と Gamebryo ゲーム単位のスケール関係
+- 参照元: `references/nifskope/src/gl/gltools.cpp:L327-345` (`hkScale660 = 1.0 / 1.42875 * 10.0 = 6.999125...`)
+- **`bhkPackedNiTriStripsShape` & `hkPackedNiTriStripsData`**:
+  すでにメッシュのローカル座標単位（Gamebryo 単位）で格納されているため、追加のスケール乗算は不要。
+- **プリミティブ・凸包形状 (`bhkBoxShape`, `bhkSphereShape`, `bhkCapsuleShape`, `bhkConvexVerticesShape`)**:
+  Havok の物理単位（メートル）で格納されている。Gamebryo 単位に変換するには **`hkScale660 = 1.0 / 0.142875 ≈ 6.999125`** を乗算する。
+  - 例: 10mmピストルの `bhkConvexVerticesShape` 頂点 X = `2.5614` $\times 6.999125 = 17.927$ GU （実メッシュの Max X = `17.805` GU と完全に一致）。
+- **`bhkRigidBodyT` の変換**:
+  `translation = Vector3(body.translation * hkScale660)`、`rotation = body.rotation`。
+
 ---
 
 ## 2. 各ブロックのバイナリ仕様 (Fallout 3: 20.2.0.7 / BSVER 34)

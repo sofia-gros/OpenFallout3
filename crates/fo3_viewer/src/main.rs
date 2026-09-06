@@ -56,6 +56,7 @@ struct ViewerState {
     clear_color: wgpu::Color,
     depth_view: wgpu::TextureView,
     scene: RenderScene,
+    show_collision: bool,
     // マウス入力状態
     left_mouse_down: bool,
     right_mouse_down: bool,
@@ -347,6 +348,14 @@ impl ViewerState {
             ],
         });
 
+        println!("\n=== 操作ガイド ===");
+        println!("  左ドラッグ:       カメラ回転 (Orbit)");
+        println!("  右ドラッグ:       カメラ平行移動 (Pan)");
+        println!("  ホイール:         ズームイン / アウト");
+        println!("  R キー:           カメラ自動再フォーカス (Reset)");
+        println!("  C キー:           Havok コリジョンワイヤーフレーム重畳表示切替 (Collision ON/OFF)");
+        println!("  Esc キー:         終了\n");
+
         ViewerState {
             window,
             surface,
@@ -364,6 +373,7 @@ impl ViewerState {
             clear_color,
             depth_view,
             scene,
+            show_collision: false,
             left_mouse_down: false,
             right_mouse_down: false,
             last_mouse_pos: None,
@@ -439,6 +449,10 @@ impl ViewerState {
             render_pass.set_pipeline(&self.context.pipeline);
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
             self.scene.render(&mut render_pass);
+
+            if self.show_collision {
+                self.scene.render_collision(&mut render_pass, &self.context);
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -527,6 +541,14 @@ impl ApplicationHandler for App {
                         match key {
                             KeyCode::KeyR => {
                                 state.camera.focus(state.scene.bounds_center, state.scene.bounds_radius);
+                                state.window.request_redraw();
+                            }
+                            KeyCode::KeyC => {
+                                state.show_collision = !state.show_collision;
+                                println!(
+                                    "Havok コリジョンワイヤーフレーム表示: {}",
+                                    if state.show_collision { "ON" } else { "OFF" }
+                                );
                                 state.window.request_redraw();
                             }
                             KeyCode::Escape => {

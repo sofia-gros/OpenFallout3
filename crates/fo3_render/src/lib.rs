@@ -14,6 +14,7 @@ pub mod mesh;
 pub mod texture;
 pub mod camera;
 pub mod lighting;
+pub mod collision;
 pub mod pipeline;
 pub mod scene;
 
@@ -22,5 +23,6 @@ pub use mesh::GpuMesh;
 pub use texture::GpuTexture;
 pub use camera::{CameraUniform, OrbitCamera};
 pub use lighting::{GpuPointLight, LightingUniform, PlacedPointLight};
+pub use collision::{CollisionVertex, GpuCollisionMesh, extract_collision_lines, HAVOK_SCALE};
 pub use pipeline::RenderContext;
 pub use scene::{RenderMesh, RenderScene};
