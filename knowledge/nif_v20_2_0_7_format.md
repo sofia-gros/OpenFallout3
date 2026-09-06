@@ -62,3 +62,69 @@ Fallout 3 (v20.1.0.1以降) では、各ブロック内のノード名やテク�
 
 - **`IndexString` / `string`**: `u32`
   - `Header.Strings[index]` から実際の文字列を取得。
+
+---
+
+## 4. シェーダープロパティの継承チェーンとバイナリレイアウト
+
+`BSShaderPPLightingProperty` (Fallout 3 ピクセルパーピクセルライティング) は以下の順序でシリアライズされます:
+
+1. **`NiObjectNET`**:
+   - `name`: `u32` (IndexString)
+   - `num_extra_data`: `u32`
+   - `extra_data`: `[i32; num_extra_data]` (Ref)
+   - `controller`: `i32` (Ref)
+2. **`NiProperty`**: (追加フィールドなし)
+3. **`NiShadeProperty`**:
+   - `flags`: `u16` (`ShadeFlags`, FO3 では必ず存在)
+4. **`BSShaderProperty`**:
+   - `shader_type`: `u32` (`BSShaderType`, 1 = SHADER_DEFAULT)
+   - `shader_flags`: `u32` (`BSShaderFlags`)
+   - `shader_flags2`: `u32` (`BSShaderFlags2`)
+   - `env_map_scale`: `f32`
+5. **`BSShaderLightingProperty`**:
+   - `texture_clamp_mode`: `u32` (`TexClampMode`)
+6. **`BSShaderPPLightingProperty`**:
+   - `texture_set`: `i32` (`BSShaderTextureSet` へのブロック参照)
+   - `refraction_strength`: `f32`
+   - `refraction_fire_period`: `i32`
+   - `parallax_max_passes`: `f32`
+   - `parallax_scale`: `f32`
+
+---
+
+## 5. ジオメトリデータブロックの構造差異 (`NiTriShapeData` vs `NiTriStripsData`)
+
+Fallout 3 における共通ジオメトリ `NiGeometryData`:
+- `group_id`: `i32`
+- `num_vertices`: `u16`
+- `keep_flags`: `u8`
+- `compress_flags`: `u8`
+- `has_vertices`: `u8` (bool)
+- `vertices`: `[Vector3; num_vertices]`
+- `bs_data_flags`: `u16` (0x1001 など。ビット 0: UV数、ビット 12: タンジェント/バイタンジェント有無)
+- `has_normals`: `u8` (bool)
+- `normals`: `[Vector3; num_vertices]`
+- `tangents` & `bitangents`: `[Vector3; num_vertices]` (bs_data_flags & 0x1000 の場合)
+- `bounding_sphere`: `center: Vector3, radius: f32`
+- `has_vertex_colors`: `u8` (bool)
+- `vertex_colors`: `[Color4; num_vertices]`
+- `uv_sets`: `[[TexCoord; num_vertices]; bs_data_flags & 1]`
+- `consistency_flags`: `u16`
+- `additional_data`: `i32`
+
+### 末尾ポリゴンデータ構造:
+- **`NiTriShapeData`**:
+  - `num_triangles`: `u16`
+  - `num_triangle_points`: `u32`
+  - `has_triangles`: `u8`
+  - `triangles`: `[Triangle(v1, v2, v3: u16); num_triangles]`
+  - `num_match_groups`: `u16`
+  - `match_groups`: 各グループのカウント (`u16`) + 頂点インデックス (`[u16; count]`)
+- **`NiTriStripsData`**:
+  - `num_triangles`: `u16`
+  - `num_strips`: `u16`
+  - `strip_lengths`: `[u16; num_strips]`
+  - `has_points`: `u8`
+  - `strips`: 各ストリップの頂点配列 (`[u16; strip_lengths[i]]`)
+  - **Match Groups は存在しない**（OpenMW `data.cpp:188` に準拠）
