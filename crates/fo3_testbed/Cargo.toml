@@ -1,0 +1,8 @@
+[package]
+name = "fo3_testbed"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fo3_nif = { path = "../fo3_nif" }
+fo3_gamebryo_core = { path = "../fo3_gamebryo_core" }

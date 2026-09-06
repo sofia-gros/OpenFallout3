@@ -1,0 +1,10 @@
+[package]
+name = "fo3_nif"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fo3_gamebryo_core = { path = "../fo3_gamebryo_core" }
+byteorder = { workspace = true }
+thiserror = { workspace = true }
+glam = { workspace = true }

@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+Cargo.lock
+
+# リファレンスリポジトリ（ローカル検索用、本リポジトリにはコミットしない）
+/references/
+
+# テスト・検証用実アセット（大容量ファイル等）
+/assets/
+/test_assets/

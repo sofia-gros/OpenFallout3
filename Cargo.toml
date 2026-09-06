@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/fo3_gamebryo_core",
+    "crates/fo3_nif",
+    "crates/fo3_testbed",
+]
+
+[workspace.dependencies]
+glam = "0.29"
+byteorder = "1.5"
+thiserror = "2.0"
+slotmap = "1.0"
