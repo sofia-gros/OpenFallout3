@@ -149,14 +149,17 @@ impl ViewerState {
                 let model_map = esm_reader.read_all_models_map().expect("Failed to read models map");
                 println!("モデルマップ登録件数: {} 件", model_map.len());
 
-                let (cell, refrs) = esm_reader
+                let (cell, refrs, land) = esm_reader
                     .find_cell_by_edid(cell_edid)
                     .expect("Failed to find cell")
                     .unwrap_or_else(|| panic!("セル \"{}\" が見つかりませんでした", cell_edid));
 
                 println!(
-                    "セル取得成功: \"{}\" (表示名: {:?}, REFR総数: {})",
-                    cell.edid, cell.full_name, refrs.len()
+                    "セル取得成功: \"{}\" (表示名: {:?}, REFR総数: {}, 地形LAND: {})",
+                    cell.edid,
+                    cell.full_name,
+                    refrs.len(),
+                    if land.is_some() { "あり" } else { "なし" }
                 );
 
                 let mut nif_cache: HashMap<String, Arc<NifFile>> = HashMap::new();
@@ -214,7 +217,10 @@ impl ViewerState {
                 );
                 let placed_refs: Vec<(&NifFile, NiTransform)> =
                     placed_items.iter().map(|(n, t)| (n.as_ref(), *t)).collect();
-                RenderScene::from_placed_nifs(&device, &queue, &context, &placed_refs, &mut vfs)
+                let land_info = land.as_ref().and_then(|l| {
+                    cell.grid.map(|(gx, gy)| (l, gx, gy))
+                });
+                RenderScene::from_cell(&device, &queue, &context, &placed_refs, land_info, &mut vfs)
             }
         };
 

@@ -87,6 +87,12 @@ pub const SUB_XSCL: FourCC = FourCC(*b"XSCL");
 pub const SUB_XCLC: FourCC = FourCC(*b"XCLC");
 pub const SUB_XCLL: FourCC = FourCC(*b"XCLL");
 pub const SUB_XXXX: FourCC = FourCC(*b"XXXX");
+pub const SUB_VHGT: FourCC = FourCC(*b"VHGT");
+pub const SUB_VNML: FourCC = FourCC(*b"VNML");
+pub const SUB_VCLR: FourCC = FourCC(*b"VCLR");
+pub const SUB_BTXT: FourCC = FourCC(*b"BTXT");
+pub const SUB_ATXT: FourCC = FourCC(*b"ATXT");
+pub const SUB_VTXT: FourCC = FourCC(*b"VTXT");
 
 /// 32-bit オブジェクト一意識別子 (FormID)。
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]

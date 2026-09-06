@@ -81,6 +81,22 @@ impl RenderScene {
         placed_nifs: &[(&NifFile, NiTransform)],
         vfs: &mut VfsManager,
     ) -> Self {
+        Self::from_cell(device, queue, context, placed_nifs, None, vfs)
+    }
+
+    /// セルの配置オブジェクト群および地形 (LAND) から RenderScene を構築する。
+    ///
+    /// 参照元:
+    /// - `references/openmw/components/esmterrain/` (地形チャンク生成)
+    /// - `references/openmw/components/esm4/loadland.hpp` (LAND レコード仕様)
+    pub fn from_cell(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        context: &RenderContext,
+        placed_nifs: &[(&NifFile, NiTransform)],
+        land_info: Option<(&fo3_esm::LandRecord, i32, i32)>,
+        vfs: &mut VfsManager,
+    ) -> Self {
         let mut meshes = Vec::new();
         let mut texture_cache: HashMap<String, GpuTexture> = HashMap::new();
         let default_texture = GpuTexture::create_default_white(device, queue);
@@ -89,6 +105,74 @@ impl RenderScene {
         let mut max = Vec3::splat(f32::MIN);
         let mut found = false;
 
+        // 1. 地形 (LAND) メッシュの生成と登録
+        if let Some((land, grid_x, grid_y)) = land_info {
+            if let Some(gpu_mesh) = GpuMesh::from_land(device, land, grid_x, grid_y) {
+                // デフォルトの荒野テクスチャをロード
+                let diffuse_path = "textures/landscape/dirtwasteland01.dds";
+                if !texture_cache.contains_key(diffuse_path) {
+                    if let Ok(bytes) = vfs.read(diffuse_path) {
+                        if let Ok(tex) = GpuTexture::from_dds_bytes(device, queue, &bytes, Some(diffuse_path)) {
+                            texture_cache.insert(diffuse_path.to_string(), tex);
+                        }
+                    }
+                }
+                let texture = texture_cache.get(diffuse_path).unwrap_or(&default_texture);
+
+                let model_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Model Uniform Buffer: Landscape"),
+                    contents: bytemuck::cast_slice(&glam::Mat4::IDENTITY.to_cols_array()),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+
+                let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Model Bind Group: Landscape"),
+                    layout: &context.model_bind_group_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: model_uniform_buffer.as_entire_binding(),
+                    }],
+                });
+
+                let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Texture Bind Group: Landscape"),
+                    layout: &context.texture_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&texture.view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&texture.sampler),
+                        },
+                    ],
+                });
+
+                meshes.push(RenderMesh {
+                    name: "Landscape".to_string(),
+                    mesh: gpu_mesh,
+                    model_bind_group,
+                    texture_bind_group,
+                });
+
+                // 地形のバウンディング反映
+                let origin_x = grid_x as f32 * fo3_esm::LAND_REAL_SIZE;
+                let origin_y = grid_y as f32 * fo3_esm::LAND_REAL_SIZE;
+                let heights = land.compute_heights();
+                for &h in &heights {
+                    min.z = min.z.min(h);
+                    max.z = max.z.max(h);
+                }
+                min.x = min.x.min(origin_x);
+                max.x = max.x.max(origin_x + fo3_esm::LAND_REAL_SIZE);
+                min.y = min.y.min(origin_y);
+                max.y = max.y.max(origin_y + fo3_esm::LAND_REAL_SIZE);
+                found = true;
+            }
+        }
+
+        // 2. 配置された 3D オブジェクト (REFR) の走査と登録
         for (nif, world_transform) in placed_nifs {
             if !nif.blocks.is_empty() {
                 traverse_block(

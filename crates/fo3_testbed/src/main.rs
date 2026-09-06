@@ -386,7 +386,7 @@ fn test_esm_cell(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::e
     let result = reader.find_cell_by_edid(target_edid)?;
 
     match result {
-        Some((cell, refrs)) => {
+        Some((cell, refrs, land)) => {
             println!("\n【セル情報】");
             println!("  FormID: {:#010X}", cell.form_id.0);
             println!("  EDID: {}", cell.edid);
@@ -394,6 +394,21 @@ fn test_esm_cell(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::e
             println!("  フラグ: {:#06X} (Interior: {})", cell.cell_flags, cell.is_interior());
             if let Some((x, y)) = cell.grid {
                 println!("  グリッド座標: ({}, {})", x, y);
+            }
+            if let Some(ref l) = land {
+                println!("\n【地形 (LAND) 情報】");
+                println!("  FormID: {:#010X}", l.form_id.0);
+                println!("  標高オフセット: {:.1}", l.height_offset);
+                let heights = l.compute_heights();
+                let (min_h, max_h) = heights.iter().fold(
+                    (f32::INFINITY, f32::NEG_INFINITY),
+                    |(min, max), &h| (min.min(h), max.max(h)),
+                );
+                println!("  復元標高範囲: {:.1} ～ {:.1} (高低差: {:.1})", min_h, max_h, max_h - min_h);
+                println!("  法線データ保持: {}", l.normals.is_some());
+                println!("  頂点色保持: {}", l.vertex_colors.is_some());
+            } else {
+                println!("\n【地形 (LAND) 情報】なし (屋内セルまたは地形非保持)");
             }
 
             println!("\n【配置参照オブジェクト (REFR) 総数: {} 件】", refrs.len());

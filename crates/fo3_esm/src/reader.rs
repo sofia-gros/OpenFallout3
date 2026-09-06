@@ -11,11 +11,11 @@ use flate2::read::ZlibDecoder;
 use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::header::{GroupHeader, RecordHeader};
-use crate::records::{CellRecord, RefrRecord, StatRecord, Tes4Header};
+use crate::records::{CellRecord, LandRecord, RefrRecord, StatRecord, Tes4Header};
 use crate::subrecord::{parse_subrecords, Subrecord};
 use crate::types::{
     FormId, FourCC, REC_ACTI, REC_ALCH, REC_AMMO, REC_ARMO, REC_BOOK, REC_CELL, REC_CONT,
-    REC_DOOR, REC_FURN, REC_KEYM, REC_LIGH, REC_MISC, REC_MSTT, REC_REFR, REC_SCOL, REC_STAT,
+    REC_DOOR, REC_FURN, REC_KEYM, REC_LAND, REC_LIGH, REC_MISC, REC_MSTT, REC_REFR, REC_SCOL, REC_STAT,
     REC_TERM, REC_TES4, REC_WEAP, REC_WRLD, SUB_EDID, SUB_MODL,
 };
 
@@ -273,10 +273,10 @@ impl<R: Read + Seek> EsmReader<R> {
         Ok(map)
     }
 
-    /// 指定された EDID を持つ CELL レコードとその子 REFR レコード群を検索・取得する。
+    /// 指定された EDID を持つ CELL レコード、その子 REFR レコード群、および地形 LAND レコード（存在する場合）を検索・取得する。
     ///
     /// 内部セル（トップレベル CELL グループ）および外部セル（WRLD グループ配下）の双方を走査する。
-    pub fn find_cell_by_edid(&mut self, target_edid: &str) -> io::Result<Option<(CellRecord, Vec<RefrRecord>)>> {
+    pub fn find_cell_by_edid(&mut self, target_edid: &str) -> io::Result<Option<(CellRecord, Vec<RefrRecord>, Option<LandRecord>)>> {
         let start_pos = 24 + self.header_record.data_size as u64;
         self.reader.seek(SeekFrom::Start(start_pos))?;
 
@@ -318,9 +318,10 @@ impl<R: Read + Seek> EsmReader<R> {
         Ok(None)
     }
 
-    fn search_cell_in_stream(&mut self, group_end: u64, target_edid: &str) -> io::Result<Option<(CellRecord, Vec<RefrRecord>)>> {
+    fn search_cell_in_stream(&mut self, group_end: u64, target_edid: &str) -> io::Result<Option<(CellRecord, Vec<RefrRecord>, Option<LandRecord>)>> {
         let mut found_cell: Option<CellRecord> = None;
         let mut refrs = Vec::new();
+        let mut land: Option<LandRecord> = None;
 
         while self.reader.stream_position()? < group_end {
             let entry = match self.read_next_entry()? {
@@ -336,10 +337,10 @@ impl<R: Read + Seek> EsmReader<R> {
                         let group_label_id = u32::from_le_bytes(group.label);
                         // 対象セルの子グループ (CellChildren=6, Persistent=8, Temporary=9)
                         if (group.group_type == 6 || group.group_type == 8 || group.group_type == 9) && group_label_id == cell_id {
-                            self.collect_refrs_in_group(inner_end, &mut refrs)?;
+                            self.collect_children_in_group(inner_end, &mut refrs, &mut land)?;
                         } else {
                             // 子グループを抜けたので終了
-                            return Ok(Some((cell.clone(), refrs)));
+                            return Ok(Some((cell.clone(), refrs, land)));
                         }
                     } else {
                         // まだセルが見つかっていない場合、再帰的に探索
@@ -351,7 +352,7 @@ impl<R: Read + Seek> EsmReader<R> {
                 EsmEntry::Record(header, subrecords) => {
                     if header.type_id == REC_CELL {
                         if let Some(cell) = found_cell.take() {
-                            return Ok(Some((cell, refrs)));
+                            return Ok(Some((cell, refrs, land)));
                         }
 
                         let cell = CellRecord::from_record(&header, &subrecords)?;
@@ -364,13 +365,18 @@ impl<R: Read + Seek> EsmReader<R> {
         }
 
         if let Some(cell) = found_cell {
-            Ok(Some((cell, refrs)))
+            Ok(Some((cell, refrs, land)))
         } else {
             Ok(None)
         }
     }
 
-    fn collect_refrs_in_group(&mut self, group_end: u64, refrs: &mut Vec<RefrRecord>) -> io::Result<()> {
+    fn collect_children_in_group(
+        &mut self,
+        group_end: u64,
+        refrs: &mut Vec<RefrRecord>,
+        land: &mut Option<LandRecord>,
+    ) -> io::Result<()> {
         while self.reader.stream_position()? < group_end {
             let entry = match self.read_next_entry()? {
                 Some(e) => e,
@@ -379,11 +385,15 @@ impl<R: Read + Seek> EsmReader<R> {
             match entry {
                 EsmEntry::Group(group) => {
                     let inner_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
-                    self.collect_refrs_in_group(inner_end, refrs)?;
+                    self.collect_children_in_group(inner_end, refrs, land)?;
                 }
                 EsmEntry::Record(header, subrecords) => {
                     if header.type_id == REC_REFR {
                         refrs.push(RefrRecord::from_record(&header, &subrecords)?);
+                    } else if header.type_id == REC_LAND {
+                        if land.is_none() {
+                            *land = Some(LandRecord::parse(&header, &subrecords)?);
+                        }
                     }
                 }
             }
@@ -596,5 +606,56 @@ mod tests {
         assert_eq!(refr.position, [100.0, 200.0, 300.0]);
         assert_eq!(refr.rotation, [0.1, 0.2, 0.3]);
         assert_eq!(refr.scale, 1.5);
+    }
+
+    #[test]
+    fn test_land_record_parsing_and_heights() {
+        use crate::types::{SUB_DATA, SUB_VHGT};
+        use crate::records::land::{LAND_NUM_VERTS, LAND_VERTS_PER_SIDE};
+
+        let land_header = RecordHeader {
+            type_id: REC_LAND,
+            data_size: 0,
+            flags: 0,
+            form_id: FormId(0x00099999),
+            vc_info: 0,
+            form_version: 15,
+            vc_info2: 0,
+        };
+
+        let mut vhgt_data = Vec::new();
+        // height_offset = 100.0
+        vhgt_data.extend_from_slice(&100.0f32.to_le_bytes());
+        // 1089 個の勾配差分: すべて 1 (i8)
+        let grad = vec![1i8; LAND_NUM_VERTS];
+        for b in grad {
+            vhgt_data.push(b as u8);
+        }
+        // unknown 3 bytes
+        vhgt_data.extend_from_slice(&[0, 0, 0]);
+
+        let land_subs = vec![
+            Subrecord {
+                type_id: SUB_DATA,
+                data: 1u32.to_le_bytes().to_vec(),
+            },
+            Subrecord {
+                type_id: SUB_VHGT,
+                data: vhgt_data,
+            },
+        ];
+
+        let land = LandRecord::parse(&land_header, &land_subs).unwrap();
+        assert_eq!(land.form_id, FormId(0x00099999));
+        assert_eq!(land.height_offset, 100.0);
+        assert_eq!(land.gradient_data.len(), LAND_NUM_VERTS);
+
+        let heights = land.compute_heights();
+        // y=0, x=0: row_offset = 100 + 1 = 101, height = 101 * 8 = 808
+        assert_eq!(heights[0], 808.0);
+        // y=0, x=1: col_offset = 101 + 1 = 102, height = 102 * 8 = 816
+        assert_eq!(heights[1], 816.0);
+        // y=1, x=0: row_offset = 101 + 1 = 102, height = 102 * 8 = 816
+        assert_eq!(heights[LAND_VERTS_PER_SIDE], 816.0);
     }
 }

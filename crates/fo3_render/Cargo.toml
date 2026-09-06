@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 fo3_gamebryo_core = { path = "../fo3_gamebryo_core" }
 fo3_nif = { path = "../fo3_nif" }
+fo3_esm = { path = "../fo3_esm" }
 fo3_vfs = { path = "../fo3_vfs" }
 glam = { workspace = true }
 wgpu = { workspace = true }

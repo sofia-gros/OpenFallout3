@@ -127,6 +127,91 @@ impl GpuMesh {
         Self::create(device, &vertices, &indices)
     }
 
+    /// 地形 (LAND) レコードとセルグリッド座標 (grid_x, grid_y) から GpuMesh を生成する。
+    ///
+    /// 参照元:
+    /// - `references/openmw/components/esm4/loadland.hpp` (LAND_VERTS_PER_SIDE = 33, sRealSize = 4096)
+    /// - `references/openmw/components/esm/esmterrain.cpp:52-71` (標高復元計算式)
+    pub fn from_land(
+        device: &wgpu::Device,
+        land: &fo3_esm::LandRecord,
+        grid_x: i32,
+        grid_y: i32,
+    ) -> Option<Self> {
+        use fo3_esm::{LAND_NUM_VERTS, LAND_REAL_SIZE, LAND_VERTS_PER_SIDE};
+
+        let heights = land.compute_heights();
+        let step = LAND_REAL_SIZE / (LAND_VERTS_PER_SIDE - 1) as f32; // 128.0
+        let origin_x = grid_x as f32 * LAND_REAL_SIZE;
+        let origin_y = grid_y as f32 * LAND_REAL_SIZE;
+
+        let mut vertices = Vec::with_capacity(LAND_NUM_VERTS);
+        for y in 0..LAND_VERTS_PER_SIDE {
+            for x in 0..LAND_VERTS_PER_SIDE {
+                let idx = y * LAND_VERTS_PER_SIDE + x;
+                let wx = origin_x + x as f32 * step;
+                let wy = origin_y + y as f32 * step;
+                let wz = heights[idx];
+
+                let normal = if let Some(ref norms) = land.normals {
+                    if idx < norms.len() {
+                        let n = norms[idx];
+                        [n[0] as f32 / 127.0, n[1] as f32 / 127.0, n[2] as f32 / 127.0]
+                    } else {
+                        [0.0, 0.0, 1.0]
+                    }
+                } else {
+                    [0.0, 0.0, 1.0]
+                };
+
+                let color = if let Some(ref cols) = land.vertex_colors {
+                    if idx < cols.len() {
+                        let c = cols[idx];
+                        [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 1.0]
+                    } else {
+                        [1.0, 1.0, 1.0, 1.0]
+                    }
+                } else {
+                    [1.0, 1.0, 1.0, 1.0]
+                };
+
+                // UV は 1 グリッドあたり複数回タイリング（1マスあたり1回）
+                let uv = [x as f32, y as f32];
+
+                vertices.push(Vertex {
+                    position: [wx, wy, wz],
+                    normal,
+                    uv,
+                    color,
+                });
+            }
+        }
+
+        // 32 x 32 クアッド -> 2048 三角形 (6144 インデックス)
+        let num_quads = LAND_VERTS_PER_SIDE - 1; // 32
+        let mut indices = Vec::with_capacity(num_quads * num_quads * 6);
+        for y in 0..num_quads {
+            for x in 0..num_quads {
+                let i0 = (y * LAND_VERTS_PER_SIDE + x) as u16;
+                let i1 = (y * LAND_VERTS_PER_SIDE + x + 1) as u16;
+                let i2 = ((y + 1) * LAND_VERTS_PER_SIDE + x) as u16;
+                let i3 = ((y + 1) * LAND_VERTS_PER_SIDE + x + 1) as u16;
+
+                // 三角形 1: i0 -> i2 -> i1
+                indices.push(i0);
+                indices.push(i2);
+                indices.push(i1);
+
+                // 三角形 2: i1 -> i2 -> i3
+                indices.push(i1);
+                indices.push(i2);
+                indices.push(i3);
+            }
+        }
+
+        Self::create(device, &vertices, &indices)
+    }
+
     fn create(device: &wgpu::Device, vertices: &[Vertex], indices: &[u16]) -> Option<Self> {
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Mesh Vertex Buffer"),
