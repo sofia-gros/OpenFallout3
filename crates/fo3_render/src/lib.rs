@@ -1,0 +1,24 @@
+//! # fo3_render
+//!
+//! Fallout 3 (Gamebryo 2.6) 向け wgpu レンダリングコアライブラリ。
+//!
+//! - `vertex`: GPU 頂点レイアウト (`Vertex`)
+//! - `mesh`: NIF ジオメトリから GPU バッファへの変換 (`GpuMesh`)
+//! - `texture`: DDS テクスチャ読み込みと GPU アップロード (`GpuTexture`)
+//! - `camera`: Z-up 座標系オービットカメラ (`OrbitCamera`)
+//! - `pipeline`: wgpu パイプライン・シェーダー管理 (`RenderContext`)
+//! - `scene`: NIF シーングラフトラバース & 描画ノード構築 (`RenderScene`)
+
+pub mod vertex;
+pub mod mesh;
+pub mod texture;
+pub mod camera;
+pub mod pipeline;
+pub mod scene;
+
+pub use vertex::Vertex;
+pub use mesh::GpuMesh;
+pub use texture::GpuTexture;
+pub use camera::{CameraUniform, OrbitCamera};
+pub use pipeline::RenderContext;
+pub use scene::{RenderMesh, RenderScene};

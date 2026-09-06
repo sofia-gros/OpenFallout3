@@ -6,6 +6,8 @@ members = [
     "crates/fo3_bsa",
     "crates/fo3_vfs",
     "crates/fo3_testbed",
+    "crates/fo3_render",
+    "crates/fo3_viewer",
 ]
 
 [workspace.dependencies]
@@ -14,3 +16,8 @@ byteorder = "1.5"
 thiserror = "2.0"
 slotmap = "1.0"
 flate2 = "1.0"
+wgpu = "24.0"
+winit = "0.30"
+bytemuck = { version = "1.21", features = ["derive"] }
+ddsfile = "0.5"
+pollster = "0.4"

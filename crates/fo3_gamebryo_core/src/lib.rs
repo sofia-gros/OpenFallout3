@@ -3,7 +3,7 @@
 //! Gamebryo 2.6 の基本データ型、トランスフォーム計算、バウンディングボリュームの定義。
 //! 参照元: Gamebryo 2.6 SDK NiTransform, NiBound, NiAVObject
 
-use glam::{Mat3, Vec3};
+use glam::{Mat3, Mat4, Vec3};
 
 /// Gamebryo 2.6 におけるローカルおよびワールドトランスフォーム。
 ///
@@ -45,6 +45,15 @@ impl NiTransform {
             translation,
             scale,
         }
+    }
+
+    /// GPU シェーダー計算用の 4x4 アフィン変換行列へ変換する。
+    ///
+    /// 式: `T * R * S` (v' = R * (S * v) + T)
+    pub fn to_mat4(&self) -> Mat4 {
+        Mat4::from_translation(self.translation)
+            * Mat4::from_mat3(self.rotation)
+            * Mat4::from_scale(Vec3::splat(self.scale))
     }
 }
 
@@ -100,5 +109,19 @@ mod tests {
         assert_eq!(world.scale, 1.0);
         // T_world = 10.0 + (5.0 * 2.0) = 20.0
         assert_eq!(world.translation, Vec3::new(20.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn test_to_mat4() {
+        let t = NiTransform {
+            rotation: Mat3::IDENTITY,
+            translation: Vec3::new(1.0, 2.0, 3.0),
+            scale: 2.0,
+        };
+        let m = t.to_mat4();
+        let p = glam::Vec4::new(1.0, 1.0, 1.0, 1.0);
+        let transformed = m * p;
+        // p' = S * p + T = 2.0 * [1,1,1] + [1,2,3] = [3, 4, 5]
+        assert_eq!(transformed, glam::Vec4::new(3.0, 4.0, 5.0, 1.0));
     }
 }

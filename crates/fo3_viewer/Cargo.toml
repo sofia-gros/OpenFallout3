@@ -1,0 +1,16 @@
+[package]
+name = "fo3_viewer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fo3_render = { path = "../fo3_render" }
+fo3_gamebryo_core = { path = "../fo3_gamebryo_core" }
+fo3_nif = { path = "../fo3_nif" }
+fo3_bsa = { path = "../fo3_bsa" }
+fo3_vfs = { path = "../fo3_vfs" }
+glam = { workspace = true }
+wgpu = { workspace = true }
+winit = { workspace = true }
+pollster = { workspace = true }
+bytemuck = { workspace = true }

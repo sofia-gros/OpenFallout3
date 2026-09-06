@@ -15,3 +15,4 @@
 - [development_roadmap_openmw_order.md](./development_roadmap_openmw_order.md): OpenMW の歴史的実装順序に学ぶ Fallout 3 開発ロードマップ
 - [bsa_v104_format.md](./bsa_v104_format.md): BSA アーカイブフォーマット (v104 / Fallout 3) 詳細バイナリ仕様
 - [nif_blocks_geometry.md](./nif_blocks_geometry.md): Fallout 3 NIF ジオメトリ & マテリアルブロック詳細バイナリ仕様
+- [rendering_pipeline_and_viewer.md](./rendering_pipeline_and_viewer.md): wgpu レンダリングパイプラインとメッシュビューアーの設計仕様
