@@ -498,6 +498,112 @@ fn scan_records_for_formids(
     Ok(results)
 }
 
+fn test_esm_worlds(esm_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::SeekFrom;
+    use fo3_esm::{EsmEntry, FourCC, GroupHeader};
+
+    println!("=== ESM ワールドスペース (WRLD) 一覧走査: {} ===", esm_path);
+    let mut reader = EsmReader::open(esm_path)?;
+    let start_pos = 24 + reader.header_record.data_size as u64;
+    reader.seek(SeekFrom::Start(start_pos))?;
+
+    let sub_edid = FourCC(*b"EDID");
+    let sub_full = FourCC(*b"FULL");
+    let rec_wrld = FourCC(*b"WRLD");
+
+    while let Some(entry) = reader.read_next_entry()? {
+        match entry {
+            EsmEntry::Group(group) => {
+                let rtype = group.target_record_type();
+                let group_end = reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                if rtype == Some(rec_wrld) {
+                    println!("Top WRLD グループを発見！ワールドスペースを走査中...");
+                    while reader.stream_position()? < group_end {
+                        if let Some(inner) = reader.read_next_entry()? {
+                            match inner {
+                                EsmEntry::Record(header, subrecords) => {
+                                    if header.type_id == rec_wrld {
+                                        let mut edid = String::new();
+                                        let mut full = String::new();
+                                        for s in &subrecords {
+                                            if s.type_id == sub_edid {
+                                                edid = s.as_string();
+                                            } else if s.type_id == sub_full {
+                                                full = s.as_string();
+                                            }
+                                        }
+                                        println!("  WRLD FormID: {:#010X} | EDID: {:<25} | Name: {:?}", header.form_id.0, edid, full);
+                                    }
+                                }
+                                EsmEntry::Group(child_group) => {
+                                    let child_end = reader.stream_position()? + (child_group.group_size as u64 - GroupHeader::SIZE as u64);
+                                    let group_label_id = u32::from_le_bytes(child_group.label);
+                                    // MegatonWorld (0x00000A74) の子グループの場合
+                                    if group_label_id == 0x00000A74 {
+                                        println!("    -> MegatonWorld (0x00000A74) の子グループ発見 (Type: {})", child_group.group_type);
+                                        scan_world_cells(&mut reader, child_end)?;
+                                    } else {
+                                        reader.seek(SeekFrom::Start(child_end))?;
+                                    }
+                                }
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    break;
+                } else {
+                    let rem = group.group_size as u64 - GroupHeader::SIZE as u64;
+                    reader.skip(rem)?;
+                }
+            }
+            EsmEntry::Record(rec, _) => {
+                reader.skip(rec.data_size as u64)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn scan_world_cells<R: std::io::Read + std::io::Seek>(
+    reader: &mut EsmReader<R>,
+    group_end: u64,
+) -> std::io::Result<()> {
+    use fo3_esm::{EsmEntry, FourCC, GroupHeader};
+    let sub_edid = FourCC(*b"EDID");
+    let sub_full = FourCC(*b"FULL");
+    let rec_cell = FourCC(*b"CELL");
+
+    while reader.stream_position()? < group_end {
+        if let Some(entry) = reader.read_next_entry()? {
+            match entry {
+                EsmEntry::Group(group) => {
+                    let inner_end = reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                    scan_world_cells(reader, inner_end)?;
+                }
+                EsmEntry::Record(header, subrecords) => {
+                    if header.type_id == rec_cell {
+                        let mut edid = String::new();
+                        let mut full = String::new();
+                        for s in &subrecords {
+                            if s.type_id == sub_edid {
+                                edid = s.as_string();
+                            } else if s.type_id == sub_full {
+                                full = s.as_string();
+                            }
+                        }
+                        println!("      [CELL] FormID: {:#010X} | EDID: {:<25} | Name: {:?}", header.form_id.0, edid, full);
+                    }
+                }
+            }
+        } else {
+            break;
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
@@ -577,6 +683,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
             test_esm_cell(&args[2], &args[3])?;
+        }
+        "esm-worlds" => {
+            if args.len() < 3 {
+                print_usage();
+                return Ok(());
+            }
+            test_esm_worlds(&args[2])?;
         }
         _ => {
             if args[1].ends_with(".nif") {

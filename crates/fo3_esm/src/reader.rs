@@ -16,7 +16,7 @@ use crate::subrecord::{parse_subrecords, Subrecord};
 use crate::types::{
     FormId, FourCC, REC_ACTI, REC_ALCH, REC_AMMO, REC_ARMO, REC_BOOK, REC_CELL, REC_CONT,
     REC_DOOR, REC_FURN, REC_KEYM, REC_LIGH, REC_MISC, REC_MSTT, REC_REFR, REC_SCOL, REC_STAT,
-    REC_TERM, REC_TES4, REC_WEAP, SUB_EDID, SUB_MODL,
+    REC_TERM, REC_TES4, REC_WEAP, REC_WRLD, SUB_EDID, SUB_MODL,
 };
 
 /// 配置元ベースオブジェクトのメタ情報（モデルパス、エディタID、レコード型）。
@@ -274,18 +274,29 @@ impl<R: Read + Seek> EsmReader<R> {
     }
 
     /// 指定された EDID を持つ CELL レコードとその子 REFR レコード群を検索・取得する。
+    ///
+    /// 内部セル（トップレベル CELL グループ）および外部セル（WRLD グループ配下）の双方を走査する。
     pub fn find_cell_by_edid(&mut self, target_edid: &str) -> io::Result<Option<(CellRecord, Vec<RefrRecord>)>> {
         let start_pos = 24 + self.header_record.data_size as u64;
         self.reader.seek(SeekFrom::Start(start_pos))?;
 
-        // 1. トップレベルの CELL グループを見つける
-        let mut cell_group_end = 0u64;
+        // 1. トップレベルの CELL グループ内を走査
+        let mut wrld_group_start = 0u64;
+        let mut wrld_group_size = 0u64;
+
         while let Some(entry) = self.read_next_entry()? {
             match entry {
                 EsmEntry::Group(group) => {
-                    if group.target_record_type() == Some(REC_CELL) {
-                        cell_group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
-                        break;
+                    let rtype = group.target_record_type();
+                    let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                    if rtype == Some(REC_CELL) {
+                        if let Some(res) = self.search_cell_in_stream(group_end, target_edid)? {
+                            return Ok(Some(res));
+                        }
+                    } else if rtype == Some(REC_WRLD) {
+                        wrld_group_start = self.reader.stream_position()?;
+                        wrld_group_size = group.group_size as u64 - GroupHeader::SIZE as u64;
+                        self.skip(wrld_group_size)?;
                     } else {
                         let rem = group.group_size as u64 - GroupHeader::SIZE as u64;
                         self.skip(rem)?;
@@ -297,12 +308,14 @@ impl<R: Read + Seek> EsmReader<R> {
             }
         }
 
-        if cell_group_end == 0 {
-            return Ok(None);
+        // 2. CELL グループで見つからなかった場合、WRLD グループ内（外部セル）を走査
+        if wrld_group_start > 0 {
+            self.reader.seek(SeekFrom::Start(wrld_group_start))?;
+            let wrld_end = wrld_group_start + wrld_group_size;
+            return self.search_cell_in_stream(wrld_end, target_edid);
         }
 
-        // 2. CELL グループ内を再帰走査して target_edid に一致する CELL とその REFR を探す
-        self.search_cell_in_stream(cell_group_end, target_edid)
+        Ok(None)
     }
 
     fn search_cell_in_stream(&mut self, group_end: u64, target_edid: &str) -> io::Result<Option<(CellRecord, Vec<RefrRecord>)>> {
