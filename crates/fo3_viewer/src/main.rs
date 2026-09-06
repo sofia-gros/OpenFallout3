@@ -57,6 +57,8 @@ struct ViewerState {
     depth_view: wgpu::TextureView,
     scene: RenderScene,
     show_collision: bool,
+    enable_fog: bool,
+    headlight: bool,
     // マウス入力状態
     left_mouse_down: bool,
     right_mouse_down: bool,
@@ -283,25 +285,26 @@ impl ViewerState {
 
                 let clear_color = if let Some(ref cl) = cell.lighting {
                     if cl.fog_far > 0.0 {
+                        // 背景（クリアカラー）を暗めのトーンにして、フォグ環境下でもメッシュのシルエットが確実に視認できるようにする
                         wgpu::Color {
-                            r: (cl.fog_color[0] as f64) / 255.0,
-                            g: (cl.fog_color[1] as f64) / 255.0,
-                            b: (cl.fog_color[2] as f64) / 255.0,
+                            r: (cl.fog_color[0] as f64) / 255.0 * 0.25,
+                            g: (cl.fog_color[1] as f64) / 255.0 * 0.25,
+                            b: (cl.fog_color[2] as f64) / 255.0 * 0.25,
                             a: 1.0,
                         }
                     } else {
                         wgpu::Color {
-                            r: (cl.ambient[0] as f64) / 255.0 * 0.5,
-                            g: (cl.ambient[1] as f64) / 255.0 * 0.5,
-                            b: (cl.ambient[2] as f64) / 255.0 * 0.5,
+                            r: (cl.ambient[0] as f64) / 255.0 * 0.4,
+                            g: (cl.ambient[1] as f64) / 255.0 * 0.4,
+                            b: (cl.ambient[2] as f64) / 255.0 * 0.4,
                             a: 1.0,
                         }
                     }
                 } else {
                     wgpu::Color {
-                        r: 0.1,
-                        g: 0.12,
-                        b: 0.15,
+                        r: 0.08,
+                        g: 0.09,
+                        b: 0.11,
                         a: 1.0,
                     }
                 };
@@ -327,6 +330,21 @@ impl ViewerState {
             camera.target, camera.distance
         );
 
+        // カメラ距離がフォグ Far 距離を超えている場合（全体俯瞰時）、メッシュがフォグに完全に埋没するのを防ぐため初期状態でフォグを OFF に設定
+        let enable_fog = if let Some(ref cl) = cell_lighting {
+            if cl.fog_far > 0.0 && camera.distance > cl.fog_far {
+                println!(
+                    "注記: カメラ距離 ({:.1}) がセルフォグ Far ({:.1}) を超えているため、初期状態でフォグを無効化しています (F キーでフォグ表示切替)。",
+                    camera.distance, cl.fog_far
+                );
+                false
+            } else {
+                true
+            }
+        } else {
+            false
+        };
+
         let camera_uniform = camera.build_uniform();
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
@@ -334,8 +352,14 @@ impl ViewerState {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        let mut initial_cell_lighting = cell_lighting.clone();
+        if !enable_fog {
+            if let Some(ref mut cl) = initial_cell_lighting {
+                cl.fog_far = 0.0;
+            }
+        }
         let initial_lighting = LightingUniform::from_cell_lighting(
-            cell_lighting.as_ref(),
+            initial_cell_lighting.as_ref(),
             &placed_lights,
             camera.eye_position(),
         );
@@ -366,6 +390,8 @@ impl ViewerState {
         println!("  ホイール:         ズームイン / アウト");
         println!("  R キー:           カメラ自動再フォーカス (Reset)");
         println!("  C キー:           Havok コリジョンワイヤーフレーム重畳表示切替 (Collision ON/OFF)");
+        println!("  F キー:           セル環境フォグ表示切替 (Fog ON/OFF)");
+        println!("  L キー:           ビューア補助ヘッドライト切替 (Light ON/OFF)");
         println!("  Esc キー:         終了\n");
 
         ViewerState {
@@ -386,6 +412,8 @@ impl ViewerState {
             depth_view,
             scene,
             show_collision: false,
+            enable_fog,
+            headlight: false,
             left_mouse_down: false,
             right_mouse_down: false,
             last_mouse_pos: None,
@@ -415,9 +443,27 @@ impl ViewerState {
             bytemuck::cast_slice(&[uniform]),
         );
 
+        let mut current_lighting = self.cell_lighting.clone();
+        if !self.enable_fog {
+            if let Some(ref mut cl) = current_lighting {
+                cl.fog_far = 0.0;
+            }
+        }
+
+        let mut lights = self.placed_lights.clone();
+        if self.headlight {
+            // カメラ位置に配置するビューア補助ヘッドライト
+            lights.push(PlacedPointLight {
+                position: self.camera.eye_position(),
+                radius: self.camera.distance * 2.0 + 2000.0,
+                color: [1.0, 0.98, 0.95],
+                falloff: 1.0,
+            });
+        }
+
         let light_uniform = LightingUniform::from_cell_lighting(
-            self.cell_lighting.as_ref(),
-            &self.placed_lights,
+            current_lighting.as_ref(),
+            &lights,
             self.camera.eye_position(),
         );
         self.queue.write_buffer(
@@ -559,6 +605,22 @@ impl ApplicationHandler for App {
                                 println!(
                                     "Havok コリジョンワイヤーフレーム表示: {}",
                                     if state.show_collision { "ON" } else { "OFF" }
+                                );
+                                state.window.request_redraw();
+                            }
+                            KeyCode::KeyF => {
+                                state.enable_fog = !state.enable_fog;
+                                println!(
+                                    "セル環境フォグ表示: {}",
+                                    if state.enable_fog { "ON" } else { "OFF" }
+                                );
+                                state.window.request_redraw();
+                            }
+                            KeyCode::KeyL => {
+                                state.headlight = !state.headlight;
+                                println!(
+                                    "ビューア補助ヘッドライト: {}",
+                                    if state.headlight { "ON" } else { "OFF" }
                                 );
                                 state.window.request_redraw();
                             }
