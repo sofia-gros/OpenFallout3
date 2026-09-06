@@ -11,7 +11,7 @@ use flate2::read::ZlibDecoder;
 use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::header::{GroupHeader, RecordHeader};
-use crate::records::{CellRecord, LandRecord, RefrRecord, StatRecord, Tes4Header};
+use crate::records::{CellRecord, LandRecord, LightRecord, RefrRecord, StatRecord, Tes4Header};
 use crate::subrecord::{parse_subrecords, Subrecord};
 use crate::types::{
     FormId, FourCC, REC_ACTI, REC_ALCH, REC_AMMO, REC_ARMO, REC_BOOK, REC_CELL, REC_CONT,
@@ -208,6 +208,59 @@ impl<R: Read + Seek> EsmReader<R> {
         let mut map = HashMap::with_capacity(stats.len());
         for stat in stats {
             map.insert(stat.form_id, stat);
+        }
+        Ok(map)
+    }
+
+    /// LIGH グループ内の全 LightRecord を走査して取得する。
+    pub fn read_light_records(&mut self, limit: Option<usize>) -> io::Result<Vec<LightRecord>> {
+        let start_pos = 24 + self.header_record.data_size as u64;
+        self.reader.seek(SeekFrom::Start(start_pos))?;
+
+        let mut lights = Vec::new();
+
+        while let Some(entry) = self.read_next_entry()? {
+            match entry {
+                EsmEntry::Group(group) => {
+                    if group.target_record_type() == Some(REC_LIGH) {
+                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        while self.reader.stream_position()? < group_end {
+                            if let Some(inner) = self.read_next_entry()? {
+                                if let EsmEntry::Record(header, subrecords) = inner {
+                                    if header.type_id == REC_LIGH {
+                                        lights.push(LightRecord::from_record(&header, &subrecords)?);
+                                        if let Some(lim) = limit {
+                                            if lights.len() >= lim {
+                                                return Ok(lights);
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        return Ok(lights);
+                    } else {
+                        let remaining = group.group_size as u64 - GroupHeader::SIZE as u64;
+                        self.skip(remaining)?;
+                    }
+                }
+                EsmEntry::Record(rec, _) => {
+                    self.skip(rec.data_size as u64)?;
+                }
+            }
+        }
+
+        Ok(lights)
+    }
+
+    /// 全 LIGH レコードを FormId をキーとする HashMap として読み出す。
+    pub fn read_light_map(&mut self) -> io::Result<HashMap<FormId, LightRecord>> {
+        let lights = self.read_light_records(None)?;
+        let mut map = HashMap::with_capacity(lights.len());
+        for light in lights {
+            map.insert(light.form_id, light);
         }
         Ok(map)
     }

@@ -18,10 +18,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use fo3_bsa::BsaArchive;
-use fo3_esm::EsmReader;
+use fo3_esm::{CellLighting, EsmReader};
 use fo3_gamebryo_core::NiTransform;
 use fo3_nif::NifFile;
-use fo3_render::{OrbitCamera, RenderContext, RenderScene};
+use fo3_render::{LightingUniform, OrbitCamera, PlacedPointLight, RenderContext, RenderScene};
 use fo3_vfs::VfsManager;
 use pollster::FutureExt;
 use wgpu::util::DeviceExt;
@@ -50,6 +50,10 @@ struct ViewerState {
     camera: OrbitCamera,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    lighting_buffer: wgpu::Buffer,
+    cell_lighting: Option<CellLighting>,
+    placed_lights: Vec<PlacedPointLight>,
+    clear_color: wgpu::Color,
     depth_view: wgpu::TextureView,
     scene: RenderScene,
     // マウス入力状態
@@ -132,14 +136,25 @@ impl ViewerState {
         }
 
         // 表示ターゲットに応じたシーンの構築
-        let scene = match target {
+        let (scene, cell_lighting, placed_lights, clear_color) = match target {
             ViewerTarget::Mesh(nif_path) => {
                 println!("VFS から NIF ファイルを取得中: {}", nif_path);
                 let nif_bytes = vfs.read(nif_path).expect("Failed to read NIF from VFS");
                 let mut cursor = Cursor::new(nif_bytes);
                 let nif_file = NifFile::read(&mut cursor).expect("Failed to parse NIF");
                 println!("NIF パース成功 (ブロック数: {})。GPU シーンを構築中...", nif_file.blocks.len());
-                RenderScene::from_nif(&device, &queue, &context, &nif_file, &mut vfs)
+                let scene = RenderScene::from_nif(&device, &queue, &context, &nif_file, &mut vfs);
+                (
+                    scene,
+                    None,
+                    Vec::new(),
+                    wgpu::Color {
+                        r: 0.1,
+                        g: 0.12,
+                        b: 0.15,
+                        a: 1.0,
+                    },
+                )
             }
             ViewerTarget::Cell(cell_edid) => {
                 println!("ESM からセル \"{}\" を検索中...", cell_edid);
@@ -148,6 +163,8 @@ impl ViewerState {
                 println!("3D モデル保持レコード (STAT, SCOL, DOOR, ACTI, FURN, etc.) を一括走査中...");
                 let model_map = esm_reader.read_all_models_map().expect("Failed to read models map");
                 println!("モデルマップ登録件数: {} 件", model_map.len());
+                let light_map = esm_reader.read_light_map().unwrap_or_default();
+                println!("光源レコード (LIGHT) 登録件数: {} 件", light_map.len());
 
                 let (cell, refrs, land) = esm_reader
                     .find_cell_by_edid(cell_edid)
@@ -162,11 +179,39 @@ impl ViewerState {
                     if land.is_some() { "あり" } else { "なし" }
                 );
 
+                if let Some(ref cl) = cell.lighting {
+                    println!(
+                        "セル環境光 (XCLL): Ambient=[{}, {}, {}], Directional=[{}, {}, {}], Fog=[{}, {}, {}], Near={:.0}, Far={:.0}",
+                        cl.ambient[0], cl.ambient[1], cl.ambient[2],
+                        cl.directional[0], cl.directional[1], cl.directional[2],
+                        cl.fog_color[0], cl.fog_color[1], cl.fog_color[2],
+                        cl.fog_near, cl.fog_far
+                    );
+                }
+
                 let mut nif_cache: HashMap<String, Arc<NifFile>> = HashMap::new();
                 let mut placed_items: Vec<(Arc<NifFile>, NiTransform)> = Vec::new();
+                let mut placed_lights: Vec<PlacedPointLight> = Vec::new();
                 let mut skipped_markers = 0;
 
                 for refr in &refrs {
+                    // 配置点光源の収集 (LIGHT レコード)
+                    if let Some(light_rec) = light_map.get(&refr.base_object) {
+                        let pos = glam::Vec3::new(refr.position[0], refr.position[1], refr.position[2]);
+                        let r = light_rec.colour[0] as f32 / 255.0;
+                        let g = light_rec.colour[1] as f32 / 255.0;
+                        let b = light_rec.colour[2] as f32 / 255.0;
+                        let radius = if light_rec.radius > 0 { light_rec.radius as f32 } else { 500.0 };
+                        let falloff = if light_rec.falloff > 0.01 { light_rec.falloff } else { 1.0 };
+                        placed_lights.push(PlacedPointLight {
+                            position: pos,
+                            radius,
+                            color: [r, g, b],
+                            falloff,
+                        });
+                    }
+
+                    // 配置メッシュの収集
                     if let Some(obj_info) = model_map.get(&refr.base_object) {
                         if obj_info.model.is_empty() {
                             continue;
@@ -211,16 +256,44 @@ impl ViewerState {
                 }
 
                 println!(
-                    "配置メッシュロード完了: {} 件 (マーカー/エフェクト除外: {} 件)。GPU シーン構築中...",
+                    "配置メッシュロード完了: {} 件 (マーカー/エフェクト除外: {} 件), 点光源: {} 灯。GPU シーン構築中...",
                     placed_items.len(),
-                    skipped_markers
+                    skipped_markers,
+                    placed_lights.len()
                 );
                 let placed_refs: Vec<(&NifFile, NiTransform)> =
                     placed_items.iter().map(|(n, t)| (n.as_ref(), *t)).collect();
                 let land_info = land.as_ref().and_then(|l| {
                     cell.grid.map(|(gx, gy)| (l, gx, gy))
                 });
-                RenderScene::from_cell(&device, &queue, &context, &placed_refs, land_info, &mut vfs)
+                let scene = RenderScene::from_cell(&device, &queue, &context, &placed_refs, land_info, &mut vfs);
+
+                let clear_color = if let Some(ref cl) = cell.lighting {
+                    if cl.fog_far > 0.0 {
+                        wgpu::Color {
+                            r: (cl.fog_color[0] as f64) / 255.0,
+                            g: (cl.fog_color[1] as f64) / 255.0,
+                            b: (cl.fog_color[2] as f64) / 255.0,
+                            a: 1.0,
+                        }
+                    } else {
+                        wgpu::Color {
+                            r: (cl.ambient[0] as f64) / 255.0 * 0.5,
+                            g: (cl.ambient[1] as f64) / 255.0 * 0.5,
+                            b: (cl.ambient[2] as f64) / 255.0 * 0.5,
+                            a: 1.0,
+                        }
+                    }
+                } else {
+                    wgpu::Color {
+                        r: 0.1,
+                        g: 0.12,
+                        b: 0.15,
+                        a: 1.0,
+                    }
+                };
+
+                (scene, cell.lighting, placed_lights, clear_color)
             }
         };
 
@@ -248,13 +321,30 @@ impl ViewerState {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        let initial_lighting = LightingUniform::from_cell_lighting(
+            cell_lighting.as_ref(),
+            &placed_lights,
+            camera.eye_position(),
+        );
+        let lighting_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Lighting Buffer"),
+            contents: bytemuck::cast_slice(&[initial_lighting]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Camera Bind Group"),
+            label: Some("Camera & Lighting Bind Group"),
             layout: &context.camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: lighting_buffer.as_entire_binding(),
+                },
+            ],
         });
 
         ViewerState {
@@ -268,6 +358,10 @@ impl ViewerState {
             camera,
             camera_buffer,
             camera_bind_group,
+            lighting_buffer,
+            cell_lighting,
+            placed_lights,
+            clear_color,
             depth_view,
             scene,
             left_mouse_down: false,
@@ -298,6 +392,17 @@ impl ViewerState {
             0,
             bytemuck::cast_slice(&[uniform]),
         );
+
+        let light_uniform = LightingUniform::from_cell_lighting(
+            self.cell_lighting.as_ref(),
+            &self.placed_lights,
+            self.camera.eye_position(),
+        );
+        self.queue.write_buffer(
+            &self.lighting_buffer,
+            0,
+            bytemuck::cast_slice(&[light_uniform]),
+        );
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -315,12 +420,7 @@ impl ViewerState {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.12,
-                            b: 0.15,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(self.clear_color),
                         store: wgpu::StoreOp::Store,
                     },
                 })],

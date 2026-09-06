@@ -18,7 +18,7 @@ pub use types::{FormId, FourCC, ObjectBounds};
 pub use header::{GroupHeader, RecordHeader, SubrecordHeader};
 pub use subrecord::Subrecord;
 pub use records::{
-    CellRecord, LandRecord, RefrRecord, StatRecord, Tes4Header,
+    CellLighting, CellRecord, LandRecord, LightRecord, RefrRecord, StatRecord, Tes4Header,
     LAND_HEIGHT_SCALE, LAND_NUM_VERTS, LAND_REAL_SIZE, LAND_VERTS_PER_SIDE,
 };
 pub use reader::{BaseObjectInfo, EsmEntry, EsmReader};

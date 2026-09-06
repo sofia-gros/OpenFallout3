@@ -451,6 +451,10 @@ fn test_esm_cell(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::e
     let model_map = reader.read_all_models_map()?;
     println!("モデル登録総件数: {} 件", model_map.len());
 
+    println!("全 LIGHT レコードのマップを構築中...");
+    let light_map = reader.read_light_map()?;
+    println!("光源レコード登録総件数: {} 件", light_map.len());
+
     println!("セル \"{}\" を探索中...", target_edid);
     let result = reader.find_cell_by_edid(target_edid)?;
 
@@ -463,6 +467,16 @@ fn test_esm_cell(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::e
             println!("  フラグ: {:#06X} (Interior: {})", cell.cell_flags, cell.is_interior());
             if let Some((x, y)) = cell.grid {
                 println!("  グリッド座標: ({}, {})", x, y);
+            }
+            if let Some(ref lgt) = cell.lighting {
+                println!("\n【セル環境照明 (XCLL)】");
+                println!("  環境光 (Ambient):      RGBA({:?})", lgt.ambient);
+                println!("  指向性光 (Directional): RGBA({:?}) | RotXY: {}, RotZ: {}", lgt.directional, lgt.rotation_xy, lgt.rotation_z);
+                println!("  フォグ色 (Fog):         RGBA({:?}) | Near: {:.1}, Far: {:.1}, Clip: {:.1}, Power: {:.2}", lgt.fog_color, lgt.fog_near, lgt.fog_far, lgt.fog_clip_dist, lgt.fog_power);
+            } else if let Some(ltmp) = cell.lighting_template {
+                println!("\n【セル環境照明】テンプレート参照 FormID: {:#010X} (Flags: {:?})", ltmp.0, cell.lighting_template_flags);
+            } else {
+                println!("\n【セル環境照明 (XCLL)】なし (デフォルト屋外光または天候制御)");
             }
             if let Some(ref l) = land {
                 println!("\n【地形 (LAND) 情報】");
@@ -482,8 +496,13 @@ fn test_esm_cell(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::e
 
             println!("\n【配置参照オブジェクト (REFR) 総数: {} 件】", refrs.len());
             let mut resolved_count = 0;
+            let mut light_count = 0;
             for (i, refr) in refrs.iter().enumerate() {
-                let model_info = if let Some(info) = model_map.get(&refr.base_object) {
+                let model_info = if let Some(light) = light_map.get(&refr.base_object) {
+                    resolved_count += 1;
+                    light_count += 1;
+                    format!("LIGHT: \"{}\" -> 半径: {}, 色: RGBA({:?}){}", light.edid, light.radius, light.colour, light.model.as_deref().map(|m| format!(" [Mesh: {}]", m)).unwrap_or_default())
+                } else if let Some(info) = model_map.get(&refr.base_object) {
                     resolved_count += 1;
                     format!("{}: \"{}\" -> {}", info.record_type, info.edid, info.model)
                 } else {
@@ -504,7 +523,7 @@ fn test_esm_cell(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::e
                     println!("  ... (中略: 残り {} 件) ...", refrs.len().saturating_sub(35));
                 }
             }
-            println!("\n3D モデル解決数: {} / {}", resolved_count, refrs.len());
+            println!("\n3D オブジェクト解決数: {} / {} (うち配置光源 LIGHT: {} 件)", resolved_count, refrs.len(), light_count);
             let mut unresolved_set = std::collections::BTreeSet::new();
             for refr in &refrs {
                 if !model_map.contains_key(&refr.base_object) {

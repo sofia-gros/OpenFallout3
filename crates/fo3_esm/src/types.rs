@@ -70,6 +70,7 @@ pub const REC_REFR: FourCC = FourCC(*b"REFR");
 pub const REC_ACHR: FourCC = FourCC(*b"ACHR");
 pub const REC_LAND: FourCC = FourCC(*b"LAND");
 pub const REC_NAVM: FourCC = FourCC(*b"NAVM");
+pub const REC_LGTM: FourCC = FourCC(*b"LGTM");
 
 pub const SUB_EDID: FourCC = FourCC(*b"EDID");
 pub const SUB_HEDR: FourCC = FourCC(*b"HEDR");
@@ -86,6 +87,8 @@ pub const SUB_NAME: FourCC = FourCC(*b"NAME");
 pub const SUB_XSCL: FourCC = FourCC(*b"XSCL");
 pub const SUB_XCLC: FourCC = FourCC(*b"XCLC");
 pub const SUB_XCLL: FourCC = FourCC(*b"XCLL");
+pub const SUB_LTMP: FourCC = FourCC(*b"LTMP");
+pub const SUB_LNAM: FourCC = FourCC(*b"LNAM");
 pub const SUB_XXXX: FourCC = FourCC(*b"XXXX");
 pub const SUB_VHGT: FourCC = FourCC(*b"VHGT");
 pub const SUB_VNML: FourCC = FourCC(*b"VNML");
