@@ -91,19 +91,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (model.alpha_test != 0u) {
         let alpha = base_color.a;
         let ref_val = model.alpha_threshold;
-        var pass: bool = true;
+        var test_passed: bool = true;
         switch (model.alpha_test_func) {
-            case 0u: { pass = true; } // TEST_ALWAYS
-            case 1u: { pass = alpha < ref_val; } // TEST_LESS
-            case 2u: { pass = abs(alpha - ref_val) < 0.0039; } // TEST_EQUAL (1/256 許容)
-            case 3u: { pass = alpha <= ref_val; } // TEST_LESS_EQUAL
-            case 4u: { pass = alpha > ref_val; } // TEST_GREATER (標準カットアウト)
-            case 5u: { pass = abs(alpha - ref_val) >= 0.0039; } // TEST_NOT_EQUAL
-            case 6u: { pass = alpha >= ref_val; } // TEST_GREATER_EQUAL
-            case 7u: { pass = false; } // TEST_NEVER
-            default: { pass = true; }
+            case 0u: { test_passed = true; } // TEST_ALWAYS
+            case 1u: { test_passed = alpha < ref_val; } // TEST_LESS
+            case 2u: { test_passed = abs(alpha - ref_val) < 0.0039; } // TEST_EQUAL (1/256 許容)
+            case 3u: { test_passed = alpha <= ref_val; } // TEST_LESS_EQUAL
+            case 4u: { test_passed = alpha > ref_val; } // TEST_GREATER (標準カットアウト)
+            case 5u: { test_passed = abs(alpha - ref_val) >= 0.0039; } // TEST_NOT_EQUAL
+            case 6u: { test_passed = alpha >= ref_val; } // TEST_GREATER_EQUAL
+            case 7u: { test_passed = false; } // TEST_NEVER
+            default: { test_passed = true; }
         }
-        if (!pass) {
+        if (!test_passed) {
             discard;
         }
     }

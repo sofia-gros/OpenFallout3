@@ -318,3 +318,32 @@ impl RenderContext {
         texture.create_view(&wgpu::TextureViewDescriptor::default())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    /// WGSL シェーダーの構文バリデーションテスト。
+    /// 予約語や構文エラーをコンパイル時・CI時に即座に検知する。
+    #[test]
+    fn test_shader_wgsl_validity() {
+        let shader_src = include_str!("shader.wgsl");
+        let parse_res = wgpu::naga::front::wgsl::parse_str(shader_src);
+        assert!(
+            parse_res.is_ok(),
+            "shader.wgsl の構文検証エラー: {:?}",
+            parse_res.err()
+        );
+    }
+
+    /// コリジョンライン描画用 WGSL シェーダーの構文バリデーションテスト。
+    #[test]
+    fn test_collision_shader_wgsl_validity() {
+        let shader_src = include_str!("collision_shader.wgsl");
+        let parse_res = wgpu::naga::front::wgsl::parse_str(shader_src);
+        assert!(
+            parse_res.is_ok(),
+            "collision_shader.wgsl の構文検証エラー: {:?}",
+            parse_res.err()
+        );
+    }
+}
+
