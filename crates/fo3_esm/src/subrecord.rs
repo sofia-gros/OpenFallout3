@@ -44,6 +44,35 @@ impl Subrecord {
         cursor.read_f32::<LittleEndian>()
     }
 
+    /// u16 値として解釈。
+    pub fn as_u16(&self) -> io::Result<u16> {
+        if self.data.len() < 2 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Subrecord too small for u16"));
+        }
+        let mut cursor = Cursor::new(&self.data);
+        cursor.read_u16::<LittleEndian>()
+    }
+
+    /// FormId 値として解釈。
+    pub fn as_form_id(&self) -> io::Result<crate::types::FormId> {
+        self.as_u32().map(crate::types::FormId)
+    }
+
+    /// DATA サブレコードから位置とオイラー角回転 (pos [f32; 3], rot [f32; 3]) を取得 (24 bytes)。
+    pub fn as_pos_rot(&self) -> io::Result<([f32; 3], [f32; 3])> {
+        if self.data.len() < 24 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Subrecord too small for pos/rot DATA"));
+        }
+        let mut cursor = Cursor::new(&self.data);
+        let px = cursor.read_f32::<LittleEndian>()?;
+        let py = cursor.read_f32::<LittleEndian>()?;
+        let pz = cursor.read_f32::<LittleEndian>()?;
+        let rx = cursor.read_f32::<LittleEndian>()?;
+        let ry = cursor.read_f32::<LittleEndian>()?;
+        let rz = cursor.read_f32::<LittleEndian>()?;
+        Ok(([px, py, pz], [rx, ry, rz]))
+    }
+
     /// OBND 境界ボックス ([i16; 3] x 2) として解釈。
     pub fn as_bounds(&self) -> io::Result<ObjectBounds> {
         if self.data.len() < 12 {

@@ -5,7 +5,7 @@
 //! - `types`: 4文字シグネチャ (`FourCC`)、`FormId`、境界ボックス (`ObjectBounds`)
 //! - `header`: 24 バイトレコードヘッダー (`RecordHeader`)、グループヘッダー (`GroupHeader`)
 //! - `subrecord`: サブレコード (`Subrecord`)、`XXXX` 巨大サイズ対応パーサー
-//! - `records`: 各種レコード実装 (`Tes4Header`, `StatRecord`)
+//! - `records`: 各種レコード実装 (`Tes4Header`, `StatRecord`, `CellRecord`, `RefrRecord`)
 //! - `reader`: ESM ファイル走査・zlib 解凍リーダー (`EsmReader`)
 
 pub mod types;
@@ -17,5 +17,5 @@ pub mod reader;
 pub use types::{FormId, FourCC, ObjectBounds};
 pub use header::{GroupHeader, RecordHeader, SubrecordHeader};
 pub use subrecord::Subrecord;
-pub use records::{StatRecord, Tes4Header};
+pub use records::{CellRecord, RefrRecord, StatRecord, Tes4Header};
 pub use reader::{EsmEntry, EsmReader};

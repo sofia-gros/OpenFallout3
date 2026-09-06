@@ -47,8 +47,8 @@ impl Default for OrbitCamera {
             yaw: -FRAC_PI_2,
             fov_y: 60.0_f32.to_radians(),
             aspect: 16.0 / 9.0,
-            z_near: 0.1,
-            z_far: 10000.0,
+            z_near: 1.0,
+            z_far: 100000.0,
         }
     }
 }
@@ -120,7 +120,7 @@ impl OrbitCamera {
         } else if delta < 0.0 {
             self.distance *= zoom_factor;
         }
-        self.distance = self.distance.clamp(1.0, 5000.0);
+        self.distance = self.distance.clamp(1.0, 100000.0);
     }
 
     /// カメラの注視点をスクリーン平面に沿ってパン移動。

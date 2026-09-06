@@ -1,18 +1,25 @@
 //! # fo3_viewer
 //!
-//! Fallout 3 NIF 単体メッシュビューアー (winit + wgpu)。
+//! Fallout 3 メッシュ & セルシーンビューアー (winit + wgpu)。
 //!
 //! 使用法:
-//!   cargo run -p fo3_viewer -- <data_dir> <nif_relative_path>
+//!   - NIF 単体表示: `cargo run -p fo3_viewer -- <data_dir> <nif_relative_path>`
+//!   - セル一括表示: `cargo run -p fo3_viewer -- cell <data_dir> <cell_edid>`
+//!
 //! 例:
-//!   cargo run -p fo3_viewer -- "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "meshes\weapons\1handpistol\10mmpistol.nif"
+//!   `cargo run -p fo3_viewer -- "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "meshes\weapons\1handpistol\10mmpistol.nif"`
+//!   `cargo run -p fo3_viewer -- cell "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "Vault101a"`
+//!   `cargo run -p fo3_viewer -- cell "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "MegatonCommonHouse"`
 
+use std::collections::HashMap;
 use std::env;
 use std::io::Cursor;
 use std::path::Path;
 use std::sync::Arc;
 
 use fo3_bsa::BsaArchive;
+use fo3_esm::EsmReader;
+use fo3_gamebryo_core::NiTransform;
 use fo3_nif::NifFile;
 use fo3_render::{OrbitCamera, RenderContext, RenderScene};
 use fo3_vfs::VfsManager;
@@ -24,6 +31,13 @@ use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
+
+/// ビューアーの表示対象。
+#[derive(Clone, Debug)]
+enum ViewerTarget {
+    Mesh(String),
+    Cell(String),
+}
 
 struct ViewerState {
     window: Arc<Window>,
@@ -45,7 +59,7 @@ struct ViewerState {
 }
 
 impl ViewerState {
-    async fn new(window: Arc<Window>, data_dir: &str, nif_path: &str) -> Self {
+    async fn new(window: Arc<Window>, data_dir: &str, target: &ViewerTarget) -> Self {
         let size = window.inner_size();
         let width = size.width.max(1);
         let height = size.height.max(1);
@@ -98,7 +112,7 @@ impl ViewerState {
         let context = RenderContext::new(&device, surface_format);
         let depth_view = RenderContext::create_depth_texture(&device, width, height);
 
-        // VFS の初期化と NIF の読み込み
+        // VFS の初期化
         let mut vfs = VfsManager::new();
         let data_p = Path::new(data_dir);
         vfs.add_loose_root(data_p);
@@ -117,14 +131,90 @@ impl ViewerState {
             }
         }
 
-        println!("VFS から NIF ファイルを取得中: {}", nif_path);
-        let nif_bytes = vfs.read(nif_path).expect("Failed to read NIF from VFS");
-        let mut cursor = Cursor::new(nif_bytes);
-        let nif_file = NifFile::read(&mut cursor).expect("Failed to parse NIF");
-        println!("NIF パース成功 (ブロック数: {})。GPU シーンを構築中...", nif_file.blocks.len());
+        // 表示ターゲットに応じたシーンの構築
+        let scene = match target {
+            ViewerTarget::Mesh(nif_path) => {
+                println!("VFS から NIF ファイルを取得中: {}", nif_path);
+                let nif_bytes = vfs.read(nif_path).expect("Failed to read NIF from VFS");
+                let mut cursor = Cursor::new(nif_bytes);
+                let nif_file = NifFile::read(&mut cursor).expect("Failed to parse NIF");
+                println!("NIF パース成功 (ブロック数: {})。GPU シーンを構築中...", nif_file.blocks.len());
+                RenderScene::from_nif(&device, &queue, &context, &nif_file, &mut vfs)
+            }
+            ViewerTarget::Cell(cell_edid) => {
+                println!("ESM からセル \"{}\" を検索中...", cell_edid);
+                let esm_path = data_p.join("Fallout3.esm");
+                let mut esm_reader = EsmReader::open(&esm_path).expect("Failed to open Fallout3.esm");
+                println!("STAT レコードマップをロード中...");
+                let stat_map = esm_reader.read_stat_map().expect("Failed to read STAT map");
 
-        let scene = RenderScene::from_nif(&device, &queue, &context, &nif_file, &mut vfs);
+                let (cell, refrs) = esm_reader
+                    .find_cell_by_edid(cell_edid)
+                    .expect("Failed to find cell")
+                    .unwrap_or_else(|| panic!("セル \"{}\" が見つかりませんでした", cell_edid));
+
+                println!(
+                    "セル取得成功: \"{}\" (表示名: {:?}, REFR総数: {})",
+                    cell.edid, cell.full_name, refrs.len()
+                );
+
+                let mut nif_cache: HashMap<String, Arc<NifFile>> = HashMap::new();
+                let mut placed_items: Vec<(Arc<NifFile>, NiTransform)> = Vec::new();
+
+                for refr in &refrs {
+                    if let Some(stat) = stat_map.get(&refr.base_object) {
+                        if stat.model.is_empty() {
+                            continue;
+                        }
+                        let model_key = stat.model.to_ascii_lowercase();
+                        let nif = if let Some(n) = nif_cache.get(&model_key) {
+                            n.clone()
+                        } else {
+                            let mesh_path = if model_key.starts_with("meshes\\") || model_key.starts_with("meshes/") {
+                                stat.model.clone()
+                            } else {
+                                format!("meshes\\{}", stat.model)
+                            };
+                            match vfs.read(&mesh_path) {
+                                Ok(bytes) => {
+                                    let mut cursor = Cursor::new(bytes);
+                                    match NifFile::read(&mut cursor) {
+                                        Ok(parsed) => {
+                                            let arc = Arc::new(parsed);
+                                            nif_cache.insert(model_key, arc.clone());
+                                            arc
+                                        }
+                                        Err(_) => continue,
+                                    }
+                                }
+                                Err(_) => continue,
+                            }
+                        };
+
+                        let pos = glam::Vec3::new(refr.position[0], refr.position[1], refr.position[2]);
+                        let rot = glam::Vec3::new(refr.rotation[0], refr.rotation[1], refr.rotation[2]);
+                        let world_transform = NiTransform::from_euler_xyz(pos, rot, refr.scale);
+                        placed_items.push((nif, world_transform));
+                    }
+                }
+
+                println!(
+                    "配置可能メッシュロード完了: {} 件。GPU シーン構築中...",
+                    placed_items.len()
+                );
+                let placed_refs: Vec<(&NifFile, NiTransform)> =
+                    placed_items.iter().map(|(n, t)| (n.as_ref(), *t)).collect();
+                RenderScene::from_placed_nifs(&device, &queue, &context, &placed_refs, &mut vfs)
+            }
+        };
+
         println!("GPU シーン構築完了: {} メッシュノード描画準備完了", scene.meshes.len());
+
+        let title = match target {
+            ViewerTarget::Mesh(path) => format!("OpenFallout3 - Mesh: {}", path),
+            ViewerTarget::Cell(edid) => format!("OpenFallout3 - Cell: {}", edid),
+        };
+        window.set_title(&title);
 
         // カメラの初期化（シーン全体のバウンディングに自動フォーカス）
         let aspect = width as f32 / height as f32;
@@ -210,9 +300,9 @@ impl ViewerState {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.15,
-                            g: 0.18,
-                            b: 0.22,
+                            r: 0.1,
+                            g: 0.12,
+                            b: 0.15,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -226,13 +316,12 @@ impl ViewerState {
                     }),
                     stencil_ops: None,
                 }),
-                occlusion_query_set: None,
                 timestamp_writes: None,
+                occlusion_query_set: None,
             });
 
             render_pass.set_pipeline(&self.context.pipeline);
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-
             self.scene.render(&mut render_pass);
         }
 
@@ -245,7 +334,7 @@ impl ViewerState {
 
 struct App {
     data_dir: String,
-    nif_path: String,
+    target: ViewerTarget,
     state: Option<ViewerState>,
 }
 
@@ -253,12 +342,12 @@ impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.state.is_none() {
             let window_attributes = Window::default_attributes()
-                .with_title(format!("OpenFallout3 Mesh Viewer - {}", self.nif_path))
+                .with_title("OpenFallout3 Viewer")
                 .with_inner_size(PhysicalSize::new(1280, 720));
             let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
-
-            let state = ViewerState::new(window, &self.data_dir, &self.nif_path).block_on();
+            let state = ViewerState::new(window.clone(), &self.data_dir, &self.target).block_on();
             self.state = Some(state);
+            window.request_redraw();
         }
     }
 
@@ -282,18 +371,15 @@ impl ApplicationHandler for App {
                     Ok(_) => {}
                     Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
                     Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
-                    Err(e) => eprintln!("Render error: {:?}", e),
+                    Err(e) => eprintln!("レンダリングエラー: {:?}", e),
                 }
             }
             WindowEvent::MouseInput { button, state: btn_state, .. } => {
-                let is_pressed = btn_state == ElementState::Pressed;
+                let pressed = btn_state == ElementState::Pressed;
                 match button {
-                    MouseButton::Left => state.left_mouse_down = is_pressed,
-                    MouseButton::Right => state.right_mouse_down = is_pressed,
+                    MouseButton::Left => state.left_mouse_down = pressed,
+                    MouseButton::Right => state.right_mouse_down = pressed,
                     _ => {}
-                }
-                if !is_pressed && !state.left_mouse_down && !state.right_mouse_down {
-                    state.last_mouse_pos = None;
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -344,19 +430,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         println!("使用法:");
-        println!("  cargo run -p fo3_viewer -- <DataDir> <RelativeNifPath>");
+        println!("  - メッシュ単体表示: cargo run -p fo3_viewer -- <DataDir> <RelativeNifPath>");
+        println!("  - セル一括表示:     cargo run -p fo3_viewer -- cell <DataDir> <CellEDID>");
         println!("例:");
         println!("  cargo run -p fo3_viewer -- \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" \"meshes\\weapons\\1handpistol\\10mmpistol.nif\"");
+        println!("  cargo run -p fo3_viewer -- cell \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" \"Vault101a\"");
+        println!("  cargo run -p fo3_viewer -- cell \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" \"MegatonCommonHouse\"");
         return Ok(());
     }
 
-    let data_dir = args[1].clone();
-    let nif_path = args[2].clone();
+    let (data_dir, target) = if args[1] == "cell" {
+        if args.len() < 4 {
+            eprintln!("エラー: セル表示モードには <DataDir> と <CellEDID> が必要です。");
+            return Ok(());
+        }
+        (args[2].clone(), ViewerTarget::Cell(args[3].clone()))
+    } else {
+        (args[1].clone(), ViewerTarget::Mesh(args[2].clone()))
+    };
 
     let event_loop = EventLoop::new()?;
     let mut app = App {
         data_dir,
-        nif_path,
+        target,
         state: None,
     };
 

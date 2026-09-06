@@ -3,6 +3,7 @@
 //! ESM ファイルの逐次走査、グループトラバース、zlib 圧縮レコードの展開を担当。
 //! 参照元: `references/openmw/components/esm4/reader.cpp`
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
@@ -10,9 +11,9 @@ use flate2::read::ZlibDecoder;
 use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::header::{GroupHeader, RecordHeader};
-use crate::records::{StatRecord, Tes4Header};
+use crate::records::{CellRecord, RefrRecord, StatRecord, Tes4Header};
 use crate::subrecord::{parse_subrecords, Subrecord};
-use crate::types::{REC_STAT, REC_TES4};
+use crate::types::{FormId, REC_CELL, REC_REFR, REC_STAT, REC_TES4};
 
 /// ESM ファイルのエントリ（レコードまたはグループ）。
 #[derive(Debug)]
@@ -177,6 +178,121 @@ impl<R: Read + Seek> EsmReader<R> {
 
         Ok(stats)
     }
+
+    /// 全 STAT レコードを FormId をキーとする HashMap として読み出す。
+    pub fn read_stat_map(&mut self) -> io::Result<HashMap<FormId, StatRecord>> {
+        let stats = self.read_stat_records(None)?;
+        let mut map = HashMap::with_capacity(stats.len());
+        for stat in stats {
+            map.insert(stat.form_id, stat);
+        }
+        Ok(map)
+    }
+
+    /// 指定された EDID を持つ CELL レコードとその子 REFR レコード群を検索・取得する。
+    pub fn find_cell_by_edid(&mut self, target_edid: &str) -> io::Result<Option<(CellRecord, Vec<RefrRecord>)>> {
+        let start_pos = 24 + self.header_record.data_size as u64;
+        self.reader.seek(SeekFrom::Start(start_pos))?;
+
+        // 1. トップレベルの CELL グループを見つける
+        let mut cell_group_end = 0u64;
+        while let Some(entry) = self.read_next_entry()? {
+            match entry {
+                EsmEntry::Group(group) => {
+                    if group.target_record_type() == Some(REC_CELL) {
+                        cell_group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        break;
+                    } else {
+                        let rem = group.group_size as u64 - GroupHeader::SIZE as u64;
+                        self.skip(rem)?;
+                    }
+                }
+                EsmEntry::Record(rec, _) => {
+                    self.skip(rec.data_size as u64)?;
+                }
+            }
+        }
+
+        if cell_group_end == 0 {
+            return Ok(None);
+        }
+
+        // 2. CELL グループ内を再帰走査して target_edid に一致する CELL とその REFR を探す
+        self.search_cell_in_stream(cell_group_end, target_edid)
+    }
+
+    fn search_cell_in_stream(&mut self, group_end: u64, target_edid: &str) -> io::Result<Option<(CellRecord, Vec<RefrRecord>)>> {
+        let mut found_cell: Option<CellRecord> = None;
+        let mut refrs = Vec::new();
+
+        while self.reader.stream_position()? < group_end {
+            let entry = match self.read_next_entry()? {
+                Some(e) => e,
+                None => break,
+            };
+
+            match entry {
+                EsmEntry::Group(group) => {
+                    let inner_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                    if let Some(ref cell) = found_cell {
+                        let cell_id = cell.form_id.0;
+                        let group_label_id = u32::from_le_bytes(group.label);
+                        // 対象セルの子グループ (CellChildren=6, Persistent=8, Temporary=9)
+                        if (group.group_type == 6 || group.group_type == 8 || group.group_type == 9) && group_label_id == cell_id {
+                            self.collect_refrs_in_group(inner_end, &mut refrs)?;
+                        } else {
+                            // 子グループを抜けたので終了
+                            return Ok(Some((cell.clone(), refrs)));
+                        }
+                    } else {
+                        // まだセルが見つかっていない場合、再帰的に探索
+                        if let Some(result) = self.search_cell_in_stream(inner_end, target_edid)? {
+                            return Ok(Some(result));
+                        }
+                    }
+                }
+                EsmEntry::Record(header, subrecords) => {
+                    if header.type_id == REC_CELL {
+                        if let Some(cell) = found_cell.take() {
+                            return Ok(Some((cell, refrs)));
+                        }
+
+                        let cell = CellRecord::from_record(&header, &subrecords)?;
+                        if cell.edid.eq_ignore_ascii_case(target_edid) {
+                            found_cell = Some(cell);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(cell) = found_cell {
+            Ok(Some((cell, refrs)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn collect_refrs_in_group(&mut self, group_end: u64, refrs: &mut Vec<RefrRecord>) -> io::Result<()> {
+        while self.reader.stream_position()? < group_end {
+            let entry = match self.read_next_entry()? {
+                Some(e) => e,
+                None => break,
+            };
+            match entry {
+                EsmEntry::Group(group) => {
+                    let inner_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                    self.collect_refrs_in_group(inner_end, refrs)?;
+                }
+                EsmEntry::Record(header, subrecords) => {
+                    if header.type_id == REC_REFR {
+                        refrs.push(RefrRecord::from_record(&header, &subrecords)?);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -308,5 +424,80 @@ mod tests {
         } else {
             panic!("Expected record");
         }
+    }
+
+    #[test]
+    fn test_cell_and_refr_parsing() {
+        use crate::types::{SUB_DATA, SUB_EDID, SUB_NAME, SUB_XSCL};
+
+        // 1. CELL レコードのパーステスト
+        let cell_header = RecordHeader {
+            type_id: REC_CELL,
+            data_size: 0,
+            flags: 0,
+            form_id: FormId(0x00012345),
+            vc_info: 0,
+            form_version: 15,
+            vc_info2: 0,
+        };
+        let cell_subs = vec![
+            Subrecord {
+                type_id: SUB_EDID,
+                data: b"TestCell01\0".to_vec(),
+            },
+            Subrecord {
+                type_id: SUB_DATA,
+                data: vec![0x01, 0x00], // Interior flag
+            },
+        ];
+        let cell = CellRecord::from_record(&cell_header, &cell_subs).unwrap();
+        assert_eq!(cell.form_id, FormId(0x00012345));
+        assert_eq!(cell.edid, "TestCell01");
+        assert!(cell.is_interior());
+
+        // 2. REFR レコードのパーステスト
+        let refr_header = RecordHeader {
+            type_id: REC_REFR,
+            data_size: 0,
+            flags: 0,
+            form_id: FormId(0x0006789A),
+            vc_info: 0,
+            form_version: 15,
+            vc_info2: 0,
+        };
+        let mut data_bytes = Vec::new();
+        // pos: [100.0, 200.0, 300.0]
+        data_bytes.extend_from_slice(&100.0f32.to_le_bytes());
+        data_bytes.extend_from_slice(&200.0f32.to_le_bytes());
+        data_bytes.extend_from_slice(&300.0f32.to_le_bytes());
+        // rot: [0.1, 0.2, 0.3]
+        data_bytes.extend_from_slice(&0.1f32.to_le_bytes());
+        data_bytes.extend_from_slice(&0.2f32.to_le_bytes());
+        data_bytes.extend_from_slice(&0.3f32.to_le_bytes());
+
+        let refr_subs = vec![
+            Subrecord {
+                type_id: SUB_EDID,
+                data: b"TestRefr01\0".to_vec(),
+            },
+            Subrecord {
+                type_id: SUB_NAME,
+                data: 0x000ABCDEu32.to_le_bytes().to_vec(),
+            },
+            Subrecord {
+                type_id: SUB_DATA,
+                data: data_bytes,
+            },
+            Subrecord {
+                type_id: SUB_XSCL,
+                data: 1.5f32.to_le_bytes().to_vec(),
+            },
+        ];
+        let refr = RefrRecord::from_record(&refr_header, &refr_subs).unwrap();
+        assert_eq!(refr.form_id, FormId(0x0006789A));
+        assert_eq!(refr.base_object, FormId(0x000ABCDE));
+        assert_eq!(refr.position, [100.0, 200.0, 300.0]);
+        assert_eq!(refr.rotation, [0.1, 0.2, 0.3]);
+        assert_eq!(refr.scale, 1.5);
     }
 }

@@ -29,6 +29,23 @@ impl Default for NiTransform {
 }
 
 impl NiTransform {
+    /// 3軸オイラー角 (rx, ry, rz: ラジアン)、位置、スケールから NiTransform を構築する。
+    ///
+    /// 回転行列合成順序: `R = R_z(rz) * R_y(ry) * R_x(rx)`
+    /// 参照元: `references/nifskope/src/gl/glcontroller.cpp:489`, `references/nifskope/src/data/niftypes.h:961`
+    pub fn from_euler_xyz(pos: Vec3, rot: Vec3, scale: f32) -> Self {
+        let rx = Mat3::from_rotation_x(rot.x);
+        let ry = Mat3::from_rotation_y(rot.y);
+        let rz = Mat3::from_rotation_z(rot.z);
+        let rotation = rz * ry * rx;
+
+        NiTransform {
+            rotation,
+            translation: pos,
+            scale,
+        }
+    }
+
     /// 親トランスフォームとローカルトランスフォームを合成し、ワールドトランスフォームを計算する。
     ///
     /// 計算規則 (Gamebryo 2.6 `NiAVObject::UpdateDownwardPass` に完全準拠):

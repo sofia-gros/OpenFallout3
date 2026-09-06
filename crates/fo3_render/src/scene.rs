@@ -73,6 +73,81 @@ impl RenderScene {
         }
     }
 
+    /// 複数の配置済み NIF インスタンスとワールド変換から RenderScene を構築。
+    pub fn from_placed_nifs(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        context: &RenderContext,
+        placed_nifs: &[(&NifFile, NiTransform)],
+        vfs: &mut VfsManager,
+    ) -> Self {
+        let mut meshes = Vec::new();
+        let mut texture_cache: HashMap<String, GpuTexture> = HashMap::new();
+        let default_texture = GpuTexture::create_default_white(device, queue);
+
+        let mut min = Vec3::splat(f32::MAX);
+        let mut max = Vec3::splat(f32::MIN);
+        let mut found = false;
+
+        for (nif, world_transform) in placed_nifs {
+            if !nif.blocks.is_empty() {
+                traverse_block(
+                    0,
+                    world_transform,
+                    nif,
+                    vfs,
+                    device,
+                    queue,
+                    context,
+                    &mut meshes,
+                    &mut texture_cache,
+                    &default_texture,
+                );
+
+                let mat = world_transform.to_mat4();
+                for block in &nif.blocks {
+                    match block {
+                        NifBlock::NiTriShapeData(d) => {
+                            for v in &d.common.vertices {
+                                let local_p = glam::Vec4::new(v.x, v.y, v.z, 1.0);
+                                let wp = mat * local_p;
+                                let p = Vec3::new(wp.x, wp.y, wp.z);
+                                min = min.min(p);
+                                max = max.max(p);
+                                found = true;
+                            }
+                        }
+                        NifBlock::NiTriStripsData(d) => {
+                            for v in &d.common.vertices {
+                                let local_p = glam::Vec4::new(v.x, v.y, v.z, 1.0);
+                                let wp = mat * local_p;
+                                let p = Vec3::new(wp.x, wp.y, wp.z);
+                                min = min.min(p);
+                                max = max.max(p);
+                                found = true;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        let (bounds_center, bounds_radius) = if found {
+            let center = (min + max) * 0.5;
+            let radius = (max - min).length() * 0.5;
+            (center, radius.max(10.0))
+        } else {
+            (Vec3::ZERO, 100.0)
+        };
+
+        RenderScene {
+            meshes,
+            bounds_center,
+            bounds_radius,
+        }
+    }
+
     /// シーン内のすべてのメッシュを描画する。
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
         for mesh_node in &self.meshes {

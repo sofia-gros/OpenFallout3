@@ -28,6 +28,7 @@ fn print_usage() {
     println!("  cargo run -p fo3_testbed -- esm-header <path/to/file.esm>");
     println!("  cargo run -p fo3_testbed -- esm-groups <path/to/file.esm>");
     println!("  cargo run -p fo3_testbed -- esm-stat <path/to/file.esm> [limit]");
+    println!("  cargo run -p fo3_testbed -- esm-cell <path/to/file.esm> <cell_edid>");
 }
 
 fn test_nif(nif_path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -358,6 +359,64 @@ fn test_esm_stat(esm_path: &str, limit: Option<usize>) -> Result<(), Box<dyn std
     Ok(())
 }
 
+fn test_esm_cell(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== ESM セル検索 & REFR 抽出検証: セル \"{}\" ({}) ===", target_edid, esm_path);
+
+    let mut reader = EsmReader::open(esm_path)?;
+
+    println!("STAT レコードマップを構築中...");
+    let stat_map = reader.read_stat_map()?;
+    println!("STAT レコード登録件数: {} 件", stat_map.len());
+
+    println!("セル \"{}\" を探索中...", target_edid);
+    let result = reader.find_cell_by_edid(target_edid)?;
+
+    match result {
+        Some((cell, refrs)) => {
+            println!("\n【セル情報】");
+            println!("  FormID: {:#010X}", cell.form_id.0);
+            println!("  EDID: {}", cell.edid);
+            println!("  表示名: {:?}", cell.full_name);
+            println!("  フラグ: {:#06X} (Interior: {})", cell.cell_flags, cell.is_interior());
+            if let Some((x, y)) = cell.grid {
+                println!("  グリッド座標: ({}, {})", x, y);
+            }
+
+            println!("\n【配置参照オブジェクト (REFR) 総数: {} 件】", refrs.len());
+            let mut stat_count = 0;
+            for (i, refr) in refrs.iter().enumerate() {
+                let model_info = if let Some(stat) = stat_map.get(&refr.base_object) {
+                    stat_count += 1;
+                    format!("STAT: \"{}\" -> {}", stat.edid, stat.model)
+                } else {
+                    format!("Base: {:#010X}", refr.base_object.0)
+                };
+
+                if i < 30 || i >= refrs.len().saturating_sub(5) {
+                    println!(
+                        "  [{:03}] FormID: {:#010X} | Pos: [{:>8.1}, {:>8.1}, {:>8.1}] | Rot: [{:>5.2}, {:>5.2}, {:>5.2}] | Scale: {:.2} | {}",
+                        i,
+                        refr.form_id.0,
+                        refr.position[0], refr.position[1], refr.position[2],
+                        refr.rotation[0], refr.rotation[1], refr.rotation[2],
+                        refr.scale,
+                        model_info
+                    );
+                } else if i == 30 {
+                    println!("  ... (中略: 残り {} 件) ...", refrs.len().saturating_sub(35));
+                }
+            }
+            println!("\nSTAT オブジェクト参照数: {} / {}", stat_count, refrs.len());
+            println!("セル検証完了！");
+        }
+        None => {
+            println!("セル \"{}\" は見つかりませんでした。", target_edid);
+        }
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
@@ -430,6 +489,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             let limit = args.get(3).and_then(|s| s.parse::<usize>().ok());
             test_esm_stat(&args[2], limit)?;
+        }
+        "esm-cell" => {
+            if args.len() < 4 {
+                print_usage();
+                return Ok(());
+            }
+            test_esm_cell(&args[2], &args[3])?;
         }
         _ => {
             if args[1].ends_with(".nif") {

@@ -67,6 +67,10 @@ pub const SUB_MODL: FourCC = FourCC(*b"MODL");
 pub const SUB_MODB: FourCC = FourCC(*b"MODB");
 pub const SUB_MODT: FourCC = FourCC(*b"MODT");
 pub const SUB_FULL: FourCC = FourCC(*b"FULL");
+pub const SUB_NAME: FourCC = FourCC(*b"NAME");
+pub const SUB_XSCL: FourCC = FourCC(*b"XSCL");
+pub const SUB_XCLC: FourCC = FourCC(*b"XCLC");
+pub const SUB_XCLL: FourCC = FourCC(*b"XCLL");
 pub const SUB_XXXX: FourCC = FourCC(*b"XXXX");
 
 /// 32-bit オブジェクト一意識別子 (FormID)。

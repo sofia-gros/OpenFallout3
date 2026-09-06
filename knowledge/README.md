@@ -17,3 +17,4 @@
 - [nif_blocks_geometry.md](./nif_blocks_geometry.md): Fallout 3 NIF ジオメトリ & マテリアルブロック詳細バイナリ仕様
 - [rendering_pipeline_and_viewer.md](./rendering_pipeline_and_viewer.md): wgpu レンダリングパイプラインとメッシュビューアーの設計仕様
 - [esm_file_format.md](./esm_file_format.md): Fallout 3 ESM / ESP ファイルフォーマット詳細バイナリ仕様
+- [esm_cell_refr.md](./esm_cell_refr.md): Fallout 3 CELL & REFR レコード・シーン配置バイナリ仕様
