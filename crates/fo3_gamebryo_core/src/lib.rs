@@ -31,15 +31,32 @@ impl Default for NiTransform {
 impl NiTransform {
     /// 3軸オイラー角 (rx, ry, rz: ラジアン)、位置、スケールから NiTransform を構築する。
     ///
-    /// ESM 内の REFR に記録されたオイラー角回転は、Gamebryo / Bethesda のワールド描画変換において
-    /// 各軸の符号を反転（マイナス）して適用する。
-    /// 回転行列合成順序: `R = R_z(-rz) * R_y(-ry) * R_x(-rx)`
-    /// 参照元: `references/openmw/apps/opencs/view/render/object.cpp:165-168`, `references/nifskope/src/gl/glcontroller.cpp:489`
+    /// 回転行列合成式: Gamebryo 2.6 / NifSkope `Matrix::fromEuler` に完全準拠。
+    /// 式: `R = R_x(rx) * R_y(ry) * R_z(rz)`
+    /// 参照元: `references/nifskope/src/data/niftypes.cpp:223` (`Matrix::fromEuler`), `references/nifskope/src/data/niftypes.h:961`
     pub fn from_euler_xyz(pos: Vec3, rot: Vec3, scale: f32) -> Self {
-        let rx = Mat3::from_rotation_x(-rot.x);
-        let ry = Mat3::from_rotation_y(-rot.y);
-        let rz = Mat3::from_rotation_z(-rot.z);
-        let rotation = rz * ry * rx;
+        let (sin_x, cos_x) = rot.x.sin_cos();
+        let (sin_y, cos_y) = rot.y.sin_cos();
+        let (sin_z, cos_z) = rot.z.sin_cos();
+
+        let m00 = cos_y * cos_z;
+        let m01 = -cos_y * sin_z;
+        let m02 = sin_y;
+
+        let m10 = sin_x * sin_y * cos_z + sin_z * cos_x;
+        let m11 = cos_x * cos_z - sin_x * sin_y * sin_z;
+        let m12 = -sin_x * cos_y;
+
+        let m20 = sin_x * sin_z - cos_x * sin_y * cos_z;
+        let m21 = cos_x * sin_y * sin_z + sin_x * cos_z;
+        let m22 = cos_x * cos_y;
+
+        // glam は列優先 (from_cols) なので、各列 (X軸, Y軸, Z軸) を渡す
+        let rotation = Mat3::from_cols(
+            Vec3::new(m00, m10, m20),
+            Vec3::new(m01, m11, m21),
+            Vec3::new(m02, m12, m22),
+        );
 
         NiTransform {
             rotation,
@@ -147,12 +164,11 @@ mod tests {
     #[test]
     fn test_from_euler_xyz() {
         use std::f32::consts::FRAC_PI_2;
-        // Z 軸 270度 (3 * FRAC_PI_2) 回転
-        let rot = Vec3::new(0.0, 0.0, 3.0 * FRAC_PI_2);
+        // Z 軸 90度 (FRAC_PI_2) 回転
+        let rot = Vec3::new(0.0, 0.0, FRAC_PI_2);
         let t = NiTransform::from_euler_xyz(Vec3::ZERO, rot, 1.0);
 
-        // ベクトル [1.0, 0.0, 0.0] を回転
-        // -rz = -270度 = +90度 なので [1, 0, 0] は [0, 1, 0] になる
+        // ベクトル [1.0, 0.0, 0.0] を Z軸 90度回転 -> [0, 1, 0]
         let rotated = t.rotation * Vec3::new(1.0, 0.0, 0.0);
         assert!((rotated.x - 0.0).abs() < 1e-5);
         assert!((rotated.y - 1.0).abs() < 1e-5);

@@ -102,23 +102,34 @@ $$M = T(\text{pos}) \cdot R \cdot S(\text{scale})$$
 
 ---
 
-## 5. ESM 配置参照 (REFR) のオイラー角回転における座標系・符号反転
+## 5. ESM 配置参照 (REFR) のオイラー角回転における Gamebryo 2.6 / NifSkope 仕様
 
-ESM 内の REFR レコードに格納されている回転角データ `rot: [f32; 3]` は、Gamebryo / Bethesda のワールド空間座標系と描画座標系の定義により、**各軸の符号を反転（マイナス）** して適用しなければなりません。
+一次文献: `references/nifskope/src/data/niftypes.cpp:223` (`Matrix::fromEuler`), `references/nifskope/src/data/niftypes.h:961`
 
-一次文献 (`references/openmw/apps/opencs/view/render/object.cpp:165-168`):
+NifSkope / Gamebryo 2.6 におけるオイラー角からの回転行列構築は、**$R = R_x(\text{rot}_x) \cdot R_y(\text{rot}_y) \cdot R_z(\text{rot}_z)$** の順序で計算されます。
+
 ```cpp
-    // orientation
-    osg::Quat xr(-position.rot[0], osg::Vec3f(1, 0, 0));
-    osg::Quat yr(-position.rot[1], osg::Vec3f(0, 1, 0));
-    osg::Quat zr(-position.rot[2], osg::Vec3f(0, 0, 1));
-    mBaseNode->setAttitude(zr * yr * xr);
+void Matrix::fromEuler( float x, float y, float z )
+{
+	float sinX = sin( x ); float cosX = cos( x );
+	float sinY = sin( y ); float cosY = cos( y );
+	float sinZ = sin( z ); float cosZ = cos( z );
+
+	m[0][0] = cosY * cosZ;
+	m[0][1] = -cosY * sinZ;
+	m[0][2] = sinY;
+	m[1][0] = sinX * sinY * cosZ + sinZ * cosX;
+	m[1][1] = cosX * cosZ - sinX * sinY * sinZ;
+	m[1][2] = -sinX * cosY;
+	m[2][0] = sinX * sinZ - cosX * sinY * cosZ;
+	m[2][1] = cosX * sinY * sinZ + sinX * cosZ;
+	m[2][2] = cosX * cosY;
+}
 ```
 
-したがって、正しい回転行列合成式は以下となります:
-$$R = R_z(-\text{rot}_z) \cdot R_y(-\text{rot}_y) \cdot R_x(-\text{rot}_x)$$
-
-※これを怠ると、270度（-90度）の回転が+90度（真逆の方向）になり、ダンジョンや洞窟・建物のピースが逆向きに配置されて壁やトンネルに深刻な隙間・不連続が生じます。
+代数展開により、この行列は列ベクトル規約において $R_x(x) \cdot R_y(y) \cdot R_z(z)$ と厳密に一致します。
+※ $R_z \cdot R_y \cdot R_x$ の逆順で掛けると、3軸すべてが回転している配管や手すり、階段などのピースが全くあさっての方向を向いて宙に浮くことになります。
+※ OpenMW の `object.cpp` で見られる符号反転は、OSG のクォータニオン乗算順序と右手/左手系の相互作用によるものであり、Gamebryo / NifSkope のネイティブ回転行列式 `fromEuler` を直接使用することで、符号反転を行わずとも正しい姿勢が得られます。
 
 ---
 
