@@ -36,12 +36,16 @@ var<uniform> model: ModelUniform;
 var t_diffuse: texture_2d<f32>;
 @group(2) @binding(1)
 var s_diffuse: sampler;
+@group(2) @binding(2)
+var t_normal: texture_2d<f32>;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
     @location(3) color: vec4<f32>,
+    @location(4) tangent: vec3<f32>,
+    @location(5) bitangent: vec3<f32>,
 };
 
 struct VertexOutput {
@@ -50,6 +54,8 @@ struct VertexOutput {
     @location(1) uv: vec2<f32>,
     @location(2) color: vec4<f32>,
     @location(3) world_pos: vec3<f32>,
+    @location(4) world_tangent: vec3<f32>,
+    @location(5) world_bitangent: vec3<f32>,
 };
 
 @vertex
@@ -60,13 +66,15 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     out.clip_position = camera.view_proj * world_pos4;
     out.world_pos = world_pos4.xyz;
 
-    // 法線を行列の上位 3x3 で変換 (スケールが等方であると仮定)
+    // 法線・接線・従法線を行列の上位 3x3 で変換 (スケールが等方であると仮定)
     let normal_matrix = mat3x3<f32>(
         model.world[0].xyz,
         model.world[1].xyz,
         model.world[2].xyz,
     );
     out.world_normal = normalize(normal_matrix * in.normal);
+    out.world_tangent = normalize(normal_matrix * in.tangent);
+    out.world_bitangent = normalize(normal_matrix * in.bitangent);
     out.uv = in.uv;
     out.color = in.color;
 
@@ -83,17 +91,47 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
 
+    // 法線マップ (Slot 1: _n.dds) サンプリング
+    // RGB: タンジェント空間法線 [-1, 1], A: グロス / スペキュラ強度
+    // 参照元: references/openmw/components/nifosg/nifloader.cpp:L2401-2426
+    let normal_sample = textureSample(t_normal, s_diffuse, in.uv);
+    let gloss = normal_sample.a;
+
+    // TBN 行列によるワールド空間法線の復元
+    var N = normalize(in.world_normal);
+    let t_len = length(in.world_tangent);
+    let b_len = length(in.world_bitangent);
+    if (t_len > 0.01 && b_len > 0.01) {
+        let T = normalize(in.world_tangent);
+        let B = normalize(in.world_bitangent);
+        let tbn = mat3x3<f32>(T, B, N);
+        let tangent_normal = normalize(normal_sample.rgb * 2.0 - 1.0);
+        N = normalize(tbn * tangent_normal);
+    }
+
+    // カメラ視線方向ベクトル (ワールド空間)
+    let V = normalize(camera.camera_pos.xyz - in.world_pos);
+
     // 1. 環境光 (Ambient)
     // 参照元: references/nifxml/nif.xml: NiAmbientLight, XCLL
-    var total_light = lighting.ambient_color.rgb;
+    var diffuse_light = lighting.ambient_color.rgb;
+    var specular_light = vec3<f32>(0.0);
 
     // 2. 指向性光 (Directional Light)
     // 参照元: Gamebryo 2.6 NiDirectionalLight
     let dir_len = length(lighting.dir_light_dir.xyz);
     if (dir_len > 0.001) {
-        let l_dir = normalize(lighting.dir_light_dir.xyz);
-        let n_dot_l = max(dot(in.world_normal, l_dir), 0.0);
-        total_light += lighting.dir_light_color.rgb * n_dot_l;
+        let L = normalize(lighting.dir_light_dir.xyz);
+        let n_dot_l = max(dot(N, L), 0.0);
+        diffuse_light += lighting.dir_light_color.rgb * n_dot_l;
+
+        // Blinn-Phong スペキュラ反射
+        if (n_dot_l > 0.0 && gloss > 0.01) {
+            let H = normalize(L + V);
+            let n_dot_h = max(dot(N, H), 0.0);
+            let spec = pow(n_dot_h, 32.0) * gloss;
+            specular_light += lighting.dir_light_color.rgb * spec;
+        }
     }
 
     // 3. 配置点光源 (Point Lights, 最大 16 灯)
@@ -106,16 +144,26 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let dist = length(to_light);
         let radius = pl.pos_radius.w;
         if (dist < radius && radius > 0.001) {
-            let l_dir = to_light / dist;
-            let n_dot_l = max(dot(in.world_normal, l_dir), 0.0);
+            let L = to_light / dist;
+            let n_dot_l = max(dot(N, L), 0.0);
             let falloff = max(pl.color_falloff.w, 0.0);
             let norm_dist = clamp(dist / radius, 0.0, 1.0);
             let atten = pow(1.0 - norm_dist, falloff);
-            total_light += pl.color_falloff.rgb * (n_dot_l * atten);
+            let light_intensity = pl.color_falloff.rgb * (atten * n_dot_l);
+            diffuse_light += light_intensity;
+
+            // 点光源の Blinn-Phong スペキュラ反射
+            if (n_dot_l > 0.0 && gloss > 0.01) {
+                let H = normalize(L + V);
+                let n_dot_h = max(dot(N, H), 0.0);
+                let spec = pow(n_dot_h, 32.0) * (gloss * atten);
+                specular_light += pl.color_falloff.rgb * spec;
+            }
         }
     }
 
-    var lit_rgb = base_color.rgb * total_light;
+    // 拡散光と鏡面反射光を合成
+    var lit_rgb = base_color.rgb * diffuse_light + specular_light;
 
     // 4. フォグ計算
     // 参照元: Gamebryo 2.6 NiFogProperty, references/nifxml/nif.xml: NiFogProperty

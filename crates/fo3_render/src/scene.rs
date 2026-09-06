@@ -45,6 +45,7 @@ impl RenderScene {
         let mut meshes = Vec::new();
         let mut texture_cache: HashMap<String, GpuTexture> = HashMap::new();
         let default_texture = GpuTexture::create_default_white(device, queue);
+        let default_normal_texture = GpuTexture::create_default_normal(device, queue);
 
         // ルートブロック（通常 0 番）からトラバース開始
         let root_transform = NiTransform::default();
@@ -60,6 +61,7 @@ impl RenderScene {
                 &mut meshes,
                 &mut texture_cache,
                 &default_texture,
+                &default_normal_texture,
             );
         }
 
@@ -100,6 +102,7 @@ impl RenderScene {
         let mut meshes = Vec::new();
         let mut texture_cache: HashMap<String, GpuTexture> = HashMap::new();
         let default_texture = GpuTexture::create_default_white(device, queue);
+        let default_normal_texture = GpuTexture::create_default_normal(device, queue);
 
         let mut min = Vec3::splat(f32::MAX);
         let mut max = Vec3::splat(f32::MIN);
@@ -146,6 +149,10 @@ impl RenderScene {
                             binding: 1,
                             resource: wgpu::BindingResource::Sampler(&texture.sampler),
                         },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::TextureView(&default_normal_texture.view),
+                        },
                     ],
                 });
 
@@ -186,6 +193,7 @@ impl RenderScene {
                     &mut meshes,
                     &mut texture_cache,
                     &default_texture,
+                    &default_normal_texture,
                 );
 
                 let mat = world_transform.to_mat4();
@@ -255,6 +263,7 @@ fn traverse_block(
     out_meshes: &mut Vec<RenderMesh>,
     texture_cache: &mut HashMap<String, GpuTexture>,
     default_texture: &GpuTexture,
+    default_normal_texture: &GpuTexture,
 ) {
     if block_index < 0 || block_index as usize >= nif.blocks.len() {
         return;
@@ -280,6 +289,7 @@ fn traverse_block(
                     out_meshes,
                     texture_cache,
                     default_texture,
+                    default_normal_texture,
                 );
             }
         }
@@ -301,6 +311,7 @@ fn traverse_block(
                     out_meshes,
                     texture_cache,
                     default_texture,
+                    default_normal_texture,
                 );
             }
         }
@@ -327,6 +338,7 @@ fn traverse_block(
                             queue,
                             texture_cache,
                             default_texture,
+                            default_normal_texture,
                         );
                         out_meshes.push(render_mesh);
                     }
@@ -356,6 +368,7 @@ fn traverse_block(
                             queue,
                             texture_cache,
                             default_texture,
+                            default_normal_texture,
                         );
                         out_meshes.push(render_mesh);
                     }
@@ -411,6 +424,7 @@ fn create_render_mesh(
     queue: &wgpu::Queue,
     texture_cache: &mut HashMap<String, GpuTexture>,
     default_texture: &GpuTexture,
+    default_normal_texture: &GpuTexture,
 ) -> RenderMesh {
     // Model Uniform バッファ作成
     let world_mat = world_transform.to_mat4();
@@ -429,9 +443,57 @@ fn create_render_mesh(
         }],
     });
 
-    // テクスチャ探索
-    let diffuse_path = find_diffuse_texture_path(properties, nif);
-    let texture = if let Some(ref path) = diffuse_path {
+    // テクスチャ探索 (Slot 0: Diffuse, Slot 1: Normal Map)
+    // 参照元: references/openmw/components/nifosg/nifloader.cpp:L2401-2426
+    let (diffuse_path, normal_path) = find_texture_paths(properties, nif);
+    ensure_texture_cached(&diffuse_path, vfs, device, queue, texture_cache);
+    ensure_texture_cached(&normal_path, vfs, device, queue, texture_cache);
+
+    let diffuse_tex = diffuse_path
+        .as_ref()
+        .and_then(|p| texture_cache.get(p))
+        .unwrap_or(default_texture);
+    let normal_tex = normal_path
+        .as_ref()
+        .and_then(|p| texture_cache.get(p))
+        .unwrap_or(default_normal_texture);
+
+    let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(&format!("Texture Bind Group: {}", name)),
+        layout: &context.texture_bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&diffuse_tex.view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&diffuse_tex.sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&normal_tex.view),
+            },
+        ],
+    });
+
+    RenderMesh {
+        name: name.to_string(),
+        mesh,
+        model_bind_group,
+        texture_bind_group,
+    }
+}
+
+/// テクスチャをキャッシュまたは VFS からロードしてキャッシュに格納する。
+fn ensure_texture_cached(
+    path_opt: &Option<String>,
+    vfs: &mut VfsManager,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture_cache: &mut HashMap<String, GpuTexture>,
+) {
+    if let Some(ref path) = path_opt {
         if !texture_cache.contains_key(path) {
             match vfs.read(path) {
                 Ok(bytes) => {
@@ -449,49 +511,34 @@ fn create_render_mesh(
                 }
             }
         }
-        texture_cache.get(path).unwrap_or(default_texture)
-    } else {
-        default_texture
-    };
-
-    let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some(&format!("Texture Bind Group: {}", name)),
-        layout: &context.texture_bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&texture.view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(&texture.sampler),
-            },
-        ],
-    });
-
-    RenderMesh {
-        name: name.to_string(),
-        mesh,
-        model_bind_group,
-        texture_bind_group,
     }
 }
 
-fn find_diffuse_texture_path(properties: &[i32], nif: &NifFile) -> Option<String> {
+/// マテリアルプロパティからディフューズ (スロット 0) と法線マップ (スロット 1) を取得。
+/// 参照元: references/openmw/components/nifosg/nifloader.cpp:L2401-2426
+fn find_texture_paths(properties: &[i32], nif: &NifFile) -> (Option<String>, Option<String>) {
     for &prop_idx in properties {
         if prop_idx >= 0 && (prop_idx as usize) < nif.blocks.len() {
             if let NifBlock::BSShaderPPLightingProperty(ref shader_prop) = nif.blocks[prop_idx as usize] {
                 if shader_prop.texture_set >= 0 && (shader_prop.texture_set as usize) < nif.blocks.len() {
                     if let NifBlock::BSShaderTextureSet(ref tex_set) = nif.blocks[shader_prop.texture_set as usize] {
-                        if !tex_set.textures.is_empty() && !tex_set.textures[0].is_empty() {
-                            return Some(tex_set.textures[0].clone());
-                        }
+                        let diff = if !tex_set.textures.is_empty() && !tex_set.textures[0].is_empty() {
+                            Some(tex_set.textures[0].clone())
+                        } else {
+                            None
+                        };
+                        let norm = if tex_set.textures.len() > 1 && !tex_set.textures[1].is_empty() {
+                            Some(tex_set.textures[1].clone())
+                        } else {
+                            None
+                        };
+                        return (diff, norm);
                     }
                 }
             }
         }
     }
-    None
+    (None, None)
 }
 
 fn calculate_scene_bounds(nif: &NifFile) -> (Vec3, f32) {

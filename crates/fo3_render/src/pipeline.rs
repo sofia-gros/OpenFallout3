@@ -64,9 +64,10 @@ impl RenderContext {
             }],
         });
 
-        // Group 2: Texture + Sampler
+        // Group 2: Diffuse Texture (0) + Sampler (1) + Normal Map Texture (2)
+        // 参照元: references/openmw/components/nifosg/nifloader.cpp:L2401-2426
         let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Texture Bind Group Layout"),
+            label: Some("Texture Bind Group Layout (Diffuse + Normal)"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -82,6 +83,16 @@ impl RenderContext {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
                     count: None,
                 },
             ],

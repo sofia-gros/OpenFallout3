@@ -77,11 +77,12 @@ fn dump_nif<R: std::io::BufRead>(reader: &mut R, title: &str) -> Result<(), Box<
             }
             NifBlock::NiTriShapeData(data) => {
                 println!(
-                    "頂点数: {:<6} 三角形数: {:<6} UV: {} 法線: {}",
+                    "頂点数: {:<6} 三角形数: {:<6} UV: {} 法線: {} 接線: {}",
                     data.common.num_vertices,
                     data.num_triangles,
                     data.common.uv_sets.len(),
-                    !data.common.normals.is_empty()
+                    !data.common.normals.is_empty(),
+                    data.common.tangents.len(),
                 );
                 let (min, max) = data.common.vertices.iter().fold(
                     (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
@@ -106,10 +107,11 @@ fn dump_nif<R: std::io::BufRead>(reader: &mut R, title: &str) -> Result<(), Box<
             }
             NifBlock::NiTriStripsData(data) => {
                 println!(
-                    "頂点数: {:<6} 三角形数: {:<6} ストリップ数: {}",
+                    "頂点数: {:<6} 三角形数: {:<6} ストリップ数: {} 接線: {}",
                     data.common.num_vertices,
                     data.num_triangles,
-                    data.num_strips
+                    data.num_strips,
+                    data.common.tangents.len(),
                 );
                 let (min, max) = data.common.vertices.iter().fold(
                     (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),

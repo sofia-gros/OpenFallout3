@@ -41,6 +41,8 @@ pub fn build_vertices(common: &NiGeometryDataCommon) -> Vec<Vertex> {
     let has_normals = !common.normals.is_empty();
     let has_uv = !common.uv_sets.is_empty() && !common.uv_sets[0].is_empty();
     let has_colors = !common.vertex_colors.is_empty();
+    let has_tangents = !common.tangents.is_empty();
+    let has_bitangents = !common.bitangents.is_empty();
 
     for i in 0..n {
         let pos = if i < common.vertices.len() {
@@ -72,11 +74,25 @@ pub fn build_vertices(common: &NiGeometryDataCommon) -> Vec<Vertex> {
             [1.0, 1.0, 1.0, 1.0]
         };
 
+        let tangent = if has_tangents && i < common.tangents.len() {
+            [common.tangents[i].x, common.tangents[i].y, common.tangents[i].z]
+        } else {
+            [0.0, 0.0, 0.0]
+        };
+
+        let bitangent = if has_bitangents && i < common.bitangents.len() {
+            [common.bitangents[i].x, common.bitangents[i].y, common.bitangents[i].z]
+        } else {
+            [0.0, 0.0, 0.0]
+        };
+
         vertices.push(Vertex {
             position: pos,
             normal,
             uv,
             color,
+            tangent,
+            bitangent,
         });
     }
 
@@ -183,6 +199,8 @@ impl GpuMesh {
                     normal,
                     uv,
                     color,
+                    tangent: [1.0, 0.0, 0.0],
+                    bitangent: [0.0, 1.0, 0.0],
                 });
             }
         }

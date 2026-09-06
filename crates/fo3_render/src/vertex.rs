@@ -7,7 +7,8 @@ use bytemuck::{Pod, Zeroable};
 
 /// GPU 描画用の標準頂点フォーマット。
 ///
-/// 座標、法線、テクスチャ座標 (UV)、頂点カラーを保持。
+/// 座標、法線、テクスチャ座標 (UV)、頂点カラー、タンジェント、ビットタンジェントを保持。
+/// 参照元: Gamebryo 2.6 `NiGeometryData`, `references/nifxml/nif.xml:L1234`
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct Vertex {
@@ -19,6 +20,10 @@ pub struct Vertex {
     pub uv: [f32; 2],
     /// 頂点カラー (R, G, B, A)
     pub color: [f32; 4],
+    /// 接線ベクトル (TX, TY, TZ)
+    pub tangent: [f32; 3],
+    /// 従法線ベクトル (BX, BY, BZ)
+    pub bitangent: [f32; 3],
 }
 
 impl Vertex {
@@ -53,7 +58,20 @@ impl Vertex {
                     shader_location: 3,
                     format: wgpu::VertexFormat::Float32x4,
                 },
+                // location 4: tangent
+                wgpu::VertexAttribute {
+                    offset: (mem::size_of::<[f32; 3]>() * 2 + mem::size_of::<[f32; 2]>() + mem::size_of::<[f32; 4]>()) as wgpu::BufferAddress,
+                    shader_location: 4,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                // location 5: bitangent
+                wgpu::VertexAttribute {
+                    offset: (mem::size_of::<[f32; 3]>() * 3 + mem::size_of::<[f32; 2]>() + mem::size_of::<[f32; 4]>()) as wgpu::BufferAddress,
+                    shader_location: 5,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
             ],
         }
     }
 }
+
