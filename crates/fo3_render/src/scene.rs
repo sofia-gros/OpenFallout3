@@ -179,6 +179,9 @@ fn traverse_block(
     let block = &nif.blocks[block_index as usize];
     match block {
         NifBlock::NiNode(node) => {
+            if is_node_hidden(&node.av, nif) {
+                return;
+            }
             let local_transform = to_core_transform(&node.av);
             let world_transform = parent_world.compose(&local_transform);
             for &child in &node.children {
@@ -197,6 +200,9 @@ fn traverse_block(
             }
         }
         NifBlock::BSFadeNode(fade) => {
+            if is_node_hidden(&fade.node.av, nif) {
+                return;
+            }
             let local_transform = to_core_transform(&fade.node.av);
             let world_transform = parent_world.compose(&local_transform);
             for &child in &fade.node.children {
@@ -215,6 +221,9 @@ fn traverse_block(
             }
         }
         NifBlock::NiTriShape(shape) => {
+            if is_node_hidden(&shape.geom.av, nif) {
+                return;
+            }
             let local_transform = to_core_transform(&shape.geom.av);
             let world_transform = parent_world.compose(&local_transform);
             let name = nif.get_string(shape.geom.av.net.name_index).unwrap_or("").to_string();
@@ -241,6 +250,9 @@ fn traverse_block(
             }
         }
         NifBlock::NiTriStrips(strips) => {
+            if is_node_hidden(&strips.geom.av, nif) {
+                return;
+            }
             let local_transform = to_core_transform(&strips.geom.av);
             let world_transform = parent_world.compose(&local_transform);
             let name = nif.get_string(strips.geom.av.net.name_index).unwrap_or("").to_string();
@@ -268,6 +280,30 @@ fn traverse_block(
         }
         _ => {}
     }
+}
+
+/// ノードが非表示（App Culled / エディタマーカー）であるかを判定する。
+///
+/// 判定基準:
+/// 1. `NiAVObject::flags` のビット 0 (`flags & 0x0001 != 0`): `Hidden` / `App Culled`
+///    参照元: `references/openmw/components/nif/node.hpp:77`, `references/nifskope/src/gl/glnode.cpp:456`
+/// 2. ノード名が `"EditorMarker"` や `"Marker"` で始まる (Creation Kit マーカー)
+///    参照元: `references/nifskope/src/gl/glmesh.cpp:760`
+fn is_node_hidden(av: &fo3_nif::NiAVObject, nif: &NifFile) -> bool {
+    // 1. App Culled (Hidden) フラグ
+    if av.flags & 0x0001 != 0 {
+        return true;
+    }
+
+    // 2. エディタマーカー名判定
+    if let Some(name) = nif.get_string(av.net.name_index) {
+        let lower = name.to_ascii_lowercase();
+        if lower.starts_with("editormarker") || lower.starts_with("marker") {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn to_core_transform(av: &fo3_nif::NiAVObject) -> NiTransform {

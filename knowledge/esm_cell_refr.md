@@ -99,4 +99,46 @@ $$
 
 ### モデル行列（ワールド変換行列 $M$）:
 $$M = T(\text{pos}) \cdot R \cdot S(\text{scale})$$
+
+---
+
+## 5. ESM 配置参照 (REFR) のオイラー角回転における座標系・符号反転
+
+ESM 内の REFR レコードに格納されている回転角データ `rot: [f32; 3]` は、Gamebryo / Bethesda のワールド空間座標系と描画座標系の定義により、**各軸の符号を反転（マイナス）** して適用しなければなりません。
+
+一次文献 (`references/openmw/apps/opencs/view/render/object.cpp:165-168`):
+```cpp
+    // orientation
+    osg::Quat xr(-position.rot[0], osg::Vec3f(1, 0, 0));
+    osg::Quat yr(-position.rot[1], osg::Vec3f(0, 1, 0));
+    osg::Quat zr(-position.rot[2], osg::Vec3f(0, 0, 1));
+    mBaseNode->setAttitude(zr * yr * xr);
+```
+
+したがって、正しい回転行列合成式は以下となります:
+$$R = R_z(-\text{rot}_z) \cdot R_y(-\text{rot}_y) \cdot R_x(-\text{rot}_x)$$
+
+※これを怠ると、270度（-90度）の回転が+90度（真逆の方向）になり、ダンジョンや洞窟・建物のピースが逆向きに配置されて壁やトンネルに深刻な隙間・不連続が生じます。
+
+---
+
+## 6. NIF 内部ノードにおけるエディタマーカーおよび非表示フラグの判定
+
+家具（`FURN`）、ドア（`DOOR`）、エフェクト等の NIF メッシュには、Creation Kit / エディタ専用の配置マーカー（座る位置、ドアを開ける位置等）や不可視ジオメトリが含まれています。これらを誤ってレンダリングすると、「緑の枠」「開口部の白い板」となって現れます。
+
+一次文献:
+- `references/nifskope/src/gl/glmesh.cpp:760`:
+  `if ( !scene->hasOption(Scene::ShowMarkers) && name.startsWith( "EditorMarker" ) ) return;`
+- `references/nifskope/src/gl/glnode.cpp:456`:
+  `if ( flags.node.hidden ) return true;`
+- `references/openmw/components/nif/node.hpp:77`:
+  `Flag_Hidden = 0x0001; bool isHidden() const { return mFlags & Flag_Hidden; }`
+
+### 除外ルール:
+1. **ノード名**:
+   - `name.to_ascii_lowercase().starts_with("editormarker")`
+   - `name.to_ascii_lowercase().starts_with("marker")`
+   上記に該当するノードおよびその子孫ノードは描画をスキップする。
+2. **`NiAVObject::flags` ビット 0 (`0x0001`)**:
+   - `flags & 0x0001 != 0` の場合、`Hidden` (App Culled: アプリケーション側で非表示指定) であるため描画をスキップする。
 ゲーム内の座標系は右手系 Z-up ($X$: 東/右, $Y$: 北/前, $Z$: 上) であり、NIF 内部のジオメトリ座標系と一致します。

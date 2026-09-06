@@ -14,8 +14,9 @@ use crate::header::{GroupHeader, RecordHeader};
 use crate::records::{CellRecord, RefrRecord, StatRecord, Tes4Header};
 use crate::subrecord::{parse_subrecords, Subrecord};
 use crate::types::{
-    FormId, FourCC, REC_ACTI, REC_CELL, REC_CONT, REC_DOOR, REC_FURN, REC_MSTT, REC_REFR,
-    REC_SCOL, REC_STAT, REC_TERM, REC_TES4, SUB_EDID, SUB_MODL,
+    FormId, FourCC, REC_ACTI, REC_ALCH, REC_AMMO, REC_ARMO, REC_BOOK, REC_CELL, REC_CONT,
+    REC_DOOR, REC_FURN, REC_KEYM, REC_LIGH, REC_MISC, REC_MSTT, REC_REFR, REC_SCOL, REC_STAT,
+    REC_TERM, REC_TES4, REC_WEAP, SUB_EDID, SUB_MODL,
 };
 
 /// 配置元ベースオブジェクトのメタ情報（モデルパス、エディタID、レコード型）。
@@ -115,6 +116,16 @@ impl<R: Read + Seek> EsmReader<R> {
         }
     }
 
+    /// 現在の読み込みストリーム位置を取得する。
+    pub fn stream_position(&mut self) -> io::Result<u64> {
+        self.reader.stream_position()
+    }
+
+    /// 指定した位置にシークする。
+    pub fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.reader.seek(pos)
+    }
+
     /// 現在位置から指定バイト数スキップする。
     pub fn skip(&mut self, bytes: u64) -> io::Result<()> {
         self.reader.seek(SeekFrom::Current(bytes as i64))?;
@@ -210,6 +221,8 @@ impl<R: Read + Seek> EsmReader<R> {
         let target_types = [
             REC_STAT, REC_SCOL, REC_DOOR, REC_ACTI,
             REC_FURN, REC_CONT, REC_MSTT, REC_TERM,
+            REC_LIGH, REC_MISC, REC_BOOK, REC_ALCH,
+            REC_KEYM, REC_WEAP, REC_AMMO, REC_ARMO,
         ];
 
         let mut map = HashMap::new();

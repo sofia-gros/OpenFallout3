@@ -481,7 +481,12 @@ fn is_editor_marker_or_effect(edid: &str, model: &str) -> bool {
         return true;
     }
     // 環境光線・グローエフェクト (不透明ジオメトリ描画では真っ白な板として現れてしまうもの)
-    if lower_model.contains("lightbeam") || lower_model.contains("glow") || lower_model.contains("ray") {
+    if lower_model.contains("lightbeam")
+        || lower_model.contains("glow")
+        || lower_model.contains("ray")
+        || lower_model.starts_with("effects\\")
+        || lower_model.starts_with("effects/")
+    {
         return true;
     }
 

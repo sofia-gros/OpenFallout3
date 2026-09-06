@@ -407,6 +407,23 @@ fn test_esm_cell(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::e
                 }
             }
             println!("\n3D モデル解決数: {} / {}", resolved_count, refrs.len());
+            let mut unresolved_set = std::collections::BTreeSet::new();
+            for refr in &refrs {
+                if !model_map.contains_key(&refr.base_object) {
+                    unresolved_set.insert(refr.base_object);
+                }
+            }
+            println!("未解決 Base FormID 数: {} 件", unresolved_set.len());
+            for fid in &unresolved_set {
+                println!("  未解決 FormID: {:#010X}", fid.0);
+            }
+
+            println!("\nESM 全体を走査して未解決 FormID のレコード種別を調査中...");
+            let found_unresolved = scan_records_for_formids(esm_path, &unresolved_set)?;
+            for (fid, (rtype, edid, model)) in found_unresolved {
+                println!("  FormID {:#010X} => レコード型: {}, EDID: {:?}, MODL: {:?}", fid.0, rtype, edid, model);
+            }
+
             println!("セル検証完了！");
         }
         None => {
@@ -415,6 +432,70 @@ fn test_esm_cell(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::e
     }
 
     Ok(())
+}
+
+fn scan_records_for_formids(
+    esm_path: &str,
+    target_ids: &std::collections::BTreeSet<fo3_esm::FormId>,
+) -> Result<std::collections::BTreeMap<fo3_esm::FormId, (fo3_esm::FourCC, String, String)>, Box<dyn std::error::Error>> {
+    use std::io::SeekFrom;
+    use fo3_esm::{EsmEntry, FourCC, GroupHeader};
+
+    let mut reader = EsmReader::open(esm_path)?;
+    let start_pos = 24 + reader.header_record.data_size as u64;
+    reader.seek(SeekFrom::Start(start_pos))?;
+
+    let mut results = std::collections::BTreeMap::new();
+
+    fn scan_group<R: std::io::Read + std::io::Seek>(
+        reader: &mut EsmReader<R>,
+        group_end: u64,
+        target_ids: &std::collections::BTreeSet<fo3_esm::FormId>,
+        results: &mut std::collections::BTreeMap<fo3_esm::FormId, (fo3_esm::FourCC, String, String)>,
+    ) -> std::io::Result<()> {
+        let sub_edid = FourCC(*b"EDID");
+        let sub_modl = FourCC(*b"MODL");
+
+        while reader.stream_position()? < group_end {
+            if let Some(entry) = reader.read_next_entry()? {
+                match entry {
+                    EsmEntry::Group(group) => {
+                        let rtype = group.target_record_type();
+                        let inner_end = reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        if rtype == Some(FourCC(*b"CELL")) || rtype == Some(FourCC(*b"WRLD")) {
+                            reader.seek(SeekFrom::Start(inner_end))?;
+                        } else {
+                            scan_group(reader, inner_end, target_ids, results)?;
+                        }
+                    }
+                    EsmEntry::Record(header, subrecords) => {
+                        if target_ids.contains(&header.form_id) {
+                            let mut edid = String::new();
+                            let mut model = String::new();
+                            for sub in &subrecords {
+                                if sub.type_id == sub_edid {
+                                    edid = sub.as_string();
+                                } else if sub.type_id == sub_modl {
+                                    model = sub.as_string();
+                                }
+                            }
+                            println!("    発見! FormID {:#010X} ({}): edid={:?}, model={:?}", header.form_id.0, header.type_id, edid, model);
+                            results.insert(header.form_id, (header.type_id, edid, model));
+                        }
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    let end_pos = reader.seek(SeekFrom::End(0))?;
+    reader.seek(SeekFrom::Start(start_pos))?;
+    scan_group(&mut reader, end_pos, target_ids, &mut results)?;
+
+    Ok(results)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

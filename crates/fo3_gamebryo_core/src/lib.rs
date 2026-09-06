@@ -31,12 +31,14 @@ impl Default for NiTransform {
 impl NiTransform {
     /// 3軸オイラー角 (rx, ry, rz: ラジアン)、位置、スケールから NiTransform を構築する。
     ///
-    /// 回転行列合成順序: `R = R_z(rz) * R_y(ry) * R_x(rx)`
-    /// 参照元: `references/nifskope/src/gl/glcontroller.cpp:489`, `references/nifskope/src/data/niftypes.h:961`
+    /// ESM 内の REFR に記録されたオイラー角回転は、Gamebryo / Bethesda のワールド描画変換において
+    /// 各軸の符号を反転（マイナス）して適用する。
+    /// 回転行列合成順序: `R = R_z(-rz) * R_y(-ry) * R_x(-rx)`
+    /// 参照元: `references/openmw/apps/opencs/view/render/object.cpp:165-168`, `references/nifskope/src/gl/glcontroller.cpp:489`
     pub fn from_euler_xyz(pos: Vec3, rot: Vec3, scale: f32) -> Self {
-        let rx = Mat3::from_rotation_x(rot.x);
-        let ry = Mat3::from_rotation_y(rot.y);
-        let rz = Mat3::from_rotation_z(rot.z);
+        let rx = Mat3::from_rotation_x(-rot.x);
+        let ry = Mat3::from_rotation_y(-rot.y);
+        let rz = Mat3::from_rotation_z(-rot.z);
         let rotation = rz * ry * rx;
 
         NiTransform {
@@ -140,5 +142,20 @@ mod tests {
         let transformed = m * p;
         // p' = S * p + T = 2.0 * [1,1,1] + [1,2,3] = [3, 4, 5]
         assert_eq!(transformed, glam::Vec4::new(3.0, 4.0, 5.0, 1.0));
+    }
+
+    #[test]
+    fn test_from_euler_xyz() {
+        use std::f32::consts::FRAC_PI_2;
+        // Z 軸 270度 (3 * FRAC_PI_2) 回転
+        let rot = Vec3::new(0.0, 0.0, 3.0 * FRAC_PI_2);
+        let t = NiTransform::from_euler_xyz(Vec3::ZERO, rot, 1.0);
+
+        // ベクトル [1.0, 0.0, 0.0] を回転
+        // -rz = -270度 = +90度 なので [1, 0, 0] は [0, 1, 0] になる
+        let rotated = t.rotation * Vec3::new(1.0, 0.0, 0.0);
+        assert!((rotated.x - 0.0).abs() < 1e-5);
+        assert!((rotated.y - 1.0).abs() < 1e-5);
+        assert!((rotated.z - 0.0).abs() < 1e-5);
     }
 }
