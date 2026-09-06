@@ -230,6 +230,113 @@ impl GpuMesh {
         Self::create(device, &vertices, &indices)
     }
 
+    /// 地形 (LAND) レコードの特定のクアドラント (0..3) から GpuMesh を生成する。
+    ///
+    /// 参照元:
+    /// - `references/openmw/components/esm4/loadland.hpp:79` (0 = bottom left, 1 = bottom right, 2 = top left, 3 = top right)
+    /// - `references/openmw/components/esm4/loadland.hpp:53-65` (sVertsPerSide = 33, sRealSize = 4096)
+    /// - `references/openmw/components/esm/esmterrain.cpp:52-71` (標高復元計算式)
+    pub fn from_land_quadrant(
+        device: &wgpu::Device,
+        land: &fo3_esm::LandRecord,
+        grid_x: i32,
+        grid_y: i32,
+        quadrant: usize,
+    ) -> Option<Self> {
+        use fo3_esm::{LAND_REAL_SIZE, LAND_VERTS_PER_SIDE};
+
+        if quadrant >= 4 {
+            return None;
+        }
+
+        let heights = land.compute_heights();
+        let step = LAND_REAL_SIZE / (LAND_VERTS_PER_SIDE - 1) as f32; // 128.0
+        let origin_x = grid_x as f32 * LAND_REAL_SIZE;
+        let origin_y = grid_y as f32 * LAND_REAL_SIZE;
+
+        // クアドラントごとの開始頂点オフセット (各クアドラントは 16x16 クワッド = 17x17 頂点)
+        let (x_start, y_start) = match quadrant {
+            0 => (0, 0),   // 左下 (Bottom-Left)
+            1 => (16, 0),  // 右下 (Bottom-Right)
+            2 => (0, 16),  // 左上 (Top-Left)
+            3 => (16, 16), // 右上 (Top-Right)
+            _ => unreachable!(),
+        };
+
+        const QUAD_VERTS_PER_SIDE: usize = 17;
+        const QUAD_QUADS_PER_SIDE: usize = 16;
+
+        let mut vertices = Vec::with_capacity(QUAD_VERTS_PER_SIDE * QUAD_VERTS_PER_SIDE);
+        for ly in 0..QUAD_VERTS_PER_SIDE {
+            for lx in 0..QUAD_VERTS_PER_SIDE {
+                let gx = x_start + lx;
+                let gy = y_start + ly;
+                let idx = gy * LAND_VERTS_PER_SIDE + gx;
+
+                let wx = origin_x + gx as f32 * step;
+                let wy = origin_y + gy as f32 * step;
+                let wz = heights[idx];
+
+                let normal = if let Some(ref norms) = land.normals {
+                    if idx < norms.len() {
+                        let n = norms[idx];
+                        [n[0] as f32 / 127.0, n[1] as f32 / 127.0, n[2] as f32 / 127.0]
+                    } else {
+                        [0.0, 0.0, 1.0]
+                    }
+                } else {
+                    [0.0, 0.0, 1.0]
+                };
+
+                let color = if let Some(ref cols) = land.vertex_colors {
+                    if idx < cols.len() {
+                        let c = cols[idx];
+                        [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 1.0]
+                    } else {
+                        [1.0, 1.0, 1.0, 1.0]
+                    }
+                } else {
+                    [1.0, 1.0, 1.0, 1.0]
+                };
+
+                // UV は 1 グリッドあたり 1 回タイリング
+                let uv = [gx as f32, gy as f32];
+
+                vertices.push(Vertex {
+                    position: [wx, wy, wz],
+                    normal,
+                    uv,
+                    color,
+                    tangent: [1.0, 0.0, 0.0],
+                    bitangent: [0.0, 1.0, 0.0],
+                });
+            }
+        }
+
+        // 16 x 16 クアッド -> 512 三角形 (1536 インデックス)
+        let mut indices = Vec::with_capacity(QUAD_QUADS_PER_SIDE * QUAD_QUADS_PER_SIDE * 6);
+        for ly in 0..QUAD_QUADS_PER_SIDE {
+            for lx in 0..QUAD_QUADS_PER_SIDE {
+                let i0 = (ly * QUAD_VERTS_PER_SIDE + lx) as u16;
+                let i1 = (ly * QUAD_VERTS_PER_SIDE + lx + 1) as u16;
+                let i2 = ((ly + 1) * QUAD_VERTS_PER_SIDE + lx) as u16;
+                let i3 = ((ly + 1) * QUAD_VERTS_PER_SIDE + lx + 1) as u16;
+
+                // 三角形 1: i0 -> i2 -> i1
+                indices.push(i0);
+                indices.push(i2);
+                indices.push(i1);
+
+                // 三角形 2: i1 -> i2 -> i3
+                indices.push(i1);
+                indices.push(i2);
+                indices.push(i3);
+            }
+        }
+
+        Self::create(device, &vertices, &indices)
+    }
+
     fn create(device: &wgpu::Device, vertices: &[Vertex], indices: &[u16]) -> Option<Self> {
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Mesh Vertex Buffer"),

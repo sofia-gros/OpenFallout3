@@ -14,11 +14,12 @@ pub mod subrecord;
 pub mod records;
 pub mod reader;
 
-pub use types::{FormId, FourCC, ObjectBounds};
+pub use types::{FormId, FourCC, ObjectBounds, REC_LTEX, REC_TXST};
 pub use header::{GroupHeader, RecordHeader, SubrecordHeader};
 pub use subrecord::Subrecord;
 pub use records::{
-    CellLighting, CellRecord, LandRecord, LightRecord, RefrRecord, StatRecord, Tes4Header,
-    LAND_HEIGHT_SCALE, LAND_NUM_VERTS, LAND_REAL_SIZE, LAND_VERTS_PER_SIDE,
+    CellLighting, CellRecord, LandRecord, LandTextureLayer, LightRecord, LtexRecord, RefrRecord, StatRecord, Tes4Header,
+    TextureSetRecord, LAND_HEIGHT_SCALE, LAND_NUM_VERTS, LAND_REAL_SIZE, LAND_VERTS_PER_SIDE,
 };
 pub use reader::{BaseObjectInfo, EsmEntry, EsmReader};
+

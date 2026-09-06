@@ -21,6 +21,10 @@ struct LightingUniform {
 
 struct ModelUniform {
     world: mat4x4<f32>,
+    alpha_test: u32,
+    alpha_test_func: u32,
+    alpha_threshold: f32,
+    _padding: u32,
 };
 
 @group(0) @binding(0)
@@ -62,19 +66,15 @@ struct VertexOutput {
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    let world_pos4 = model.world * vec4<f32>(in.position, 1.0);
-    out.clip_position = camera.view_proj * world_pos4;
-    out.world_pos = world_pos4.xyz;
+    let world_pos = model.world * vec4<f32>(in.position, 1.0);
+    out.world_pos = world_pos.xyz;
+    out.clip_position = camera.view_proj * world_pos;
 
-    // 法線・接線・従法線を行列の上位 3x3 で変換 (スケールが等方であると仮定)
-    let normal_matrix = mat3x3<f32>(
-        model.world[0].xyz,
-        model.world[1].xyz,
-        model.world[2].xyz,
-    );
-    out.world_normal = normalize(normal_matrix * in.normal);
-    out.world_tangent = normalize(normal_matrix * in.tangent);
-    out.world_bitangent = normalize(normal_matrix * in.bitangent);
+    // 法線・接線ベクトルのワールド空間変換 (回転・スケール)
+    out.world_normal = normalize((model.world * vec4<f32>(in.normal, 0.0)).xyz);
+    out.world_tangent = (model.world * vec4<f32>(in.tangent, 0.0)).xyz;
+    out.world_bitangent = (model.world * vec4<f32>(in.bitangent, 0.0)).xyz;
+
     out.uv = in.uv;
     out.color = in.color;
 
@@ -86,9 +86,26 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let tex_color = textureSample(t_diffuse, s_diffuse, in.uv);
     let base_color = tex_color * in.color;
 
-    // アルファテスト (透過テクスチャの切り抜き)
-    if (base_color.a < 0.33) {
-        discard;
+    // アルファテスト (NiAlphaProperty の動的カットアウト判定)
+    // 参照元: references/nifskope/build/nif.xml:L1518, references/nifskope/src/gl/glproperty.cpp:L204-237
+    if (model.alpha_test != 0u) {
+        let alpha = base_color.a;
+        let ref_val = model.alpha_threshold;
+        var pass: bool = true;
+        switch (model.alpha_test_func) {
+            case 0u: { pass = true; } // TEST_ALWAYS
+            case 1u: { pass = alpha < ref_val; } // TEST_LESS
+            case 2u: { pass = abs(alpha - ref_val) < 0.0039; } // TEST_EQUAL (1/256 許容)
+            case 3u: { pass = alpha <= ref_val; } // TEST_LESS_EQUAL
+            case 4u: { pass = alpha > ref_val; } // TEST_GREATER (標準カットアウト)
+            case 5u: { pass = abs(alpha - ref_val) >= 0.0039; } // TEST_NOT_EQUAL
+            case 6u: { pass = alpha >= ref_val; } // TEST_GREATER_EQUAL
+            case 7u: { pass = false; } // TEST_NEVER
+            default: { pass = true; }
+        }
+        if (!pass) {
+            discard;
+        }
     }
 
     // 法線マップ (Slot 1: _n.dds) サンプリング

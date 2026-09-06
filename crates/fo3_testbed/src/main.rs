@@ -29,6 +29,7 @@ fn print_usage() {
     println!("  cargo run -p fo3_testbed -- esm-header <path/to/file.esm>");
     println!("  cargo run -p fo3_testbed -- esm-groups <path/to/file.esm>");
     println!("  cargo run -p fo3_testbed -- esm-stat <path/to/file.esm> [limit]");
+    println!("  cargo run -p fo3_testbed -- esm-ltex <path/to/file.esm> [limit]");
     println!("  cargo run -p fo3_testbed -- esm-cell <path/to/file.esm> <cell_edid>");
     println!("  cargo run -p fo3_testbed -- collision-batch <data_dir> [limit]");
     println!("  cargo run -p fo3_testbed -- collision-lines <data_dir> <relative/path>");
@@ -448,6 +449,52 @@ fn test_esm_stat(esm_path: &str, limit: Option<usize>) -> Result<(), Box<dyn std
     Ok(())
 }
 
+fn test_esm_ltex(esm_path: &str, limit: Option<usize>) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== ESM LTEX (地形テクスチャ) レコードパース検証: {} ===", esm_path);
+    if let Some(lim) = limit {
+        println!("最大取得件数: {}", lim);
+    }
+
+    println!("=== 地形テクスチャ解決マップ構築検証 ===");
+    let mut reader2 = EsmReader::open(esm_path)?;
+    let land_tex_map = reader2.read_landscape_texture_map()?;
+    println!("解決済み地形テクスチャ数: {} 件", land_tex_map.len());
+    let mut count = 0;
+    for (fid, (diff, norm)) in &land_tex_map {
+        println!("  LTEX {:#010X} => Diffuse: \"{}\", Normal: \"{}\"", fid.0, diff, norm);
+        count += 1;
+        if count >= limit.unwrap_or(10) {
+            break;
+        }
+    }
+    // reader を巻き戻してサブレコードを直接ダンプ
+    let mut r = EsmReader::open(esm_path)?;
+    while let Some(e) = r.read_next_entry()? {
+        if let fo3_esm::EsmEntry::Group(g) = e {
+            if g.target_record_type() == Some(fo3_esm::REC_LTEX) {
+                while let Some(inner) = r.read_next_entry()? {
+                    if let fo3_esm::EsmEntry::Record(hdr, subs) = inner {
+                        println!("Record FormID: {:#010X}, Type: {}", hdr.form_id.0, hdr.type_id);
+                        for s in subs {
+                            let str_val = if s.data.iter().all(|&b| b >= 0x20 && b <= 0x7E || b == 0) {
+                                format!(" (ASCII: \"{}\")", s.as_string())
+                            } else {
+                                String::new()
+                            };
+                            println!("  Subrecord: {} ({} bytes){}", s.type_id, s.data.len(), str_val);
+                        }
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    println!("\nLTEX レコードパース検証成功！");
+    Ok(())
+}
+
 fn test_esm_cell(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::error::Error>> {
     println!("=== ESM セル検索 & REFR 抽出検証: セル \"{}\" ({}) ===", target_edid, esm_path);
 
@@ -496,6 +543,8 @@ fn test_esm_cell(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::e
                 println!("  復元標高範囲: {:.1} ～ {:.1} (高低差: {:.1})", min_h, max_h, max_h - min_h);
                 println!("  法線データ保持: {}", l.normals.is_some());
                 println!("  頂点色保持: {}", l.vertex_colors.is_some());
+                println!("  ベーステクスチャ (BTXT): [Q0: {:#010X}, Q1: {:#010X}, Q2: {:#010X}, Q3: {:#010X}]", l.base_textures[0].0, l.base_textures[1].0, l.base_textures[2].0, l.base_textures[3].0);
+                println!("  追加テクスチャレイヤー数 (ATXT/VTXT): {} 件", l.layers.len());
             } else {
                 println!("\n【地形 (LAND) 情報】なし (屋内セルまたは地形非保持)");
             }
@@ -799,6 +848,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             let limit = args.get(3).and_then(|s| s.parse::<usize>().ok());
             test_esm_stat(&args[2], limit)?;
+        }
+        "esm-ltex" => {
+            if args.len() < 3 {
+                print_usage();
+                return Ok(());
+            }
+            let limit = args.get(3).and_then(|s| s.parse::<usize>().ok());
+            test_esm_ltex(&args[2], limit)?;
         }
         "esm-cell" => {
             if args.len() < 4 {

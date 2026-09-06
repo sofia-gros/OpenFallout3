@@ -2,10 +2,53 @@
 //!
 //! シェーダー、バインドグループレイアウト、ブレンド設定、深度テストの初期化および管理。
 
+use bytemuck::{Pod, Zeroable};
 use crate::vertex::Vertex;
+
+/// モデルおよびアルファテスト用 Uniform バッファ構造体。
+///
+/// 参照元: `references/nifskope/build/nif.xml:L1518` (`AlphaFlags`), `references/nifskope/src/gl/glproperty.cpp:L204`
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct ModelUniform {
+    /// ワールド変換行列 (4x4)
+    pub world: [f32; 16],
+    /// アルファテスト有効化フラグ (0: 無効, 1: 有効)
+    pub alpha_test: u32,
+    /// アルファテスト比較関数 (0..7: TestFunction)
+    pub alpha_test_func: u32,
+    /// アルファテスト閾値 (0.0 .. 1.0)
+    pub alpha_threshold: f32,
+    /// 16バイトアライメント用パディング
+    pub _padding: u32,
+}
+
+impl ModelUniform {
+    /// ワールド変換行列と NiAlphaProperty から ModelUniform を構築する。
+    pub fn new(world_mat: glam::Mat4, alpha_prop: Option<&fo3_nif::NiAlphaProperty>) -> Self {
+        let (alpha_test, alpha_test_func, alpha_threshold) = if let Some(alpha) = alpha_prop {
+            if alpha.is_test_enabled() {
+                (1, alpha.test_func() as u32, alpha.threshold_normalized())
+            } else {
+                (0, 0, 0.0)
+            }
+        } else {
+            (0, 0, 0.0)
+        };
+
+        Self {
+            world: world_mat.to_cols_array(),
+            alpha_test,
+            alpha_test_func,
+            alpha_threshold,
+            _padding: 0,
+        }
+    }
+}
 
 pub struct RenderContext {
     pub pipeline: wgpu::RenderPipeline,
+    pub transparent_pipeline: wgpu::RenderPipeline,
     pub collision_pipeline: wgpu::RenderPipeline,
     pub camera_bind_group_layout: wgpu::BindGroupLayout,
     pub model_bind_group_layout: wgpu::BindGroupLayout,
@@ -55,7 +98,7 @@ impl RenderContext {
             label: Some("Model Bind Group Layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -149,6 +192,48 @@ impl RenderContext {
             cache: None,
         });
 
+        // 半透明メッシュ用描画パイプライン (深度書き込み無効、アルファブレンド有効)
+        // 参照元: references/nifskope/src/gl/glproperty.cpp:L250-255 (glEnable(GL_BLEND))
+        let transparent_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Transparent Mesh Render Pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[Vertex::desc()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Self::DEPTH_FORMAT,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
         let collision_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Collision Line Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("collision_shader.wgsl").into()),
@@ -205,6 +290,7 @@ impl RenderContext {
 
         RenderContext {
             pipeline,
+            transparent_pipeline,
             collision_pipeline,
             camera_bind_group_layout,
             model_bind_group_layout,

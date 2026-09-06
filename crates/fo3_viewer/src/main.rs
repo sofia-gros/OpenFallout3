@@ -267,7 +267,19 @@ impl ViewerState {
                 let land_info = land.as_ref().and_then(|l| {
                     cell.grid.map(|(gx, gy)| (l, gx, gy))
                 });
-                let scene = RenderScene::from_cell(&device, &queue, &context, &placed_refs, land_info, &mut vfs);
+                let landscape_texture_map = esm_reader.read_landscape_texture_map().ok();
+                if let Some(ref tex_map) = landscape_texture_map {
+                    println!("地形テクスチャセット解決: {} 件", tex_map.len());
+                }
+                let scene = RenderScene::from_cell(
+                    &device,
+                    &queue,
+                    &context,
+                    &placed_refs,
+                    land_info,
+                    landscape_texture_map.as_ref(),
+                    &mut vfs,
+                );
 
                 let clear_color = if let Some(ref cl) = cell.lighting {
                     if cl.fog_far > 0.0 {
@@ -446,9 +458,8 @@ impl ViewerState {
                 occlusion_query_set: None,
             });
 
-            render_pass.set_pipeline(&self.context.pipeline);
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            self.scene.render(&mut render_pass);
+            self.scene.render(&mut render_pass, &self.context);
 
             if self.show_collision {
                 self.scene.render_collision(&mut render_pass, &self.context);

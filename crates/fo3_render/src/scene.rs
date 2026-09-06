@@ -14,7 +14,7 @@ use wgpu::util::DeviceExt;
 
 use crate::collision::{extract_collision_lines, GpuCollisionMesh};
 use crate::mesh::GpuMesh;
-use crate::pipeline::RenderContext;
+use crate::pipeline::{ModelUniform, RenderContext};
 use crate::texture::GpuTexture;
 
 /// 単一のメッシュ描画単位。
@@ -23,6 +23,12 @@ pub struct RenderMesh {
     pub mesh: GpuMesh,
     pub model_bind_group: wgpu::BindGroup,
     pub texture_bind_group: wgpu::BindGroup,
+    /// 半透明合成（Alpha Blending）を行うか
+    pub is_transparent: bool,
+    /// カメラ距離によるソートを行うか
+    pub alpha_sort: bool,
+    /// メッシュのワールド空間中心座標 (ソート用)
+    pub world_center: Vec3,
 }
 
 /// NIF から構築された完全な描画シーン。
@@ -56,6 +62,7 @@ impl RenderScene {
             traverse_block(
                 0,
                 &root_transform,
+                None,
                 nif,
                 vfs,
                 device,
@@ -94,20 +101,17 @@ impl RenderScene {
         placed_nifs: &[(&NifFile, NiTransform)],
         vfs: &mut VfsManager,
     ) -> Self {
-        Self::from_cell(device, queue, context, placed_nifs, None, vfs)
+        Self::from_cell(device, queue, context, placed_nifs, None, None, vfs)
     }
 
-    /// セルの配置オブジェクト群および地形 (LAND) から RenderScene を構築する。
-    ///
-    /// 参照元:
-    /// - `references/openmw/components/esmterrain/` (地形チャンク生成)
-    /// - `references/openmw/components/esm4/loadland.hpp` (LAND レコード仕様)
+    /// ESM セルデータから 3D シーンを構築。
     pub fn from_cell(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         context: &RenderContext,
         placed_nifs: &[(&NifFile, NiTransform)],
         land_info: Option<(&fo3_esm::LandRecord, i32, i32)>,
+        landscape_texture_map: Option<&HashMap<fo3_esm::FormId, (String, String)>>,
         vfs: &mut VfsManager,
     ) -> Self {
         let mut meshes = Vec::new();
@@ -119,75 +123,118 @@ impl RenderScene {
         let mut max = Vec3::splat(f32::MIN);
         let mut found = false;
 
-        // 1. 地形 (LAND) メッシュの生成と登録
+        // 1. 地形 (LAND) メッシュの生成と登録 (4クアドラント分割描画)
+        // 参照元:
+        // - references/openmw/components/esm4/loadland.hpp:79 (クアドラント 0..3)
+        // - references/openmw/components/esm4/loadland.cpp:138-143 (BTXT)
+        // - knowledge/landscape_multitexturing.md
         if let Some((land, grid_x, grid_y)) = land_info {
-            if let Some(gpu_mesh) = GpuMesh::from_land(device, land, grid_x, grid_y) {
-                // デフォルトの荒野テクスチャをロード
-                let diffuse_path = "textures/landscape/dirtwasteland01.dds";
-                if !texture_cache.contains_key(diffuse_path) {
-                    if let Ok(bytes) = vfs.read(diffuse_path) {
-                        if let Ok(tex) = GpuTexture::from_dds_bytes(device, queue, &bytes, Some(diffuse_path)) {
-                            texture_cache.insert(diffuse_path.to_string(), tex);
+            let origin_x = grid_x as f32 * fo3_esm::LAND_REAL_SIZE;
+            let origin_y = grid_y as f32 * fo3_esm::LAND_REAL_SIZE;
+
+            for q in 0..4 {
+                if let Some(gpu_mesh) = GpuMesh::from_land_quadrant(device, land, grid_x, grid_y, q) {
+                    let form_id = land.base_textures[q];
+                    let (diff_name, norm_name) = if form_id != fo3_esm::FormId(0) {
+                        if let Some(tex_map) = landscape_texture_map {
+                            if let Some((diff, norm)) = tex_map.get(&form_id) {
+                                (
+                                    normalize_texture_path(diff),
+                                    if norm.is_empty() {
+                                        None
+                                    } else {
+                                        Some(normalize_texture_path(norm))
+                                    },
+                                )
+                            } else {
+                                ("textures\\landscape\\dirtwasteland01.dds".to_string(), None)
+                            }
+                        } else {
+                            ("textures\\landscape\\dirtwasteland01.dds".to_string(), None)
                         }
-                    }
-                }
-                let texture = texture_cache.get(diffuse_path).unwrap_or(&default_texture);
+                    } else {
+                        ("textures\\landscape\\dirtwasteland01.dds".to_string(), None)
+                    };
 
-                let model_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Model Uniform Buffer: Landscape"),
-                    contents: bytemuck::cast_slice(&glam::Mat4::IDENTITY.to_cols_array()),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+                    let diff_opt = Some(diff_name.clone());
+                    ensure_texture_cached(&diff_opt, vfs, device, queue, &mut texture_cache);
+                    ensure_texture_cached(&norm_name, vfs, device, queue, &mut texture_cache);
 
-                let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("Model Bind Group: Landscape"),
-                    layout: &context.model_bind_group_layout,
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: model_uniform_buffer.as_entire_binding(),
-                    }],
-                });
+                    let diffuse_texture = texture_cache.get(&diff_name).unwrap_or(&default_texture);
+                    let normal_texture = norm_name
+                        .as_ref()
+                        .and_then(|p| texture_cache.get(p))
+                        .unwrap_or(&default_normal_texture);
 
-                let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("Texture Bind Group: Landscape"),
-                    layout: &context.texture_bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
+                    let model_uniform = ModelUniform::new(glam::Mat4::IDENTITY, None);
+                    let model_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("Model Uniform Buffer: Landscape Q{}", q)),
+                        contents: bytemuck::bytes_of(&model_uniform),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+
+                    let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some(&format!("Model Bind Group: Landscape Q{}", q)),
+                        layout: &context.model_bind_group_layout,
+                        entries: &[wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&texture.view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&texture.sampler),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::TextureView(&default_normal_texture.view),
-                        },
-                    ],
-                });
+                            resource: model_uniform_buffer.as_entire_binding(),
+                        }],
+                    });
 
-                meshes.push(RenderMesh {
-                    name: "Landscape".to_string(),
-                    mesh: gpu_mesh,
-                    model_bind_group,
-                    texture_bind_group,
-                });
+                    let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some(&format!("Texture Bind Group: Landscape Q{}", q)),
+                        layout: &context.texture_bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::TextureView(&normal_texture.view),
+                            },
+                        ],
+                    });
 
-                // 地形のバウンディング反映
-                let origin_x = grid_x as f32 * fo3_esm::LAND_REAL_SIZE;
-                let origin_y = grid_y as f32 * fo3_esm::LAND_REAL_SIZE;
-                let heights = land.compute_heights();
-                for &h in &heights {
-                    min.z = min.z.min(h);
-                    max.z = max.z.max(h);
+                    let q_offset_x = if q % 2 == 1 {
+                        fo3_esm::LAND_REAL_SIZE * 0.75
+                    } else {
+                        fo3_esm::LAND_REAL_SIZE * 0.25
+                    };
+                    let q_offset_y = if q >= 2 {
+                        fo3_esm::LAND_REAL_SIZE * 0.75
+                    } else {
+                        fo3_esm::LAND_REAL_SIZE * 0.25
+                    };
+
+                    meshes.push(RenderMesh {
+                        name: format!("Landscape_Q{}", q),
+                        mesh: gpu_mesh,
+                        model_bind_group,
+                        texture_bind_group,
+                        is_transparent: false,
+                        alpha_sort: false,
+                        world_center: Vec3::new(origin_x + q_offset_x, origin_y + q_offset_y, 0.0),
+                    });
                 }
-                min.x = min.x.min(origin_x);
-                max.x = max.x.max(origin_x + fo3_esm::LAND_REAL_SIZE);
-                min.y = min.y.min(origin_y);
-                max.y = max.y.max(origin_y + fo3_esm::LAND_REAL_SIZE);
-                found = true;
             }
+
+            // 地形のバウンディング反映
+            let heights = land.compute_heights();
+            for &h in &heights {
+                min.z = min.z.min(h);
+                max.z = max.z.max(h);
+            }
+            min.x = min.x.min(origin_x);
+            max.x = max.x.max(origin_x + fo3_esm::LAND_REAL_SIZE);
+            min.y = min.y.min(origin_y);
+            max.y = max.y.max(origin_y + fo3_esm::LAND_REAL_SIZE);
+            found = true;
         }
 
         // 2. 配置された 3D オブジェクト (REFR) の走査と登録
@@ -197,6 +244,7 @@ impl RenderScene {
                 traverse_block(
                     0,
                     world_transform,
+                    None,
                     nif,
                     vfs,
                     device,
@@ -219,9 +267,7 @@ impl RenderScene {
                     match block {
                         NifBlock::NiTriShapeData(d) => {
                             for v in &d.common.vertices {
-                                let local_p = glam::Vec4::new(v.x, v.y, v.z, 1.0);
-                                let wp = mat * local_p;
-                                let p = Vec3::new(wp.x, wp.y, wp.z);
+                                let p = mat.transform_point3(Vec3::new(v.x, v.y, v.z));
                                 min = min.min(p);
                                 max = max.max(p);
                                 found = true;
@@ -229,9 +275,7 @@ impl RenderScene {
                         }
                         NifBlock::NiTriStripsData(d) => {
                             for v in &d.common.vertices {
-                                let local_p = glam::Vec4::new(v.x, v.y, v.z, 1.0);
-                                let wp = mat * local_p;
-                                let p = Vec3::new(wp.x, wp.y, wp.z);
+                                let p = mat.transform_point3(Vec3::new(v.x, v.y, v.z));
                                 min = min.min(p);
                                 max = max.max(p);
                                 found = true;
@@ -246,7 +290,7 @@ impl RenderScene {
         let (bounds_center, bounds_radius) = if found {
             let center = (min + max) * 0.5;
             let radius = (max - min).length() * 0.5;
-            (center, radius.max(10.0))
+            (center, radius.max(100.0))
         } else {
             (Vec3::ZERO, 100.0)
         };
@@ -259,9 +303,22 @@ impl RenderScene {
         }
     }
 
-    /// シーン内のすべてのメッシュを描画する。
-    pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
-        for mesh_node in &self.meshes {
+    /// シーン内のすべてのメッシュを描画する（不透明パス → 半透明パス）。
+    /// 参照元: Gamebryo 2.6 レンダリング順序（不透明オブジェクトを先に深度書き込みありで描画し、その後半透明オブジェクトを合成）
+    pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>, context: &'a RenderContext) {
+        // 1. 不透明メッシュ群の描画 (通常パイプライン: 深度書き込み有効)
+        render_pass.set_pipeline(&context.pipeline);
+        for mesh_node in self.meshes.iter().filter(|m| !m.is_transparent) {
+            render_pass.set_bind_group(1, &mesh_node.model_bind_group, &[]);
+            render_pass.set_bind_group(2, &mesh_node.texture_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, mesh_node.mesh.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(mesh_node.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.draw_indexed(0..mesh_node.mesh.num_elements, 0, 0..1);
+        }
+
+        // 2. 半透明メッシュ群の描画 (半透明パイプライン: 深度書き込み無効、アルファブレンド)
+        render_pass.set_pipeline(&context.transparent_pipeline);
+        for mesh_node in self.meshes.iter().filter(|m| m.is_transparent) {
             render_pass.set_bind_group(1, &mesh_node.model_bind_group, &[]);
             render_pass.set_bind_group(2, &mesh_node.texture_bind_group, &[]);
             render_pass.set_vertex_buffer(0, mesh_node.mesh.vertex_buffer.slice(..));
@@ -284,6 +341,7 @@ impl RenderScene {
 fn traverse_block(
     block_index: i32,
     parent_world: &NiTransform,
+    parent_alpha: Option<&fo3_nif::NiAlphaProperty>,
     nif: &NifFile,
     vfs: &mut VfsManager,
     device: &wgpu::Device,
@@ -306,10 +364,12 @@ fn traverse_block(
             }
             let local_transform = to_core_transform(&node.av);
             let world_transform = parent_world.compose(&local_transform);
+            let current_alpha = find_alpha_property(&node.av.properties, nif).or(parent_alpha);
             for &child in &node.children {
                 traverse_block(
                     child,
                     &world_transform,
+                    current_alpha,
                     nif,
                     vfs,
                     device,
@@ -328,10 +388,12 @@ fn traverse_block(
             }
             let local_transform = to_core_transform(&fade.node.av);
             let world_transform = parent_world.compose(&local_transform);
+            let current_alpha = find_alpha_property(&fade.node.av.properties, nif).or(parent_alpha);
             for &child in &fade.node.children {
                 traverse_block(
                     child,
                     &world_transform,
+                    current_alpha,
                     nif,
                     vfs,
                     device,
@@ -362,6 +424,7 @@ fn traverse_block(
                             gpu_mesh,
                             &world_transform,
                             &shape.geom.av.properties,
+                            parent_alpha,
                             nif,
                             vfs,
                             queue,
@@ -392,6 +455,7 @@ fn traverse_block(
                             gpu_mesh,
                             &world_transform,
                             &strips.geom.av.properties,
+                            parent_alpha,
                             nif,
                             vfs,
                             queue,
@@ -448,6 +512,7 @@ fn create_render_mesh(
     mesh: GpuMesh,
     world_transform: &NiTransform,
     properties: &[i32],
+    parent_alpha: Option<&fo3_nif::NiAlphaProperty>,
     nif: &NifFile,
     vfs: &mut VfsManager,
     queue: &wgpu::Queue,
@@ -455,11 +520,18 @@ fn create_render_mesh(
     default_texture: &GpuTexture,
     default_normal_texture: &GpuTexture,
 ) -> RenderMesh {
+    // アルファプロパティの解決 (自身のプロパティ優先、無ければ親から継承)
+    // 参照元: Gamebryo 2.6 NiAVObject::AttachProperty, Property Cascading
+    let effective_alpha = find_alpha_property(properties, nif).or(parent_alpha);
+    let is_transparent = effective_alpha.map_or(false, |a| a.is_blend_enabled());
+    let alpha_sort = effective_alpha.map_or(false, |a| !a.is_no_sorter());
+
     // Model Uniform バッファ作成
     let world_mat = world_transform.to_mat4();
+    let model_uniform = ModelUniform::new(world_mat, effective_alpha);
     let model_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(&format!("Model Uniform Buffer: {}", name)),
-        contents: bytemuck::cast_slice(&world_mat.to_cols_array()),
+        contents: bytemuck::bytes_of(&model_uniform),
         usage: wgpu::BufferUsages::UNIFORM,
     });
 
@@ -511,6 +583,9 @@ fn create_render_mesh(
         mesh,
         model_bind_group,
         texture_bind_group,
+        is_transparent,
+        alpha_sort,
+        world_center: world_transform.translation,
     }
 }
 
@@ -570,6 +645,19 @@ fn find_texture_paths(properties: &[i32], nif: &NifFile) -> (Option<String>, Opt
     (None, None)
 }
 
+/// プロパティリストから NiAlphaProperty を検索する。
+/// 参照元: references/nifskope/src/gl/glnode.cpp:295, references/nifxml/nif.xml:L3972
+fn find_alpha_property<'a>(properties: &[i32], nif: &'a NifFile) -> Option<&'a fo3_nif::NiAlphaProperty> {
+    for &prop_idx in properties {
+        if prop_idx >= 0 && (prop_idx as usize) < nif.blocks.len() {
+            if let NifBlock::NiAlphaProperty(ref alpha) = nif.blocks[prop_idx as usize] {
+                return Some(alpha);
+            }
+        }
+    }
+    None
+}
+
 fn calculate_scene_bounds(nif: &NifFile) -> (Vec3, f32) {
     let mut min = Vec3::splat(f32::MAX);
     let mut max = Vec3::splat(f32::MIN);
@@ -605,3 +693,15 @@ fn calculate_scene_bounds(nif: &NifFile) -> (Vec3, f32) {
     let radius = (max - min).length() * 0.5;
     (center, radius.max(10.0))
 }
+
+/// テクスチャパスを正規化（区切り文字をバックスラッシュに統一し、先頭に 'textures\' を補完）する。
+/// BSA 内では 'textures/landscape/...' のように格納されているため。
+fn normalize_texture_path(path: &str) -> String {
+    let p = path.replace('/', "\\");
+    if p.to_ascii_lowercase().starts_with("textures\\") {
+        p
+    } else {
+        format!("textures\\{}", p)
+    }
+}
+

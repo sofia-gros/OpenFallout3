@@ -146,4 +146,81 @@ impl NiAlphaProperty {
             threshold,
         })
     }
+
+    /// アルファブレンド（半透明合成）が有効か判定する。
+    /// 参照元: `references/nifskope/build/nif.xml:L1520` (bit 0)
+    #[inline]
+    pub fn is_blend_enabled(&self) -> bool {
+        (self.flags & 0x0001) != 0
+    }
+
+    /// 送信元ブレンドモード (`AlphaFunction`) を取得する。
+    /// 参照元: `references/nifskope/build/nif.xml:L1521` (bit 1..4)
+    #[inline]
+    pub fn src_blend_mode(&self) -> u8 {
+        ((self.flags >> 1) & 0x0F) as u8
+    }
+
+    /// 送信先ブレンドモード (`AlphaFunction`) を取得する。
+    /// 参照元: `references/nifskope/build/nif.xml:L1522` (bit 5..8)
+    #[inline]
+    pub fn dst_blend_mode(&self) -> u8 {
+        ((self.flags >> 5) & 0x0F) as u8
+    }
+
+    /// アルファテスト（カットアウト）が有効か判定する。
+    /// 参照元: `references/nifskope/build/nif.xml:L1523` (bit 9)
+    #[inline]
+    pub fn is_test_enabled(&self) -> bool {
+        (self.flags & 0x0200) != 0
+    }
+
+    /// アルファテスト比較関数 (`TestFunction`) を取得する。
+    /// 参照元: `references/nifskope/build/nif.xml:L1524` (bit 10..12)
+    /// 0: ALWAYS, 1: LESS, 2: EQUAL, 3: LESS_EQUAL, 4: GREATER, 5: NOT_EQUAL, 6: GREATER_EQUAL, 7: NEVER
+    #[inline]
+    pub fn test_func(&self) -> u8 {
+        ((self.flags >> 10) & 0x07) as u8
+    }
+
+    /// カメラ距離によるソートが無効（No Sorter）であるか判定する。
+    /// 参照元: `references/nifskope/build/nif.xml:L1525` (bit 13)
+    #[inline]
+    pub fn is_no_sorter(&self) -> bool {
+        (self.flags & 0x2000) != 0
+    }
+
+    /// 0.0〜1.0 に正規化されたアルファテスト閾値を取得する。
+    /// 参照元: `references/nifskope/src/gl/glproperty.cpp:L229` (`threshold / 255.0`)
+    #[inline]
+    pub fn threshold_normalized(&self) -> f32 {
+        self.threshold as f32 / 255.0
+    }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_alpha_property_flags() {
+        // 標準的なカットアウト設定: Alpha Test 有効 (bit 9), TEST_GREATER (func=4, bit 10..12 => 4 << 10 = 0x1000)
+        // flags = 0x1200 (4608), threshold = 128 (0.5019)
+        let alpha = NiAlphaProperty {
+            net: NiObjectNET {
+                name_index: u32::MAX,
+                extra_data_list: Vec::new(),
+                controller: -1,
+            },
+            flags: 0x1200,
+            threshold: 128,
+        };
+
+        assert!(!alpha.is_blend_enabled());
+        assert!(alpha.is_test_enabled());
+        assert_eq!(alpha.test_func(), 4); // TEST_GREATER
+        assert!(!alpha.is_no_sorter());
+        assert!((alpha.threshold_normalized() - 0.50196).abs() < 0.001);
+    }
+}
+

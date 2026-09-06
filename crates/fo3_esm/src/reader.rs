@@ -11,12 +11,12 @@ use flate2::read::ZlibDecoder;
 use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::header::{GroupHeader, RecordHeader};
-use crate::records::{CellRecord, LandRecord, LightRecord, RefrRecord, StatRecord, Tes4Header};
+use crate::records::{CellRecord, LandRecord, LightRecord, LtexRecord, RefrRecord, StatRecord, Tes4Header, TextureSetRecord};
 use crate::subrecord::{parse_subrecords, Subrecord};
 use crate::types::{
     FormId, FourCC, REC_ACTI, REC_ALCH, REC_AMMO, REC_ARMO, REC_BOOK, REC_CELL, REC_CONT,
-    REC_DOOR, REC_FURN, REC_KEYM, REC_LAND, REC_LIGH, REC_MISC, REC_MSTT, REC_REFR, REC_SCOL, REC_STAT,
-    REC_TERM, REC_TES4, REC_WEAP, REC_WRLD, SUB_EDID, SUB_MODL,
+    REC_DOOR, REC_FURN, REC_KEYM, REC_LAND, REC_LIGH, REC_LTEX, REC_MISC, REC_MSTT, REC_REFR, REC_SCOL, REC_STAT,
+    REC_TERM, REC_TES4, REC_TXST, REC_WEAP, REC_WRLD, SUB_EDID, SUB_MODL,
 };
 
 /// 配置元ベースオブジェクトのメタ情報（モデルパス、エディタID、レコード型）。
@@ -263,6 +263,132 @@ impl<R: Read + Seek> EsmReader<R> {
             map.insert(light.form_id, light);
         }
         Ok(map)
+    }
+
+    /// LTEX グループ内の全 LtexRecord を走査して取得する。
+    /// 参照元: `references/openmw/components/esm4/loadltex.hpp`, `loadltex.cpp`
+    pub fn read_ltex_records(&mut self, limit: Option<usize>) -> io::Result<Vec<LtexRecord>> {
+        let start_pos = 24 + self.header_record.data_size as u64;
+        self.reader.seek(SeekFrom::Start(start_pos))?;
+
+        let mut textures = Vec::new();
+
+        while let Some(entry) = self.read_next_entry()? {
+            match entry {
+                EsmEntry::Group(group) => {
+                    if group.target_record_type() == Some(REC_LTEX) {
+                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        while self.reader.stream_position()? < group_end {
+                            if let Some(inner) = self.read_next_entry()? {
+                                if let EsmEntry::Record(header, subrecords) = inner {
+                                    if header.type_id == REC_LTEX {
+                                        textures.push(LtexRecord::read(&header, &subrecords)?);
+                                        if let Some(lim) = limit {
+                                            if textures.len() >= lim {
+                                                return Ok(textures);
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        return Ok(textures);
+                    } else {
+                        let remaining = group.group_size as u64 - GroupHeader::SIZE as u64;
+                        self.skip(remaining)?;
+                    }
+                }
+                EsmEntry::Record(rec, _) => {
+                    self.skip(rec.data_size as u64)?;
+                }
+            }
+        }
+
+        Ok(textures)
+    }
+
+    /// 全 LTEX レコードを FormId をキーとする HashMap として読み出す。
+    pub fn read_ltex_map(&mut self) -> io::Result<HashMap<FormId, LtexRecord>> {
+        let textures = self.read_ltex_records(None)?;
+        let mut map = HashMap::with_capacity(textures.len());
+        for tex in textures {
+            map.insert(tex.form_id, tex);
+        }
+        Ok(map)
+    }
+
+    /// TXST グループ内の全 TextureSetRecord を走査して取得する。
+    /// 参照元: `references/openmw/components/esm4/loadtxst.hpp`, `loadtxst.cpp`
+    pub fn read_txst_records(&mut self, limit: Option<usize>) -> io::Result<Vec<TextureSetRecord>> {
+        let start_pos = 24 + self.header_record.data_size as u64;
+        self.reader.seek(SeekFrom::Start(start_pos))?;
+
+        let mut textures = Vec::new();
+
+        while let Some(entry) = self.read_next_entry()? {
+            match entry {
+                EsmEntry::Group(group) => {
+                    if group.target_record_type() == Some(REC_TXST) {
+                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        while self.reader.stream_position()? < group_end {
+                            if let Some(inner) = self.read_next_entry()? {
+                                if let EsmEntry::Record(header, subrecords) = inner {
+                                    if header.type_id == REC_TXST {
+                                        textures.push(TextureSetRecord::read(&header, &subrecords)?);
+                                        if let Some(lim) = limit {
+                                            if textures.len() >= lim {
+                                                return Ok(textures);
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        return Ok(textures);
+                    } else {
+                        let remaining = group.group_size as u64 - GroupHeader::SIZE as u64;
+                        self.skip(remaining)?;
+                    }
+                }
+                EsmEntry::Record(rec, _) => {
+                    self.skip(rec.data_size as u64)?;
+                }
+            }
+        }
+
+        Ok(textures)
+    }
+
+    /// 全 TXST レコードを FormId をキーとする HashMap として読み出す。
+    pub fn read_txst_map(&mut self) -> io::Result<HashMap<FormId, TextureSetRecord>> {
+        let textures = self.read_txst_records(None)?;
+        let mut map = HashMap::with_capacity(textures.len());
+        for tex in textures {
+            map.insert(tex.form_id, tex);
+        }
+        Ok(map)
+    }
+
+    /// LTEX と TXST を一括走査し、LTEX の FormId から (diffuse, normal_map) のファイルパスを取得できるマップを構築する。
+    pub fn read_landscape_texture_map(&mut self) -> io::Result<HashMap<FormId, (String, String)>> {
+        let ltex_map = self.read_ltex_map()?;
+        let txst_map = self.read_txst_map()?;
+
+        let mut result = HashMap::with_capacity(ltex_map.len());
+        for (ltex_id, ltex) in ltex_map {
+            if let Some(txst) = txst_map.get(&ltex.texture_set) {
+                result.insert(ltex_id, (txst.diffuse.clone(), txst.normal_map.clone()));
+            } else if !ltex.texture_path.is_empty() {
+                let norm = ltex.texture_path.replace(".dds", "_n.dds");
+                result.insert(ltex_id, (ltex.texture_path.clone(), norm));
+            }
+        }
+
+        Ok(result)
     }
 
     /// STAT, SCOL, DOOR, ACTI, FURN, CONT, MSTT, TERM など

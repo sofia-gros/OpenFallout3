@@ -9,7 +9,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{
-    FormId, SUB_BTXT, SUB_DATA, SUB_VCLR, SUB_VHGT, SUB_VNML,
+    FormId, SUB_ATXT, SUB_BTXT, SUB_DATA, SUB_VCLR, SUB_VHGT, SUB_VNML, SUB_VTXT,
 };
 
 /// 地形の一辺あたりの頂点数 (Gamebryo 2.6 / Fallout 3 定数)。
@@ -20,6 +20,20 @@ pub const LAND_NUM_VERTS: usize = LAND_VERTS_PER_SIDE * LAND_VERTS_PER_SIDE;
 pub const LAND_REAL_SIZE: f32 = 4096.0;
 /// 地形の高さスケール係数 (8.0)。
 pub const LAND_HEIGHT_SCALE: f32 = 8.0;
+
+/// 追加テクスチャレイヤー (`ATXT` + `VTXT`)。
+/// 参照元: `references/openmw/components/esm4/loadland.hpp:L84-106`
+#[derive(Clone, Debug, PartialEq)]
+pub struct LandTextureLayer {
+    /// テクスチャ (`LTEX`) の FormID
+    pub form_id: FormId,
+    /// クアドラント (0: 左下, 1: 右下, 2: 左上, 3: 右上)
+    pub quadrant: u8,
+    /// レイヤーインデックス (0..7)
+    pub layer_index: u16,
+    /// 頂点透過度リスト (頂点位置 0..288 [17x17], 透過度 0.0..1.0)
+    pub opacities: Vec<(u16, f32)>,
+}
 
 /// セル地形 (LAND) レコード。
 ///
@@ -40,6 +54,8 @@ pub struct LandRecord {
     pub vertex_colors: Option<Vec<[u8; 3]>>,
     /// 4 クアドラントのベーステクスチャ FormID (BTXT)
     pub base_textures: [FormId; 4],
+    /// 追加テクスチャレイヤーリスト (ATXT / VTXT)
+    pub layers: Vec<LandTextureLayer>,
 }
 
 impl LandRecord {
@@ -53,6 +69,8 @@ impl LandRecord {
         let mut normals = None;
         let mut vertex_colors = None;
         let mut base_textures = [FormId(0); 4];
+        let mut layers = Vec::new();
+        let mut current_layer: Option<LandTextureLayer> = None;
 
         for sub in subrecords {
             match sub.type_id {
@@ -114,8 +132,48 @@ impl LandRecord {
                         }
                     }
                 }
+                SUB_ATXT => {
+                    // ATXT: FormId (4 bytes) + quadrant (1 byte) + unknown (1 byte) + layer_index (2 bytes)
+                    if let Some(prev) = current_layer.take() {
+                        layers.push(prev);
+                    }
+                    if sub.data.len() >= 8 {
+                        let mut cursor = Cursor::new(&sub.data);
+                        let form_id = FormId(cursor.read_u32::<LittleEndian>()?);
+                        let quadrant = cursor.read_u8()?;
+                        let _unknown = cursor.read_u8()?;
+                        let layer_index = cursor.read_u16::<LittleEndian>()?;
+                        current_layer = Some(LandTextureLayer {
+                            form_id,
+                            quadrant,
+                            layer_index,
+                            opacities: Vec::new(),
+                        });
+                    }
+                }
+                SUB_VTXT => {
+                    // VTXT: 1要素 8 bytes (position: u16, unknown1: u8, unknown2: u8, opacity: f32)
+                    if let Some(ref mut layer) = current_layer {
+                        let count = sub.data.len() / 8;
+                        let mut cursor = Cursor::new(&sub.data);
+                        for _ in 0..count {
+                            let position = cursor.read_u16::<LittleEndian>()?;
+                            let _u1 = cursor.read_u8()?;
+                            let _u2 = cursor.read_u8()?;
+                            let opacity = cursor.read_f32::<LittleEndian>()?;
+                            layer.opacities.push((position, opacity));
+                        }
+                    }
+                    if let Some(finished) = current_layer.take() {
+                        layers.push(finished);
+                    }
+                }
                 _ => {}
             }
+        }
+
+        if let Some(last) = current_layer {
+            layers.push(last);
         }
 
         Ok(Self {
@@ -126,6 +184,7 @@ impl LandRecord {
             normals,
             vertex_colors,
             base_textures,
+            layers,
         })
     }
 
