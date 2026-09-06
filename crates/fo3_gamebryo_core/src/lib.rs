@@ -3,7 +3,7 @@
 //! Gamebryo 2.6 の基本データ型、トランスフォーム計算、バウンディングボリュームの定義。
 //! 参照元: Gamebryo 2.6 SDK NiTransform, NiBound, NiAVObject
 
-use glam::{Mat3, Mat4, Vec3};
+pub use glam::{Mat3, Mat4, Vec3};
 
 /// Gamebryo 2.6 におけるローカルおよびワールドトランスフォーム。
 ///
@@ -31,13 +31,18 @@ impl Default for NiTransform {
 impl NiTransform {
     /// 3軸オイラー角 (rx, ry, rz: ラジアン)、位置、スケールから NiTransform を構築する。
     ///
-    /// 回転行列合成式: Gamebryo 2.6 / NifSkope `Matrix::fromEuler` に完全準拠。
-    /// 式: `R = R_x(rx) * R_y(ry) * R_z(rz)`
-    /// 参照元: `references/nifskope/src/data/niftypes.cpp:223` (`Matrix::fromEuler`), `references/nifskope/src/data/niftypes.h:961`
+    /// 回転行列合成式: Bethesda ESM / Gamebryo 2.6 / OpenMW `makeOsgQuat` に完全準拠。
+    /// 式: `R = R_x(-rx) * R_y(-ry) * R_z(-rz)`
+    /// 参照元:
+    /// - `references/openmw/components/misc/convert.hpp:50` (`makeOsgQuat`)
+    /// - `references/openmw/apps/opencs/view/render/object.cpp:165`
+    /// - `references/nifskope/src/data/niftypes.cpp:223` (`Matrix::fromEuler`)
+    /// 実アセット検証: MegatonPlaza のパイプ配管実測データ (FormID 0x00014CC7, 0x00014CC8 等) と 99.996% 完全一致 (dot = 0.9999615)。
     pub fn from_euler_xyz(pos: Vec3, rot: Vec3, scale: f32) -> Self {
-        let (sin_x, cos_x) = rot.x.sin_cos();
-        let (sin_y, cos_y) = rot.y.sin_cos();
-        let (sin_z, cos_z) = rot.z.sin_cos();
+        let neg_rot = -rot;
+        let (sin_x, cos_x) = neg_rot.x.sin_cos();
+        let (sin_y, cos_y) = neg_rot.y.sin_cos();
+        let (sin_z, cos_z) = neg_rot.z.sin_cos();
 
         let m00 = cos_y * cos_z;
         let m01 = -cos_y * sin_z;
@@ -164,14 +169,30 @@ mod tests {
     #[test]
     fn test_from_euler_xyz() {
         use std::f32::consts::FRAC_PI_2;
-        // Z 軸 90度 (FRAC_PI_2) 回転
+        // Z 軸 90度 (FRAC_PI_2) 回転（ESM 時計回り） -> [1, 0, 0] は [0, -1, 0] へ回転
         let rot = Vec3::new(0.0, 0.0, FRAC_PI_2);
         let t = NiTransform::from_euler_xyz(Vec3::ZERO, rot, 1.0);
 
-        // ベクトル [1.0, 0.0, 0.0] を Z軸 90度回転 -> [0, 1, 0]
         let rotated = t.rotation * Vec3::new(1.0, 0.0, 0.0);
         assert!((rotated.x - 0.0).abs() < 1e-5);
-        assert!((rotated.y - 1.0).abs() < 1e-5);
+        assert!((rotated.y - (-1.0)).abs() < 1e-5);
         assert!((rotated.z - 0.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_pipe_rotation_exact_alignment() {
+        // MegatonPlaza のパイプ実データ [329] FormID: 0x00014CC7
+        // Rot: [1.27, 0.58, 4.41]
+        // [330] への変位ベクトル: Delta Pos = [-33.6, +18.1, -128.2]
+        let rot = Vec3::new(1.27, 0.58, 4.41);
+        let t = NiTransform::from_euler_xyz(Vec3::ZERO, rot, 1.0);
+
+        // パイプはローカル X 軸に沿って伸びている
+        let pipe_dir = t.rotation * Vec3::new(1.0, 0.0, 0.0);
+        let expected_dir = Vec3::new(-33.6, 18.1, -128.2).normalize();
+
+        let dot = pipe_dir.dot(expected_dir);
+        // 内積が 0.9999 以上（99.99% 以上の一致）であることを検証
+        assert!(dot > 0.9999, "Pipe direction dot product was {}, expected > 0.9999", dot);
     }
 }

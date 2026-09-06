@@ -14,6 +14,7 @@ use std::io::{BufReader, Cursor};
 use std::path::Path;
 use fo3_bsa::BsaArchive;
 use fo3_esm::EsmReader;
+use fo3_gamebryo_core::Vec3;
 use fo3_nif::{NifBlock, NifFile, NifHeader};
 use fo3_vfs::VfsManager;
 
@@ -69,14 +70,6 @@ fn dump_nif<R: std::io::BufRead>(reader: &mut R, title: &str) -> Result<(), Box<
         print!("  [{:03}] {:<28}", i, type_name);
 
         match block {
-            NifBlock::NiNode(node) => {
-                let name = nif.get_string(node.av.net.name_index).unwrap_or("");
-                println!("名前: {:<20} 子ノード数: {}", format!("\"{}\"", name), node.children.len());
-            }
-            NifBlock::BSFadeNode(fade) => {
-                let name = nif.get_string(fade.node.av.net.name_index).unwrap_or("");
-                println!("名前: {:<20} 子ノード数: {}", format!("\"{}\"", name), fade.node.children.len());
-            }
             NifBlock::NiTriShape(shape) => {
                 let name = nif.get_string(shape.geom.av.net.name_index).unwrap_or("");
                 println!("名前: {:<20} Data: {:?} Props: {:?}", format!("\"{}\"", name), shape.geom.data, shape.geom.av.properties);
@@ -89,10 +82,26 @@ fn dump_nif<R: std::io::BufRead>(reader: &mut R, title: &str) -> Result<(), Box<
                     data.common.uv_sets.len(),
                     !data.common.normals.is_empty()
                 );
+                let (min, max) = data.common.vertices.iter().fold(
+                    (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
+                    |(min, max), v| (min.min(Vec3::new(v.x, v.y, v.z)), max.max(Vec3::new(v.x, v.y, v.z))),
+                );
+                println!("          頂点 Min: {:?}, Max: {:?}", min, max);
             }
             NifBlock::NiTriStrips(strips) => {
                 let name = nif.get_string(strips.geom.av.net.name_index).unwrap_or("");
                 println!("名前: {:<20} Data: {:?}", format!("\"{}\"", name), strips.geom.data);
+                println!("          Trans: {:?}, Scale: {}", strips.geom.av.translation, strips.geom.av.scale);
+            }
+            NifBlock::NiNode(node) => {
+                let name = nif.get_string(node.av.net.name_index).unwrap_or("");
+                println!("名前: {:<20} 子ノード数: {}", format!("\"{}\"", name), node.children.len());
+                println!("          Trans: {:?}, Scale: {}", node.av.translation, node.av.scale);
+            }
+            NifBlock::BSFadeNode(fade) => {
+                let name = nif.get_string(fade.node.av.net.name_index).unwrap_or("");
+                println!("名前: {:<20} 子ノード数: {}", format!("\"{}\"", name), fade.node.children.len());
+                println!("          Trans: {:?}, Scale: {}", fade.node.av.translation, fade.node.av.scale);
             }
             NifBlock::NiTriStripsData(data) => {
                 println!(
@@ -101,6 +110,11 @@ fn dump_nif<R: std::io::BufRead>(reader: &mut R, title: &str) -> Result<(), Box<
                     data.num_triangles,
                     data.num_strips
                 );
+                let (min, max) = data.common.vertices.iter().fold(
+                    (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)),
+                    |(min, max), v| (min.min(Vec3::new(v.x, v.y, v.z)), max.max(Vec3::new(v.x, v.y, v.z))),
+                );
+                println!("          頂点 Min: {:?}, Max: {:?}", min, max);
             }
             NifBlock::BSShaderTextureSet(set) => {
                 println!("スロット数: {}", set.textures.len());
