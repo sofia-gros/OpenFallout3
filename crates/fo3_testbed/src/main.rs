@@ -249,9 +249,35 @@ fn dump_nif<R: std::io::BufRead>(reader: &mut R, title: &str) -> Result<(), Box<
             NifBlock::BhkSimpleShapePhantom(p) => {
                 println!("SimpleShapePhantom Shape: {}", p.common.shape);
             }
+            NifBlock::NiSkinData(sd) => {
+                println!(
+                    "ルート変換 Scale: {:.3} ボーン数: {}",
+                    sd.skin_transform_scale,
+                    sd.bone_list.len()
+                );
+            }
+            NifBlock::NiSkinInstance(inst) => {
+                println!(
+                    "Data: {} Partition: {} SkeletonRoot: {} ボーン数: {}",
+                    inst.data,
+                    inst.skin_partition,
+                    inst.skeleton_root,
+                    inst.bones.len()
+                );
+            }
+            NifBlock::NiSkinPartition(part) => {
+                println!("パーティション数: {}", part.partitions.len());
+                for (pi, p) in part.partitions.iter().enumerate() {
+                    println!(
+                        "          [{}] 頂点数: {} 三角形数: {} ボーン数: {}",
+                        pi, p.num_vertices, p.num_triangles, p.num_bones
+                    );
+                }
+            }
             NifBlock::Unknown { type_name: _, data } => {
                 println!("(未対応/スキップ - {} バイト)", data.len());
             }
+
         }
     }
 

@@ -17,6 +17,7 @@ pub mod lighting;
 pub mod collision;
 pub mod pipeline;
 pub mod scene;
+pub mod skinning;
 
 pub use vertex::Vertex;
 pub use mesh::GpuMesh;

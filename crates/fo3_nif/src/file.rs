@@ -338,7 +338,18 @@ impl NifFile {
                         }
                     }
                 },
+                "NiSkinData" => match NiSkinData::read(&mut cursor) {
+                    Ok(data) => NifBlock::NiSkinData(data),
+                    Err(e) => {
+                        eprintln!("[WARN] NiSkinDataパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
                 "NiSkinInstance" => match NiSkinInstance::read(&mut cursor) {
+
                     Ok(inst) => NifBlock::NiSkinInstance(inst),
                     Err(e) => {
                         eprintln!("[WARN] NiSkinInstanceパース失敗: {:?}", e);

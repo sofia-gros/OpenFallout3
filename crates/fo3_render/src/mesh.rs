@@ -128,6 +128,79 @@ impl GpuMesh {
         Self::create(device, &vertices, &indices)
     }
 
+    /// CPU スキニング後の頂点位置・法線で NiTriShapeData から GpuMesh を生成する。
+    ///
+    /// `skinned_positions` と `skinned_normals` はそれぞれ元の頂点インデックスに対応する
+    /// スキニング変換後の位置・法線配列（`apply_skinning_cpu` の出力）。
+    /// 参照元: `fo3_render::skinning::apply_skinning_cpu`
+    pub fn from_tri_shape_skinned(
+        device: &wgpu::Device,
+        data: &NiTriShapeData,
+        skinned_positions: &[[f32; 3]],
+        skinned_normals: &[[f32; 3]],
+    ) -> Option<Self> {
+        let n = data.common.num_vertices as usize;
+        if n == 0 { return None; }
+
+        let common = &data.common;
+        let has_uv       = !common.uv_sets.is_empty() && !common.uv_sets[0].is_empty();
+        let has_colors   = !common.vertex_colors.is_empty();
+        let has_tangents = !common.tangents.is_empty();
+        let has_bitangs  = !common.bitangents.is_empty();
+
+        let mut vertices = Vec::with_capacity(n);
+        for i in 0..n {
+            let pos = if i < skinned_positions.len() {
+                skinned_positions[i]
+            } else if i < common.vertices.len() {
+                let v = &common.vertices[i];
+                [v.x, v.y, v.z]
+            } else {
+                [0.0, 0.0, 0.0]
+            };
+
+            let normal = if i < skinned_normals.len() {
+                skinned_normals[i]
+            } else if i < common.normals.len() {
+                let n = &common.normals[i];
+                [n.x, n.y, n.z]
+            } else {
+                [0.0, 0.0, 1.0]
+            };
+
+            let uv = if has_uv && i < common.uv_sets[0].len() {
+                [common.uv_sets[0][i].u, common.uv_sets[0][i].v]
+            } else { [0.0, 0.0] };
+
+            let color = if has_colors && i < common.vertex_colors.len() {
+                let c = &common.vertex_colors[i];
+                [c.r, c.g, c.b, c.a]
+            } else { [1.0, 1.0, 1.0, 1.0] };
+
+            let tangent = if has_tangents && i < common.tangents.len() {
+                let t = &common.tangents[i];
+                [t.x, t.y, t.z]
+            } else { [0.0, 0.0, 0.0] };
+
+            let bitangent = if has_bitangs && i < common.bitangents.len() {
+                let b = &common.bitangents[i];
+                [b.x, b.y, b.z]
+            } else { [0.0, 0.0, 0.0] };
+
+            vertices.push(crate::vertex::Vertex { position: pos, normal, uv, color, tangent, bitangent });
+        }
+
+        let mut indices = Vec::with_capacity(data.triangles.len() * 3);
+        for tri in &data.triangles {
+            indices.push(tri.v1);
+            indices.push(tri.v2);
+            indices.push(tri.v3);
+        }
+        if indices.is_empty() { return None; }
+
+        Self::create(device, &vertices, &indices)
+    }
+
     /// NiTriStripsData から GpuMesh を生成する。
     pub fn from_tri_strips(device: &wgpu::Device, data: &NiTriStripsData) -> Option<Self> {
         let vertices = build_vertices(&data.common);

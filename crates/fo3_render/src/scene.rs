@@ -10,6 +10,8 @@ use fo3_gamebryo_core::NiTransform;
 use fo3_nif::{NifBlock, NifFile};
 use fo3_vfs::VfsManager;
 use glam::Vec3;
+use crate::skinning::apply_skinning_cpu;
+
 use wgpu::util::DeviceExt;
 
 use crate::collision::{extract_collision_lines, GpuCollisionMesh};
@@ -572,7 +574,31 @@ fn traverse_block(
 
             if shape.geom.data >= 0 && (shape.geom.data as usize) < nif.blocks.len() {
                 if let NifBlock::NiTriShapeData(ref data) = nif.blocks[shape.geom.data as usize] {
-                    if let Some(gpu_mesh) = GpuMesh::from_tri_shape(device, data) {
+                    // NiSkinInstance が存在する場合は CPU スキニングを適用する
+                    // 参照元: knowledge/actor_and_skin_mesh.md, Gamebryo 2.6 NiSkinInstance::Update
+                    let gpu_mesh = if shape.geom.skin_instance >= 0 {
+                        if let Some(inst_idx) = Some(shape.geom.skin_instance as usize) {
+                            if inst_idx < nif.blocks.len() {
+                                if let NifBlock::NiSkinInstance(ref inst) = nif.blocks[inst_idx] {
+                                    if let Some((pos, nrm)) = apply_skinning_cpu(data, inst, nif) {
+                                        GpuMesh::from_tri_shape_skinned(device, data, &pos, &nrm)
+                                    } else {
+                                        GpuMesh::from_tri_shape(device, data)
+                                    }
+                                } else {
+                                    GpuMesh::from_tri_shape(device, data)
+                                }
+                            } else {
+                                GpuMesh::from_tri_shape(device, data)
+                            }
+                        } else {
+                            GpuMesh::from_tri_shape(device, data)
+                        }
+                    } else {
+                        GpuMesh::from_tri_shape(device, data)
+                    };
+
+                    if let Some(gpu_mesh) = gpu_mesh {
                         let render_mesh = create_render_mesh(
                             device,
                             context,
@@ -595,6 +621,7 @@ fn traverse_block(
                 }
             }
         }
+
         NifBlock::NiTriStrips(strips) => {
             if is_node_hidden(&strips.geom.av, nif) {
                 return;

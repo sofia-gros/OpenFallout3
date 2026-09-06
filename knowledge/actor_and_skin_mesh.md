@@ -90,3 +90,25 @@ $$v' = \sum_{i=0}^{3} w_i \cdot M_{\text{bone}[i]} \cdot B_{\text{bone}[i]} \cdo
 - $w_i$: `vertex_weights[i]` (重み)
 - $B_{\text{bone}[i]}$: 初期バインドポーズの逆行列（`skin_to_bone` 変換行列、`NiSkinData` に格納）
 - $M_{\text{bone}[i]}$: 現在のボーンノードのワールド変換行列（スケルトン階層から算出）
+
+---
+
+## 4. 実装ステータス (2026-09-07 更新)
+
+| 項目 | 状態 |
+|---|---|
+| `NiSkinData` パーサー (`fo3_nif::blocks::skin`) | 完了 |
+| `BoneData`, `BoneVertData` パーサー | 完了 |
+| `NiSkinInstance` パーサー | 完了 |
+| `NiSkinPartition` + `SkinPartition` パーサー | 完了 |
+| CPU スキニング (`fo3_render::skinning`) | 完了（バインドポーズ T-Pose） |
+| `GpuMesh::from_tri_shape_skinned` | 完了 |
+| `scene.rs` スキニング分岐 | 完了 |
+| GPU シェーダースキニング（ボーン行列パレット） | 未実装 |
+| KF アニメーション再生 | 未実装 |
+
+### CPU スキニング実装ファイル
+- `crates/fo3_nif/src/blocks/skin.rs` - `NiSkinData` / `BoneData` / `BoneVertData`
+- `crates/fo3_render/src/skinning.rs` - `apply_skinning_cpu`
+- `crates/fo3_render/src/mesh.rs` - `GpuMesh::from_tri_shape_skinned`
+- `crates/fo3_render/src/scene.rs` - `NiTriShape` スキニング分岐
