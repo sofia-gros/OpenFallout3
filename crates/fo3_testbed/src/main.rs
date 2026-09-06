@@ -13,6 +13,7 @@ use std::fs::File;
 use std::io::{BufReader, Cursor};
 use std::path::Path;
 use fo3_bsa::BsaArchive;
+use fo3_esm::EsmReader;
 use fo3_nif::{NifBlock, NifFile, NifHeader};
 use fo3_vfs::VfsManager;
 
@@ -20,10 +21,13 @@ fn print_usage() {
     println!("使用法:");
     println!("  cargo run -p fo3_testbed -- nif <path/to/mesh.nif>");
     println!("  cargo run -p fo3_testbed -- nif-dump <path/to/mesh.nif>");
-    println!("  cargo run -p fo3_testbed -- bsa-list <path/to/archive.bsa>");
+    println!("  cargo run -p fo3_testbed -- bsa-list <path/to/archive.bsa> [filter]");
     println!("  cargo run -p fo3_testbed -- bsa-extract <path/to/archive.bsa> <relative/path>");
     println!("  cargo run -p fo3_testbed -- vfs-test <data_dir> <relative/path>");
     println!("  cargo run -p fo3_testbed -- vfs-nif-dump <data_dir> <relative/path>");
+    println!("  cargo run -p fo3_testbed -- esm-header <path/to/file.esm>");
+    println!("  cargo run -p fo3_testbed -- esm-groups <path/to/file.esm>");
+    println!("  cargo run -p fo3_testbed -- esm-stat <path/to/file.esm> [limit]");
 }
 
 fn test_nif(nif_path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -278,6 +282,82 @@ fn test_vfs(data_dir: &str, relative_path: &str) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
+fn test_esm_header(esm_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== ESM ヘッダーパース検証: {} ===", esm_path);
+
+    let reader = EsmReader::open(esm_path)?;
+
+    println!("TES4 レコードヘッダー:");
+    println!("  シグネチャ: {}", reader.header_record.type_id);
+    println!("  データサイズ: {} バイト", reader.header_record.data_size);
+    println!("  フラグ: {:#010X}", reader.header_record.flags);
+    println!("  FormID: {:#010X}", reader.header_record.form_id.0);
+    println!("  バージョン: {}", reader.header_record.form_version);
+
+    println!("\nTES4 サブレコード情報:");
+    println!("  フォーマットバージョン: {}", reader.header.version);
+    println!("  レコード総数: {}", reader.header.num_records);
+    println!("  次オブジェクトID: {:#010X}", reader.header.next_object_id);
+    println!("  作者: \"{}\"", reader.header.author);
+    println!("  説明: \"{}\"", reader.header.description);
+    println!("  マスターファイル数: {}", reader.header.masters.len());
+    for (i, master) in reader.header.masters.iter().enumerate() {
+        println!("    [{}] {}", i, master);
+    }
+
+    println!("\nESM ヘッダーパース検証成功！");
+    Ok(())
+}
+
+fn test_esm_groups(esm_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== ESM トップレベルグループ一覧: {} ===", esm_path);
+
+    let mut reader = EsmReader::open(esm_path)?;
+    let groups = reader.list_top_groups()?;
+
+    println!("検出トップレベルグループ数: {}", groups.len());
+    println!("{:<4} {:<8} {:<12} {:<10}", "No", "タイプ", "サイズ(B)", "グループ種別");
+    println!("{:-<40}", "");
+
+    for (i, group) in groups.iter().enumerate() {
+        let label_str = String::from_utf8_lossy(&group.label);
+        println!(
+            "[{:02}] {:<8} {:<12} {}",
+            i,
+            label_str,
+            group.group_size,
+            group.group_type
+        );
+    }
+
+    println!("\nトップレベルグループ一覧取得完了！");
+    Ok(())
+}
+
+fn test_esm_stat(esm_path: &str, limit: Option<usize>) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== ESM STAT レコードパース検証: {} ===", esm_path);
+    if let Some(lim) = limit {
+        println!("最大取得件数: {}", lim);
+    }
+
+    let mut reader = EsmReader::open(esm_path)?;
+    let stats = reader.read_stat_records(limit)?;
+
+    println!("読み込み件数: {}", stats.len());
+    for (i, stat) in stats.iter().enumerate() {
+        println!(
+            "[{:03}] FormID: {:#010X} | EDID: {:<30} | Model: {}",
+            i,
+            stat.form_id.0,
+            format!("\"{}\"", stat.edid),
+            stat.model
+        );
+    }
+
+    println!("\nSTAT レコードパース検証成功！");
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
@@ -328,6 +408,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
             test_vfs_nif_dump(&args[2], &args[3])?;
+        }
+        "esm-header" => {
+            if args.len() < 3 {
+                print_usage();
+                return Ok(());
+            }
+            test_esm_header(&args[2])?;
+        }
+        "esm-groups" => {
+            if args.len() < 3 {
+                print_usage();
+                return Ok(());
+            }
+            test_esm_groups(&args[2])?;
+        }
+        "esm-stat" => {
+            if args.len() < 3 {
+                print_usage();
+                return Ok(());
+            }
+            let limit = args.get(3).and_then(|s| s.parse::<usize>().ok());
+            test_esm_stat(&args[2], limit)?;
         }
         _ => {
             if args[1].ends_with(".nif") {

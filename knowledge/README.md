@@ -16,3 +16,4 @@
 - [bsa_v104_format.md](./bsa_v104_format.md): BSA アーカイブフォーマット (v104 / Fallout 3) 詳細バイナリ仕様
 - [nif_blocks_geometry.md](./nif_blocks_geometry.md): Fallout 3 NIF ジオメトリ & マテリアルブロック詳細バイナリ仕様
 - [rendering_pipeline_and_viewer.md](./rendering_pipeline_and_viewer.md): wgpu レンダリングパイプラインとメッシュビューアーの設計仕様
+- [esm_file_format.md](./esm_file_format.md): Fallout 3 ESM / ESP ファイルフォーマット詳細バイナリ仕様

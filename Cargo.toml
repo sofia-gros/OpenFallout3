@@ -8,6 +8,7 @@ members = [
     "crates/fo3_testbed",
     "crates/fo3_render",
     "crates/fo3_viewer",
+    "crates/fo3_esm",
 ]
 
 [workspace.dependencies]
