@@ -1,5 +1,6 @@
 //! # NIF ブロック定義モジュール
 
+pub mod animation;
 pub mod bhk;
 pub mod extra;
 pub mod geometry;
@@ -7,6 +8,11 @@ pub mod node;
 pub mod shader;
 pub mod skin;
 
+pub use animation::{
+    ControlledBlock, NiBSplineBasisData, NiBSplineCompTransformInterpolator,
+    NiBSplineData, NiControllerSequence, NiStringPalette, NiTransformData,
+    NiTransformInterpolator,
+};
 pub use bhk::{
     BhkBlendCollisionObject, BhkBoxShape, BhkCapsuleShape, BhkCollisionObject,
     BhkConvexListShape, BhkConvexTransformShape, BhkConvexVerticesShape,
@@ -52,6 +58,15 @@ pub enum NifBlock {
     NiSkinInstance(NiSkinInstance),
     NiSkinPartition(NiSkinPartition),
     BSDismemberSkinInstance(BSDismemberSkinInstance),
+    // アニメーションブロック
+    NiStringPalette(NiStringPalette),
+    NiTransformInterpolator(NiTransformInterpolator),
+    NiTransformData(NiTransformData),
+    NiControllerSequence(NiControllerSequence),
+    NiBSplineBasisData(NiBSplineBasisData),
+    NiBSplineData(NiBSplineData),
+    NiBSplineCompTransformInterpolator(NiBSplineCompTransformInterpolator),
+
 
     // Havok コリジョンブロック
     BhkCollisionObject(BhkCollisionObject),

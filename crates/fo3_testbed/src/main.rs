@@ -285,9 +285,52 @@ fn dump_nif<R: std::io::BufRead>(reader: &mut R, title: &str) -> Result<(), Box<
                     );
                 }
             }
+            NifBlock::NiStringPalette(pal) => {
+                println!("パレットバッファ長: {} バイト", pal.palette.len());
+            }
+            NifBlock::NiTransformInterpolator(interp) => {
+                println!(
+                    "Trans: {:?} Scale: {:.3} DataRef: {}",
+                    interp.transform.translation, interp.transform.scale, interp.data
+                );
+            }
+            NifBlock::NiTransformData(data) => {
+                println!(
+                    "回転キー数: {} (Type={:?}), 移動キー数: {}, スケールキー数: {}",
+                    data.quaternion_keys.len(),
+                    data.rotation_type,
+                    data.translations.keys.len(),
+                    data.scales.keys.len()
+                );
+            }
+            NifBlock::NiControllerSequence(seq) => {
+                let name = nif.get_string(seq.name_index as u32).unwrap_or("");
+                println!(
+                    "名前: \"{}\" 時間: {:.2}s - {:.2}s 制御ブロック数: {} サイクル: {}",
+                    name, seq.start_time, seq.stop_time, seq.controlled_blocks.len(), seq.cycle_type
+                );
+            }
+            NifBlock::NiBSplineBasisData(b) => {
+                println!("制御点数: {}", b.num_control_points);
+            }
+            NifBlock::NiBSplineData(d) => {
+                println!(
+                    "Float制御点: {} 点, Compact制御点: {} 点",
+                    d.float_control_points.len(),
+                    d.compact_control_points.len()
+                );
+            }
+            NifBlock::NiBSplineCompTransformInterpolator(interp) => {
+                println!(
+                    "時間: {:.2}s - {:.2}s, SplineData: {}, Basis: {}, Trans: {:?}",
+                    interp.start_time, interp.stop_time, interp.spline_data, interp.basis_data, interp.transform.translation
+                );
+            }
             NifBlock::Unknown { type_name: _, data } => {
                 println!("(未対応/スキップ - {} バイト)", data.len());
             }
+
+
 
         }
     }

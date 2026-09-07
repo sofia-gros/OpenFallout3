@@ -379,6 +379,82 @@ impl NifFile {
                         }
                     }
                 },
+                "NiStringPalette" => match NiStringPalette::read(&mut cursor) {
+                    Ok(pal) => NifBlock::NiStringPalette(pal),
+                    Err(e) => {
+                        eprintln!("[WARN] NiStringPaletteパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "NiTransformInterpolator" | "BSRotAccumTransfInterpolator" => {
+                    match NiTransformInterpolator::read(&mut cursor) {
+                        Ok(interp) => NifBlock::NiTransformInterpolator(interp),
+                        Err(e) => {
+                            eprintln!("[WARN] NiTransformInterpolatorパース失敗: {:?}", e);
+                            NifBlock::Unknown {
+                                type_name: block_type_name.clone(),
+                                data: block_bytes,
+                            }
+                        }
+                    }
+                }
+                "NiTransformData" => match NiTransformData::read(&mut cursor) {
+                    Ok(data) => NifBlock::NiTransformData(data),
+                    Err(e) => {
+                        eprintln!("[WARN] NiTransformDataパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "NiControllerSequence" => match NiControllerSequence::read(&mut cursor) {
+                    Ok(seq) => NifBlock::NiControllerSequence(seq),
+                    Err(e) => {
+                        eprintln!("[WARN] NiControllerSequenceパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "NiBSplineBasisData" => match NiBSplineBasisData::read(&mut cursor) {
+                    Ok(b) => NifBlock::NiBSplineBasisData(b),
+                    Err(e) => {
+                        eprintln!("[WARN] NiBSplineBasisDataパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "NiBSplineData" => match NiBSplineData::read(&mut cursor) {
+                    Ok(d) => NifBlock::NiBSplineData(d),
+                    Err(e) => {
+                        eprintln!("[WARN] NiBSplineDataパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+                "NiBSplineCompTransformInterpolator" => {
+                    match NiBSplineCompTransformInterpolator::read(&mut cursor) {
+                        Ok(interp) => NifBlock::NiBSplineCompTransformInterpolator(interp),
+                        Err(e) => {
+                            eprintln!("[WARN] NiBSplineCompTransformInterpolatorパース失敗: {:?}", e);
+                            NifBlock::Unknown {
+                                type_name: block_type_name.clone(),
+                                data: block_bytes,
+                            }
+                        }
+                    }
+                }
+
+
 
                 _ => NifBlock::Unknown {
                     type_name: block_type_name.clone(),
