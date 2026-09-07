@@ -171,6 +171,62 @@ impl NiSkinInstance {
     }
 }
 
+/// ディスメンバー（四肢切断）対応スキンパーツ情報。
+///
+/// 参照元: `references/nifxml/nif.xml:L2591` (`BodyPartList`)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BodyPartList {
+    /// パーツフラグ（257 = デフォルト）
+    pub part_flag: u16,
+    /// ボディパーツ種別インデックス（0=頭部, 1=髪, ...）
+    pub body_part: u16,
+}
+
+impl BodyPartList {
+    /// バイナリストリームから `BodyPartList` を読み込む。
+    ///
+    /// 参照元: `references/nifxml/nif.xml:L2591` — size="4" (u16 + u16)
+    pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let part_flag = reader.read_u16::<LittleEndian>()?;
+        let body_part = reader.read_u16::<LittleEndian>()?;
+        Ok(BodyPartList { part_flag, body_part })
+    }
+}
+
+/// Bethesda 独自のスキンインスタンス（四肢切断パーツ情報付き）。
+///
+/// `NiSkinInstance` のサブクラス。スキニングデータへの参照構造は同一。
+/// 追加フィールドとして `num_partitions` 個の `BodyPartList` を持つ。
+///
+/// 参照元: `references/nifxml/nif.xml:L6722` (`BSDismemberSkinInstance`)
+#[derive(Clone, Debug, PartialEq)]
+pub struct BSDismemberSkinInstance {
+    /// 内包する `NiSkinInstance` データ（スキンデータ参照・ボーンリスト等）
+    pub skin_instance: NiSkinInstance,
+    /// ディスメンバーパーツリスト
+    pub partitions: Vec<BodyPartList>,
+}
+
+impl BSDismemberSkinInstance {
+    /// バイナリストリームから `BSDismemberSkinInstance` を読み込む。
+    ///
+    /// レイアウト: `NiSkinInstance` フィールド全体 + `uint num_partitions` + `[num_partitions] BodyPartList`
+    ///
+    /// 参照元: `references/nifxml/nif.xml:L6722` (`BSDismemberSkinInstance`)
+    pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
+        // 親クラス NiSkinInstance のフィールドを先に読む
+        let skin_instance = NiSkinInstance::read(reader)?;
+
+        let num_partitions = reader.read_u32::<LittleEndian>()? as usize;
+        let mut partitions = Vec::with_capacity(num_partitions);
+        for _ in 0..num_partitions {
+            partitions.push(BodyPartList::read(reader)?);
+        }
+
+        Ok(BSDismemberSkinInstance { skin_instance, partitions })
+    }
+}
+
 /// ハードウェアスキニング用サブメッシュ分割パーティション。
 ///
 /// 参照元: `references/nifxml/nif.xml:L2143` (`SkinPartition`)

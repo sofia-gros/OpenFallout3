@@ -22,7 +22,8 @@ pub use shader::{
     BSShaderNoLightingProperty, BSShaderPPLightingProperty, BSShaderTextureSet,
     NiAlphaProperty, NiMaterialProperty, NiStencilProperty,
 };
-pub use skin::{BoneData, BoneVertData, NiSkinData, NiSkinInstance, NiSkinPartition, SkinPartition};
+pub use skin::{BoneData, BoneVertData, BSDismemberSkinInstance, BodyPartList, NiSkinData, NiSkinInstance, NiSkinPartition, SkinPartition};
+
 
 
 /// パースされた NIF ブロックの列挙型。
@@ -50,6 +51,7 @@ pub enum NifBlock {
     NiSkinData(NiSkinData),
     NiSkinInstance(NiSkinInstance),
     NiSkinPartition(NiSkinPartition),
+    BSDismemberSkinInstance(BSDismemberSkinInstance),
 
     // Havok コリジョンブロック
     BhkCollisionObject(BhkCollisionObject),

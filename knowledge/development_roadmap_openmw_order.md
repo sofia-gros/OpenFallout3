@@ -7,12 +7,71 @@
 | **Phase 1: ファイル基盤** | `fo3_bsa`, `fo3_vfs` | **100% 完了** | BSA v104 完全解凍、ルーズファイル優先透過読み込み |
 | **Phase 2: 3Dメッシュパース** | `fo3_nif` | **100% 完了** | NiNode, BSFadeNode, NiTriShape/Strips, BSShaderPPLightingProperty, BSShaderTextureSet, NiMaterialProperty, NiAlphaProperty |
 | **Phase 3: レンダリング** | `fo3_render` | **100% 完了** | wgpu, DDS デコード, 法線マッピング, Blinn-Phong スペキュラ, Glow Map 自己発光, 半透明ソート描画, 地形スプラット |
-| **Phase 4: ESM 配置・データ構造** | `fo3_esm` | **100% 完了** | STAT, SCOL, DOOR, ACTI, FURN, CONT, LIGH, CELL, WRLD, LAND, REFR 拡張 (XTEL テレポートドア, XLOC 施錠, XESP 親連動, XMRK/TNAM マーカー, XOWN 所有権, XCNT スタック), ACHR/ACRE 配置アクター |
-| **Phase 4-3: 室内・屋外探索** | `fo3_viewer` | **達成済み** | Vault 101 / Megaton / Wasteland を光源・環境光・マテリアル付きでフリーカメラ探索可能 |
-| **Phase 5: コリジョンと基本物理** | `fo3_nif` (bhk), `fo3_physics` | **着手予定** | Havok 物理 / bhkRigidBody / bhkMoppBvTreeShape パース、接地・歩行コントローラー |
-| **Phase 6: スケルトンとアニメーション** | `fo3_gamebryo_anim` | 未着手 | NiSkinInstance, NiSkinData, ボーンスキニング, KF キーフレーム再生 |
-| **Phase 7: エクステリア動的ストリーミング** | `fo3_world` | 未着手 | $3 \times 3$ セルグリッド動的ロード/アンロード |
-| **Phase 8: スクリプト・ゲームプレイ** | `fo3_gameplay` | 未着手 | SCPT スクリプト仮想マシン, Pip-Boy UI, 会話 |
+| **Phase 4: ESM 配置・データ構造** | `fo3_esm` | **100% 完了** | STAT, SCOL, DOOR, ACTI, FURN, CONT, LIGH, CELL, WRLD, LAND, REFR 拡張, ACHR/ACRE 配置アクター |
+| **Phase 4-3: 室内・屋外探索** | `fo3_viewer` | **達成済み** | Vault 101 / Megaton / Wasteland をフリーカメラ探索可能 |
+| **Phase 5: コリジョンと基本物理** | `fo3_nif` (bhk), `fo3_physics` | **完了** | Rapier3D 物理エンジン統合、FPS 歩行モード、LAND 地形コライダー |
+| **Phase 6-A: スキニングランタイム基礎** | `fo3_nif`, `fo3_render` | **着手中** | NiSkinData パース完了、CPU スキニング実装済み（T-Pose 固定） |
+| **Phase 6-B: アニメーション再生基盤** | `fo3_nif`, `fo3_render` | 未着手 | NiTimeController, KF キーフレーム補間, アニメーションプレイヤー |
+| **Phase 6-C: NPC 配置・表示** | `fo3_viewer` | 未着手 | ACHR → RACE → スケルトン + 防具の組み立て、アイドル再生 |
+| **Phase 6-D: 基本インタラクト** | `fo3_viewer` | 未着手 | XTEL ドアテレポート、アクティベーター作動、コンテナ |
+| **Phase 6-E: プレイヤー/NPC 基礎システム** | `fo3_viewer` | 未着手 | 簡易 AI（注目）、会話 Stub、プレイヤーアクション |
+| **Phase 7: スクリプト VM** | `fo3_gameplay` | 未着手 | SCPT バイトコード VM（限定命令セットから） |
+| **Phase 8: HUD + Pip-Boy** | `fo3_gameplay` | 未着手 | 最低限の UI |
+| **Phase 9: ワールドストリーミング** | `fo3_world` | 未着手 | $3 \times 3$ セルグリッド動的ロード/アンロード |
+| **Phase 10: 本格ゲームプレイ** | `fo3_gameplay` | 未着手 | 戦闘・インベントリ・クエスト |
+
+---
+
+## 詳細フェーズ定義（Phase 6 A〜I）
+
+ユーザー指定の優先順位に従い、スキニング→アニメーション→NPC 配置の順で開発を進める。
+
+### Phase A：スキニングランタイム基礎（最優先・着手中）
+**目標**: 静止状態のスキンメッシュ（防具・素体）が正しく変形・表示されること。
+
+| 作業 | 状態 |
+| :--- | :--- |
+| `NiSkinData` パーサー実装 | **完了** |
+| `NiSkinInstance` / `NiSkinPartition` パーサー実装 | **完了** |
+| CPU スキニング (`apply_skinning_cpu`) | **完了（T-Pose）** |
+| スケルトン NIF の読み込みとボーン階層構築 | **未実装** |
+| バインドポーズでのスキンメッシュ表示確認 | 実装中 |
+| 静的セル表示が壊れていないこと | **確認済み** |
+
+**成功条件**: 単体の防具 NIF や素体を読み込んで、正しくスキンされた状態で表示できる。
+
+---
+
+### Phase B：アニメーション再生基盤
+**目標**: アイドルアニメーションが再生できる状態にする。
+
+| 作業 | 状態 |
+| :--- | :--- |
+| KF ファイルのヘッダー・ブロックパース | 未着手 |
+| `NiTransformInterpolator` / `NiTransformData` パース | 未着手 |
+| キーフレーム補間（線形・四元数 Slerp） | 未着手 |
+| スケルトン時間更新ループ | 未着手 |
+| 簡易アニメーションプレイヤー（単一ループ） | 未着手 |
+| スキンメッシュをアニメに合わせて変形 | 未着手 |
+
+---
+
+### Phase C：NPC 配置・表示
+**目標**: セル内に NPC が実際に出現し、アイドルで動いている。
+
+---
+
+### Phase D：基本インタラクト
+**目標**: 最低限のインタラクションが動く（ドア XTEL、アクティベーター、コンテナ）。
+
+---
+
+### Phase E：プレイヤー/NPC 基礎システム
+**目標**: 簡易 AI（注目）、会話 Stub、プレイヤーアクション。
+
+---
+
+
 
 ---
 

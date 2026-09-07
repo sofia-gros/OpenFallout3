@@ -574,17 +574,20 @@ fn traverse_block(
 
             if shape.geom.data >= 0 && (shape.geom.data as usize) < nif.blocks.len() {
                 if let NifBlock::NiTriShapeData(ref data) = nif.blocks[shape.geom.data as usize] {
-                    // NiSkinInstance が存在する場合は CPU スキニングを適用する
+                    // NiSkinInstance / BSDismemberSkinInstance が存在する場合は CPU スキニングを適用する
                     // 参照元: knowledge/actor_and_skin_mesh.md, Gamebryo 2.6 NiSkinInstance::Update
                     let gpu_mesh = if shape.geom.skin_instance >= 0 {
-                        if let Some(inst_idx) = Some(shape.geom.skin_instance as usize) {
-                            if inst_idx < nif.blocks.len() {
-                                if let NifBlock::NiSkinInstance(ref inst) = nif.blocks[inst_idx] {
-                                    if let Some((pos, nrm)) = apply_skinning_cpu(data, inst, nif) {
-                                        GpuMesh::from_tri_shape_skinned(device, data, &pos, &nrm)
-                                    } else {
-                                        GpuMesh::from_tri_shape(device, data)
-                                    }
+                        let inst_idx = shape.geom.skin_instance as usize;
+                        if inst_idx < nif.blocks.len() {
+                            // NiSkinInstance への参照を取得（BSDismemberSkinInstance も内包する）
+                            let skin_inst_ref = match &nif.blocks[inst_idx] {
+                                NifBlock::NiSkinInstance(ref inst) => Some(inst),
+                                NifBlock::BSDismemberSkinInstance(ref bdsi) => Some(&bdsi.skin_instance),
+                                _ => None,
+                            };
+                            if let Some(inst) = skin_inst_ref {
+                                if let Some((pos, nrm)) = apply_skinning_cpu(data, inst, nif) {
+                                    GpuMesh::from_tri_shape_skinned(device, data, &pos, &nrm)
                                 } else {
                                     GpuMesh::from_tri_shape(device, data)
                                 }
@@ -597,6 +600,7 @@ fn traverse_block(
                     } else {
                         GpuMesh::from_tri_shape(device, data)
                     };
+
 
                     if let Some(gpu_mesh) = gpu_mesh {
                         let render_mesh = create_render_mesh(

@@ -369,6 +369,17 @@ impl NifFile {
                         }
                     }
                 },
+                "BSDismemberSkinInstance" => match BSDismemberSkinInstance::read(&mut cursor) {
+                    Ok(inst) => NifBlock::BSDismemberSkinInstance(inst),
+                    Err(e) => {
+                        eprintln!("[WARN] BSDismemberSkinInstanceパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
+
                 _ => NifBlock::Unknown {
                     type_name: block_type_name.clone(),
                     data: block_bytes,
