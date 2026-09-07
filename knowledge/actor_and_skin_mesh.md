@@ -145,7 +145,7 @@ NiTriShape (メッシュ) ブロックがボーン NiNode ブロックよりフ�
 
 ---
 
-## 5. 実装ステータス (2026-09-07 更新)
+## 5. 実装ステータス (2026-09-08 更新)
 
 | 項目 | 状態 |
 |---|---|
@@ -160,12 +160,15 @@ NiTriShape (メッシュ) ブロックがボーン NiNode ブロックよりフ�
 | 動的ボーン行列のスキニング反映 | 完了（`apply_skinning_cpu_with_bones` に `&[Mat4]` を供給） |
 | FK 再計算 (`recompute_bone_world_map_with_pose`) | 完了（2026-09-08） |
 | KF ボーン適用 (`apply_pose`) | 完了（2026-09-08） |
+| 時間更新ループ + 簡易プレイヤー (`AnimationPlayer`) | 完了（2026-09-08, `fo3_render::animation`） |
+| B-Spline 圧縮補間 (NiBSplineCompTransformInterpolator) | 完了（Cox-de Boor 基底評価） |
 | 実アセットでの T-Pose スキニング確認 | 未着手（fo3_viewer での視覚確認が必要） |
+| 実アセットでのアニメーション再生確認 | 未着手（fo3_viewer への KF 再生統合が Phase 6-C） |
 | GPU シェーダースキニング（ボーン行列パレット） | 未実装 |
-| KF アニメーション再生 | 未実装 |
 
 ### CPU スキニング実装ファイル
 - `crates/fo3_nif/src/blocks/skin.rs` - `NiSkinData` / `BoneData` / `BoneVertData`
-- `crates/fo3_render/src/skinning.rs` - `apply_skinning_cpu`
+- `crates/fo3_render/src/skinning.rs` - `apply_skinning_cpu` / `apply_skinning_cpu_with_bones`
+- `crates/fo3_render/src/animation.rs` - `AnimationClip` / `AnimationPlayer` / `apply_pose` / B-Spline 評価
 - `crates/fo3_render/src/mesh.rs` - `GpuMesh::from_tri_shape_skinned`
-- `crates/fo3_render/src/scene.rs` - `NiTriShape` スキニング分岐
+- `crates/fo3_render/src/scene.rs` - `NiTriShape` スキニング分岐 / FK 再計算

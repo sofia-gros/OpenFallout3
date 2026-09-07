@@ -27,5 +27,8 @@ pub use camera::{CameraUniform, OrbitCamera};
 pub use lighting::{GpuPointLight, LightingUniform, PlacedPointLight};
 pub use collision::{CollisionVertex, GpuCollisionMesh, extract_collision_lines, HAVOK_SCALE};
 pub use pipeline::RenderContext;
-pub use scene::{RenderMesh, RenderScene};
-pub use animation::{AnimationClip, BoneChannel};
+pub use scene::{RenderMesh, RenderScene, recompute_bone_world_map_with_pose};
+pub use skinning::{apply_skinning_cpu, apply_skinning_cpu_with_bones};
+pub use animation::{
+    AnimationClip, AnimationPlayer, BoneChannel, CycleType, SkeletonPose, apply_pose,
+};

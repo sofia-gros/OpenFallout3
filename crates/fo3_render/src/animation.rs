@@ -339,6 +339,31 @@ pub struct BoneChannel {
     pub interpolator_index: i32,
 }
 
+/// アニメーションのループ種別 (Gamebryo `CycleType`)。
+///
+/// 参照元: `references/nifxml/nif.xml:L1022` (CycleType enum)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CycleType {
+    /// CYCLE_LOOP  (0): 時間が `[start, stop]` を繰り返し再生される。
+    Loop,
+    /// CYCLE_REVERSE (1): 往復再生（前進→後進を交互に繰り返す）。
+    Reverse,
+    /// CYCLE_CLAMP (2): 最後のキーフレームで停止する。
+    Clamp,
+}
+
+impl CycleType {
+    /// 生の uint 値から `CycleType` へ変換する。
+    /// 参照元: `references/nifxml/nif.xml:L1022-L1026`
+    pub fn from_u32(v: u32) -> Self {
+        match v {
+            0 => CycleType::Loop,
+            1 => CycleType::Reverse,
+            _ => CycleType::Clamp,
+        }
+    }
+}
+
 /// ロードされたアニメーションシーケンスプレイヤー。
 #[derive(Clone, Debug)]
 pub struct AnimationClip {
@@ -388,22 +413,31 @@ impl AnimationClip {
         })
     }
 
-    /// 指定時刻（経過秒数）における正規化時間（ループ内時刻）を計算する。
+    /// 指定時刻（経過秒数）を `CycleType` に従ってシーケンス内時間へ正規化する。
+    ///
+    /// - `CycleType::Loop`: `[start, stop]` を繰り返し (`scaled % duration`)。
+    /// - `CycleType::Reverse`: 往復再生。周期 `2*duration` で前進・後進を交互に繰り返す。
+    /// - `CycleType::Clamp`: 終端で停止 (`scaled.clamp(0, duration)`)。
+    ///
+    /// 参照元: Gamebryo 2.6 `NiControllerSequence::ComputeScaledTime`,
+    /// `references/nifxml/nif.xml:L1022` (CycleType enum)
     pub fn evaluate_time(&self, elapsed_seconds: f32) -> f32 {
         if self.duration <= 1e-5 {
             return self.start_time;
         }
-        let scaled_time = elapsed_seconds * self.frequency;
-        // サイクルタイプ: 0=LOOP, 1=REVERSE, 2=CLAMP
-        match self.cycle_type {
-            0 => {
-                // ループ再生
-                self.start_time + (scaled_time % self.duration)
+        let scaled_time = (elapsed_seconds * self.frequency).max(0.0);
+        match CycleType::from_u32(self.cycle_type) {
+            CycleType::Loop => self.start_time + (scaled_time % self.duration),
+            CycleType::Reverse => {
+                let period = self.duration * 2.0;
+                let t = scaled_time % period;
+                if t > self.duration {
+                    self.start_time + (period - t)
+                } else {
+                    self.start_time + t
+                }
             }
-            _ => {
-                // デフォルトはループまたはクランプ
-                self.start_time + (scaled_time % self.duration)
-            }
+            CycleType::Clamp => self.start_time + scaled_time.min(self.duration),
         }
     }
 
@@ -433,7 +467,89 @@ impl AnimationClip {
     }
 }
 
-/// `NiTransformInterpolator` からトランスフォームをサンプリングする。
+/// 単一ループの簡易アニメーションプレイヤー。
+///
+/// 1 本の `AnimationClip`（KF の `NiControllerSequence`）を再生し、フレーム毎の
+/// 経過時間 `dt` からシーケンス内時間を進行・ループ制御し、`SkeletonPose` を更新する。
+///
+/// 使い方の流れ (Gamebryo 2.6 のボーン適用ループ):
+///
+/// ```ignore
+/// let mut player = AnimationPlayer::new(clip);
+/// let mut pose = SkeletonPose::default();
+/// loop {
+///     let updated = player.update(kf, dt, &mut pose); // ボーン名集合を返す
+///     recompute_bone_world_map_with_pose(skeleton_nif, &pose, &mut bone_world_map);
+///     // rebind 後のスキニングは apply_skinning_cpu_with_bones へ bone_world_map を渡す
+/// }
+/// ```
+///
+/// 参照元:
+/// - Gamebryo 2.6 `NiControllerSequence::Update`
+/// - Gamebryo 2.6 `NiTimeController::Update` (時間進行)
+/// - `knowledge/animation_kf_format.md` (セクション 5)
+#[derive(Clone, Debug)]
+pub struct AnimationPlayer {
+    /// 再生対象のクリップ。
+    pub clip: AnimationClip,
+    /// ループ種別 (`AnimationClip.cycle_type` から導出)。
+    pub cycle_type: CycleType,
+    /// 再生中フラグ (`false` で一時停止)。
+    pub playing: bool,
+    /// 実経過秒数 (`frequency` 適用前)。
+    elapsed: f32,
+    /// 現在のシーケンス内時間 (最後の `update` で確定)。
+    pub current_time: f32,
+    /// `CycleType::Clamp` で終端に達したか (再生が完了したか)。
+    pub finished: bool,
+}
+
+impl AnimationPlayer {
+    /// クリップからプレイヤーを構築する。再生は開始状態で、時刻は `start_time` に初期化される。
+    pub fn new(clip: AnimationClip) -> Self {
+        let cycle_type = CycleType::from_u32(clip.cycle_type);
+        let current_time = clip.start_time;
+        Self {
+            clip,
+            cycle_type,
+            playing: true,
+            elapsed: 0.0,
+            current_time,
+            finished: false,
+        }
+    }
+
+    /// 経過秒数 `elapsed_seconds` へ直接シークする。以降の `update` はその時刻から進行する。
+    pub fn seek(&mut self, elapsed_seconds: f32) {
+        self.elapsed = elapsed_seconds.max(0.0);
+        self.current_time = self.clip.evaluate_time(self.elapsed);
+        self.finished = false;
+    }
+
+    /// 一時停止／再開を切り替える。
+    pub fn set_playing(&mut self, playing: bool) {
+        self.playing = playing;
+    }
+
+    /// フレーム毎の経過時間 `dt` (秒) で時間を進行させ、`pose` を更新する。
+    ///
+    /// 戻り値はこのフレームで姿勢が変化したボーン名の集合 (`apply_pose` の結果)。
+    /// 再生停止中は時間を進めず空の集合を返す。
+    pub fn update(&mut self, kf: &NifFile, dt: f32, pose: &mut SkeletonPose) -> Vec<String> {
+        if !self.playing {
+            return Vec::new();
+        }
+        self.elapsed += dt.max(0.0);
+        let scaled = self.elapsed * self.clip.frequency;
+        // CycleType::Clamp では終端 (stop_time) 到達で完了とする
+        if self.cycle_type == CycleType::Clamp && scaled >= self.clip.duration {
+            self.finished = true;
+        }
+        self.current_time = self.clip.evaluate_time(self.elapsed);
+        apply_pose(kf, pose, self.current_time)
+    }
+}
+
 fn sample_transform_interpolator(
     interp: &NiTransformInterpolator,
     time: f32,
@@ -581,6 +697,8 @@ pub fn apply_pose(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fo3_nif::header::{BSStreamHeader, ExportString, NifHeader};
+    use fo3_nif::{NifBlock, NifFile};
 
     /// 単純な NiTransformInterpolator (キーデータなしの固定姿勢) を持つ KF 上で、
     /// `apply_pose` がボーン名を解決してローカルトランスフォームを評価できることを検証する。
@@ -661,5 +779,129 @@ mod tests {
         let t = pose.overrides.get("Bip01").expect("Bip01 should be overridden");
         assert_eq!(t.translation, Vec3::new(5.0, 6.0, 7.0));
         assert_eq!(t.scale, 1.0);
+    }
+
+    /// `AnimationClip::evaluate_time` が CycleType に応じてシーケンス内時間を正しく
+    /// 正規化 (LOOP / REVERSE / CLAMP) できることを検証する。
+    #[test]
+    fn test_evaluate_time_cycle_types() {
+        // start=0, stop=10, duration=10, frequency=1.0
+        let base = AnimationClip {
+            name: "t".to_string(),
+            start_time: 0.0,
+            stop_time: 10.0,
+            duration: 10.0,
+            cycle_type: 0,
+            frequency: 1.0,
+            channels: HashMap::new(),
+        };
+
+        // LOOP (0): 25 秒 → 25 % 10 = 5
+        let loop_clip = AnimationClip { cycle_type: 0, ..base.clone() };
+        assert!((loop_clip.evaluate_time(25.0) - 5.0).abs() < 1e-5);
+        assert!((loop_clip.evaluate_time(10.0) - 0.0).abs() < 1e-5);
+
+        // REVERSE (1): 周期 20。15 秒 → 15 > 10 なので 20-15 = 5
+        let rev = AnimationClip { cycle_type: 1, ..base.clone() };
+        assert!((rev.evaluate_time(5.0) - 5.0).abs() < 1e-5); // 前進
+        assert!((rev.evaluate_time(15.0) - 5.0).abs() < 1e-5); // 後進
+        assert!((rev.evaluate_time(25.0) - 5.0).abs() < 1e-5); // 再び前進
+
+        // CLAMP (2): 12 秒 → 終端 10 で停止
+        let clamp = AnimationClip { cycle_type: 2, ..base.clone() };
+        assert!((clamp.evaluate_time(3.0) - 3.0).abs() < 1e-5);
+        assert!((clamp.evaluate_time(12.0) - 10.0).abs() < 1e-5);
+    }
+
+    /// `AnimationPlayer::update` が dt ごとにシーケンス内時間を進行させ、姿勢を更新することを検証する。
+    #[test]
+    fn test_animation_player_update_progresses_time() {
+        // LOOP, start=0, stop=10
+        let clips = AnimationClip {
+            name: "idle".to_string(),
+            start_time: 0.0,
+            stop_time: 10.0,
+            duration: 10.0,
+            cycle_type: 0,
+            frequency: 1.0,
+            channels: HashMap::new(),
+        };
+        let mut player = AnimationPlayer::new(clips);
+        assert!((player.current_time - 0.0).abs() < 1e-5);
+
+        let mut pose = SkeletonPose::default();
+        // 空の KF (ボーンなし) でも姿勢更新が空集合を返す
+        let kf = NifFile {
+            header: NifHeader {
+                header_string: "Gamebryo File Format, Version 20.2.0.7\n".to_string(),
+                version: 0x14020007,
+                endian_type: 1,
+                user_version: 11,
+                num_blocks: 0,
+                bs_header: BSStreamHeader {
+                    bs_version: 34,
+                    author: ExportString { value: String::new() },
+                    process_script: None,
+                    export_script: ExportString { value: String::new() },
+                },
+                block_types: vec![],
+                block_type_indices: vec![],
+                block_sizes: vec![],
+                strings: vec![],
+            },
+            blocks: vec![],
+        };
+
+        let updated = player.update(&kf, 2.5, &mut pose);
+        assert!(updated.is_empty());
+        assert!((player.current_time - 2.5).abs() < 1e-5);
+        // 合計 12.5 秒 → LOOP で 12.5 % 10 = 2.5
+        player.update(&kf, 10.0, &mut pose);
+        assert!((player.current_time - 2.5).abs() < 1e-5);
+    }
+
+    /// `AnimationPlayer` が CycleType::CLAMP で終端に達したとき `finished` を立てることを検証する。
+    #[test]
+    fn test_animation_player_clamp_finishes() {
+        let clips = AnimationClip {
+            name: "clamp".to_string(),
+            start_time: 0.0,
+            stop_time: 10.0,
+            duration: 10.0,
+            cycle_type: 2, // CLAMP
+            frequency: 1.0,
+            channels: HashMap::new(),
+        };
+        let mut player = AnimationPlayer::new(clips);
+        let kf = NifFile {
+            header: NifHeader {
+                header_string: "Gamebryo File Format, Version 20.2.0.7\n".to_string(),
+                version: 0x14020007,
+                endian_type: 1,
+                user_version: 11,
+                num_blocks: 0,
+                bs_header: BSStreamHeader {
+                    bs_version: 34,
+                    author: ExportString { value: String::new() },
+                    process_script: None,
+                    export_script: ExportString { value: String::new() },
+                },
+                block_types: vec![],
+                block_type_indices: vec![],
+                block_sizes: vec![],
+                strings: vec![],
+            },
+            blocks: vec![],
+        };
+        let mut pose = SkeletonPose::default();
+
+        player.update(&kf, 4.0, &mut pose);
+        assert!(!player.finished);
+        assert!((player.current_time - 4.0).abs() < 1e-5);
+
+        player.update(&kf, 8.0, &mut pose); // 合計 12 >= duration 10
+        assert!(player.finished);
+        // CLAMP なので終端 10 に固定
+        assert!((player.current_time - 10.0).abs() < 1e-5);
     }
 }

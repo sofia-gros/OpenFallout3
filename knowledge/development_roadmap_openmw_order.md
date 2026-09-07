@@ -11,7 +11,7 @@
 | **Phase 4-3: 室内・屋外探索** | `fo3_viewer` | **達成済み** | Vault 101 / Megaton / Wasteland をフリーカメラ探索可能 |
 | **Phase 5: コリジョンと基本物理** | `fo3_nif` (bhk), `fo3_physics` | **完了** | Rapier3D 物理エンジン統合、FPS 歩行モード、LAND 地形コライダー |
 | **Phase 6-A: スキニングランタイム基礎** | `fo3_nif`, `fo3_render` | **着手中** | NiSkinData パース完了、CPU スキニング実装済み（T-Pose 固定） |
-| **Phase 6-B: アニメーション再生基盤** | `fo3_nif`, `fo3_render` | 未着手 | NiTimeController, KF キーフレーム補間, アニメーションプレイヤー |
+| **Phase 6-B: アニメーション再生基盤** | `fo3_nif`, `fo3_render` | 達成済み | NiTimeController, KF キーフレーム補間, アニメーションプレイヤー |
 | **Phase 6-C: NPC 配置・表示** | `fo3_viewer` | 未着手 | ACHR → RACE → スケルトン + 防具の組み立て、アイドル再生 |
 | **Phase 6-D: 基本インタラクト** | `fo3_viewer` | 未着手 | XTEL ドアテレポート、アクティベーター作動、コンテナ |
 | **Phase 6-E: プレイヤー/NPC 基礎システム** | `fo3_viewer` | 未着手 | 簡易 AI（注目）、会話 Stub、プレイヤーアクション |
@@ -57,17 +57,18 @@
 | KF ファイルのヘッダー・ブロックパース | **完了** |
 | `NiTransformInterpolator` / `NiTransformData` パース | **完了** |
 | キーフレーム補間（線形・四元数 Slerp） | **完了** |
-| スケルトン時間更新ループ | 未着手 |
+| スケルトン時間更新ループ | **完了（2026-09-08）** |
 | ボーン適用ループ (`apply_pose` → FK → skinning) | **完了（2026-09-08）** |
-| 簡易アニメーションプレイヤー（単一ループ） | 未着手 |
+| 簡易アニメーションプレイヤー（単一ループ） | **完了（2026-09-08）** |
 | スキンメッシュをアニメに合わせて変形 | 実装済み（`apply_pose` + `recompute_bone_world_map_with_pose` + `apply_skinning_cpu_with_bones`） |
 
 **次のステップ**:
 1. ~~`NiControllerSequence` の `ControlledBlock` からボーン名→インターポレータのマップを構築~~ → **完了**（`AnimationClip::from_kf`）
 2. ~~ボーン階層へのアニメーション適用（各フレームでインターポレータを評価し、ボーンのローカル変換を更新）~~ → **完了**（`apply_pose` → `recompute_bone_world_map_with_pose`）
-3. `NiBSplineCompTransformInterpolator` の B-Spline 補間実装（FO3 で主流）→ **未着手**（現在は基礎 NiQuatTransform のみ）
-4. アニメーション時間の進行とループ制御（`NiTimeController` の Flags に基づく）
+3. ~~スケルトン時間更新ループ + 簡易アニメーションプレイヤー~~ → **完了（2026-09-08）**（`AnimationPlayer`：`update(dt)` で CycleType に応じた LOOP/REVERSE/CLAMP 進行、`seek`、`finished` 検出）
+4. `NiBSplineCompTransformInterpolator` の B-Spline 補間実装 → **実装済み**（`sample_bspline_transform_interpolator`、Cox-de Boor 基底）
 5. ~~スキンメッシュをアニメーションに合わせて変形~~ → **完了**（`apply_skinning_cpu_with_bones` に動的ボーン行列を渡す）
+6. 実アセットでの視覚確認（fo3_viewer に KF 再生を統合して NPC を動かす）→ **次のフェーズ (Phase 6-C)**
 
 ---
 

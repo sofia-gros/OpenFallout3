@@ -186,10 +186,10 @@ ControlledBlock (FO3):
 ```
 
 ### 注意 (B-Spline)
-- `NiBSplineCompTransformInterpolator` は FO3 で広く使用されるが、現状は
-  `sample_quat_transform(&bsp.transform)` で基礎 NiQuatTransform のみ参照（スプライン補間未実装）。
-- 本格的なアニメーション再生には `NiBSplineData` / `NiBSplineBasisData` の
-  Catmull-Rom / B-Spline 制御点評価が必要（次のステップ）。
+- `NiBSplineCompTransformInterpolator` は FO3 で広く使用される。スプライン補間は
+  `sample_bspline_transform_interpolator` (`animation.rs`) で実装済み（Cox-de Boor 基底評価、
+  セクション 5.5 参照）。チャンネルハンドルが無効 (`0xFFFF`) の場合は基礎 `NiQuatTransform` に
+  フォールバックする。
 
 ---
 
@@ -238,6 +238,45 @@ output[i] = output[i] * half_range + offset                                     
 - `blend` に渡す compact 値は `c / SHRT_MAX` で [-1,1] に正規化
 - `Compute` の `mult` 引数はブレンド重み、`Adjust` の `mult` は half_range
 - 各チャンネル (translation / rotation / scale) は独立したハンドル・offset・half_range を持つ
+
+---
+
+## 5.6 簡易アニメーションプレイヤー (`AnimationPlayer` 実装済み 2026-09-08)
+
+`crates/fo3_render/src/animation.rs` に単一ループ再生のプレイヤーを追加した。
+
+### CycleType (Gamebryo `CycleType` enum, nif.xml L1022)
+| 値 | 名称 | 動作 |
+|---|---|---|
+| 0 | `CYCLE_LOOP` | `[start, stop]` を繰り返し (`scaled % duration`) |
+| 1 | `CYCLE_REVERSE` | 往復再生。周期 `2*duration` で前進→後進を交互に繰り返す |
+| 2 | `CYCLE_CLAMP` | 終端 `stop_time` で停止。終端到達で `finished = true` |
+
+`AnimationClip::evaluate_time(elapsed)` は `elapsed * frequency` をスケーリングし、
+CycleType に応じてシーケンス内時間へ正規化する。
+
+### API
+```
+AnimationPlayer::new(clip)                      // 再生開始状態で構築 (current_time = start_time)
+player.update(kf, dt, &mut pose) -> Vec<String>  // dt 秒進行 + apply_pose。変更ボーン名集合を返す
+player.seek(elapsed_seconds)                    // 任意時刻へシーク
+player.set_playing(bool)                        // 一時停止/再開
+player.current_time                             // 現在のシーケンス内時間
+player.finished                                 // CLAMP で終端到達したか
+```
+
+### 再生フロー (毎フレーム)
+```
+1. player.update(kf, dt, &mut pose)         // 時間進行 + ボーンローカル変換を pose.overrides へ
+2. recompute_bone_world_map_with_pose(skel_nif, &pose, &mut bone_world_map)  // FK 再合成
+3. resolve_bone_world_transforms(inst, &bone_world_map) → &[Mat4]
+4. apply_skinning_cpu_with_bones(geo, inst, nif, Some(&bone_transforms))     // 変形
+```
+
+- 再生停止中 (`playing = false`) は時間を進めず空集合を返す（一時停止相当）。
+- `evaluate_time` の REPEAT / REVERSE は Gamebryo 2.6 `NiControllerSequence::ComputeScaledTime`
+  （`cyclestarttime` ベースの相対化）相当の簡易実装。将来 `NiControllerManager` で
+  複数シーケンスブレンドを扱う際に本格化する。
 
 ---
 
