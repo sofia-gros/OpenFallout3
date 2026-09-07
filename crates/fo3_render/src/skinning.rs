@@ -44,10 +44,7 @@ fn build_bone_matrix(translation: Vector3, rotation: Matrix33, scale: f32) -> Ma
     trans_mat * rot_mat * scale_mat
 }
 
-/// CPU スキニングを適用し、変換後の頂点位置・法線を返す。
-///
-/// `NiSkinPartition` の各パーティションを走査し、`SkinPartition.vertex_map` を使って
-/// 元の `NiTriShapeData` 頂点インデックスに対応する変換済み位置・法線を上書きする。
+/// CPU スキニングを適用し、変換後の頂点位置・法線を返す（バインドポーズ固定）。
 ///
 /// 参照元:
 /// - `knowledge/actor_and_skin_mesh.md`
@@ -57,6 +54,20 @@ pub fn apply_skinning_cpu(
     geo_data: &NiTriShapeData,
     skin_instance: &NiSkinInstance,
     nif: &NifFile,
+) -> Option<(Vec<[f32; 3]>, Vec<[f32; 3]>)> {
+    apply_skinning_cpu_with_bones(geo_data, skin_instance, nif, None)
+}
+
+/// CPU スキニングを適用し、変換後の頂点位置・法線を返す（動的ボーン行列対応）。
+///
+/// `bone_world_transforms` は `NiSkinInstance.bones` 配列のインデックス順に対応する
+/// 各ボーンの現在時刻におけるワールド変換行列（$M_{\text{bone}}[i]$）。
+/// `None` が渡された場合はバインドポーズ（恒等行列）として処理される。
+pub fn apply_skinning_cpu_with_bones(
+    geo_data: &NiTriShapeData,
+    skin_instance: &NiSkinInstance,
+    nif: &NifFile,
+    bone_world_transforms: Option<&[Mat4]>,
 ) -> Option<(Vec<[f32; 3]>, Vec<[f32; 3]>)> {
     // NiSkinData を解決
     let skin_data_idx = skin_instance.data;
@@ -107,14 +118,24 @@ pub fn apply_skinning_cpu(
             if bone_idx < skin_data.bone_list.len() {
                 let bd = &skin_data.bone_list[bone_idx];
                 // B_bone: 逆バインドポーズ行列 (skin_to_bone 変換)
-                // M_bone: T-Pose 固定なので恒等行列
-                // 計算: root_inv * B_bone でジオメトリ空間に変換
                 let b_bone = build_bone_matrix(
                     bd.skin_transform_translation,
                     bd.skin_transform_rotation,
                     bd.skin_transform_scale,
                 );
-                bone_matrices.push(root_mat_inv * b_bone);
+                // M_bone: アニメーションによるボーンのワールド変換行列
+                let m_bone = if let Some(transforms) = bone_world_transforms {
+                    if bone_idx < transforms.len() {
+                        transforms[bone_idx]
+                    } else {
+                        Mat4::IDENTITY
+                    }
+                } else {
+                    Mat4::IDENTITY
+                };
+
+                // 合成変換行列: root_mat_inv * M_bone * B_bone
+                bone_matrices.push(root_mat_inv * m_bone * b_bone);
             } else {
                 bone_matrices.push(Mat4::IDENTITY);
             }

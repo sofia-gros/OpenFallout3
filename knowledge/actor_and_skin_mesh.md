@@ -93,7 +93,59 @@ $$v' = \sum_{i=0}^{3} w_i \cdot M_{\text{bone}[i]} \cdot B_{\text{bone}[i]} \cdo
 
 ---
 
-## 4. 実装ステータス (2026-09-07 更新)
+## 4. ボーン階層のワールド変換解決 (`fo3_render::scene`)
+
+### 4.1 ボーン世界変換マップ (`bone_world_map`)
+
+スキンメッシュの変形に必要な各ボーンのワールド変換行列 (スケルトンルート基準) は
+`HashMap<i32, Mat4>` (`bone_world_map`) で `block_index → Mat4` として管理する。
+`NiSkinInstance.bones[i]` のブロックインデックスからこのマップを参照し、
+`apply_skinning_cpu_with_bones` に `&[Mat4]` として渡す。
+
+```rust
+fn resolve_bone_world_transforms(skin_instance, bone_world_map) -> Vec<Mat4>
+// マップに無いボーンは Mat4::IDENTITY で補完 (バインドポーズ T-Pose 相当)
+```
+
+### 4.2 トラバーサル順序問題とプレパス (2026-09-07 確定)
+
+**問題**: 装備 NIF (`meshes\armor\leatherarmor\m\outfitm.nif` など) では
+NiTriShape (メッシュ) ブロックがボーン NiNode ブロックよりファイル先頭側・
+子ノード配列の手前に配置されている場合がある (例: mesh=`[001]`, bones=`[009]`〜`[015]`)。
+単一パス深さ優先トラバース (`traverse_block`) では、メッシュ処理時にボーン未登録となり
+全ボーンが `Mat4::IDENTITY` へフォールバックしてしまう (T-Pose 表示は正しいが、
+アニメーション適用時に動的変換を反映できない)。
+
+**解決**: メッシュビルドに先立ち、スケルトン階層全体を走査してワールド変換を
+事前登録するプレパス `collect_bone_world_transforms()` を導入した。
+
+```
+処理順:
+  1. bone_world_map.clear()                          (NIF ファイルごと)
+  2. collect_bone_world_transforms(root, ...)        ← プレパス: NiNode/BSFadeNode 全登録
+  3. traverse_block(root, ...)                       ← 本パス: メッシュビルド + プロパティ解決
+  4. resolve_bone_world_transforms(inst, map)        ← NiTriShape 内で解決
+```
+
+参照元: Gamebryo 2.6 `NiAVObject::UpdateDownwardPass`, `NiSkinInstance::Update`
+実装: `crates/fo3_render/src/scene.rs` (`collect_bone_world_transforms`, `resolve_bone_world_transforms`)
+
+### 4.3 スキニング計算式と OpenMW 参照実装の比較 (2026-09-07 確認)
+
+- 本実装: `v' = root_mat_inv * Σ(w_i * M_bone[i] * B_bone[i]) * v`
+  - `B_bone[i]`: `NiSkinData.bone_list[i].skin_transform` = 逆バインド (skin→bone)
+  - `M_bone[i]`: ボーンの現ワールド行列 (スケルトン空間)
+  - `root_mat_inv`: `NiSkinData.skin_transform` の逆行列
+  - バインドポーズで `v' = v` (メッシュローカル空間に復元)
+- OpenMW (`references/openmw/components/sceneutil/riggeometry.cpp:L178`):
+  `boneMat = mInvBindMatrix * mMatrixInSkeletonSpace; resultMat *= mData->mTransform`
+  出力はスケルトン空間 (`Σ(w * M_bind⁻¹ * M_current) * X * v`)
+- 両者は `NiSkinData.skin_transform` (FO3 では通常 identity) 分だけ異なり、
+  `X = I` の FO3 実アセットでは表示結果は等価。式の統一はシェーダースキニング段階で再評価。
+
+---
+
+## 5. 実装ステータス (2026-09-07 更新)
 
 | 項目 | 状態 |
 |---|---|
@@ -104,6 +156,11 @@ $$v' = \sum_{i=0}^{3} w_i \cdot M_{\text{bone}[i]} \cdot B_{\text{bone}[i]} \cdo
 | CPU スキニング (`fo3_render::skinning`) | 完了（バインドポーズ T-Pose） |
 | `GpuMesh::from_tri_shape_skinned` | 完了 |
 | `scene.rs` スキニング分岐 | 完了 |
+| ボーン階層プレパス (`collect_bone_world_transforms`) | 完了（2026-09-07） |
+| 動的ボーン行列のスキニング反映 | 完了（`apply_skinning_cpu_with_bones` に `&[Mat4]` を供給） |
+| FK 再計算 (`recompute_bone_world_map_with_pose`) | 完了（2026-09-08） |
+| KF ボーン適用 (`apply_pose`) | 完了（2026-09-08） |
+| 実アセットでの T-Pose スキニング確認 | 未着手（fo3_viewer での視覚確認が必要） |
 | GPU シェーダースキニング（ボーン行列パレット） | 未実装 |
 | KF アニメーション再生 | 未実装 |
 

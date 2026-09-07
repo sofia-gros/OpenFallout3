@@ -34,11 +34,18 @@
 | `NiSkinData` パーサー実装 | **完了** |
 | `NiSkinInstance` / `NiSkinPartition` パーサー実装 | **完了** |
 | CPU スキニング (`apply_skinning_cpu`) | **完了（T-Pose）** |
-| スケルトン NIF の読み込みとボーン階層構築 | **未実装** |
+| スケルトン NIF の読み込みとボーン階層構築 | **完了（2026-09-07）** |
+| ボーン階層構造解き（`bones` → `bone_world_map`) | **完了（2026-09-07）** |
 | バインドポーズでのスキンメッシュ表示確認 | 実装中 |
 | 静的セル表示が壊れていないこと | **確認済み** |
 
 **成功条件**: 単体の防具 NIF や素体を読み込んで、正しくスキンされた状態で表示できる。
+
+**次のステップ**:
+1. ~~スケルトン NIF の読み込みとボーン階層構築~~ → **完了**（`scene.rs` のプレパス `collect_bone_world_transforms` + `trust_from_path` で NiNode/BSFadeNode のワールド変換を `bone_world_map` に事前登録）
+2. `NiSkinInstance.skeleton_root` と `bones` の参照先を解決し、ボーン階層とスキンメッシュを紐付け → **完了**（`resolve_bone_world_transforms`）
+3. ボーン階層のワールドトランスフォームを計算（Forward Kinematics）→ `bone_world_map` の合成は実装済み。残りは実アセット表示での視覚確認（fo3_viewer）
+4. 実アセットでの T-Pose スキニングの視覚確認（fo3_viewer で `meshes\armor\leatherarmor\m\outfitm.nif` を表示）
 
 ---
 
@@ -47,12 +54,20 @@
 
 | 作業 | 状態 |
 | :--- | :--- |
-| KF ファイルのヘッダー・ブロックパース | 未着手 |
-| `NiTransformInterpolator` / `NiTransformData` パース | 未着手 |
-| キーフレーム補間（線形・四元数 Slerp） | 未着手 |
+| KF ファイルのヘッダー・ブロックパース | **完了** |
+| `NiTransformInterpolator` / `NiTransformData` パース | **完了** |
+| キーフレーム補間（線形・四元数 Slerp） | **完了** |
 | スケルトン時間更新ループ | 未着手 |
+| ボーン適用ループ (`apply_pose` → FK → skinning) | **完了（2026-09-08）** |
 | 簡易アニメーションプレイヤー（単一ループ） | 未着手 |
-| スキンメッシュをアニメに合わせて変形 | 未着手 |
+| スキンメッシュをアニメに合わせて変形 | 実装済み（`apply_pose` + `recompute_bone_world_map_with_pose` + `apply_skinning_cpu_with_bones`） |
+
+**次のステップ**:
+1. ~~`NiControllerSequence` の `ControlledBlock` からボーン名→インターポレータのマップを構築~~ → **完了**（`AnimationClip::from_kf`）
+2. ~~ボーン階層へのアニメーション適用（各フレームでインターポレータを評価し、ボーンのローカル変換を更新）~~ → **完了**（`apply_pose` → `recompute_bone_world_map_with_pose`）
+3. `NiBSplineCompTransformInterpolator` の B-Spline 補間実装（FO3 で主流）→ **未着手**（現在は基礎 NiQuatTransform のみ）
+4. アニメーション時間の進行とループ制御（`NiTimeController` の Flags に基づく）
+5. ~~スキンメッシュをアニメーションに合わせて変形~~ → **完了**（`apply_skinning_cpu_with_bones` に動的ボーン行列を渡す）
 
 ---
 

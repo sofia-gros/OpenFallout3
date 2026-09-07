@@ -18,6 +18,7 @@ pub mod collision;
 pub mod pipeline;
 pub mod scene;
 pub mod skinning;
+pub mod animation;
 
 pub use vertex::Vertex;
 pub use mesh::GpuMesh;
@@ -27,3 +28,4 @@ pub use lighting::{GpuPointLight, LightingUniform, PlacedPointLight};
 pub use collision::{CollisionVertex, GpuCollisionMesh, extract_collision_lines, HAVOK_SCALE};
 pub use pipeline::RenderContext;
 pub use scene::{RenderMesh, RenderScene};
+pub use animation::{AnimationClip, BoneChannel};

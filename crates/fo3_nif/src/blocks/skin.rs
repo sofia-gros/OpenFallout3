@@ -103,12 +103,11 @@ impl NiSkinData {
     /// バイナリストリームから `NiSkinData` を読み込む。
     ///
     /// Fallout 3 (version 20.2.0.7, user_version 11) でのレイアウト:
-    /// ```
-    /// NiTransform skin_transform  (translation: Vec3, rotation: Mat3x3, scale: f32)
-    /// uint        num_bones
-    /// bool        has_vertex_weights  (since 4.2.1.0)
-    /// [num_bones] BoneData { ... }
-    /// ```
+    /// (NiTransform = translation: Vec3, rotation: Mat3x3, scale: f32)
+    /// 1. `NiTransform skin_transform`
+    /// 2. `uint num_bones`
+    /// 3. `bool has_vertex_weights` (since 4.2.1.0)
+    /// 4. `[num_bones] BoneData { ... }`
     pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
         let skin_transform_translation = Vector3::read(reader)?;
         let skin_transform_rotation = Matrix33::read(reader)?;

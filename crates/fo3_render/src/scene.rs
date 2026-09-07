@@ -4,13 +4,23 @@
 //! Gamebryo 2.6 準拠のワールドトランスフォーム合成を行い、
 //! GPU 描画コマンドリスト (`RenderScene`) を構築する。
 //! 参照元: Gamebryo 2.6 `NiAVObject::UpdateDownwardPass`
+//!
+//! ## ボーン階層構築
+//!
+//! スキンメッシュのスキニング変形に必要なボーンのワールド変換行列は、
+//! トラバース中に `bone_world_map` (block_index → Mat4) に蓄積される。
+//! `NiSkinInstance.bones` の各ブロックインデックスからこのマップを参照し、
+//! `apply_skinning_cpu_with_bones` に渡すことで、バインドポーズからの
+//! 変形を正しく計算する。
+//!
+//! 参照元: `knowledge/actor_and_skin_mesh.md`, Gamebryo 2.6 `NiSkinInstance::Update`
 
 use std::collections::HashMap;
 use fo3_gamebryo_core::NiTransform;
 use fo3_nif::{NifBlock, NifFile};
 use fo3_vfs::VfsManager;
-use glam::Vec3;
-use crate::skinning::apply_skinning_cpu;
+use glam::{Mat4, Vec3};
+use crate::skinning::apply_skinning_cpu_with_bones;
 
 use wgpu::util::DeviceExt;
 
@@ -55,13 +65,20 @@ impl RenderScene {
     ) -> Self {
         let mut meshes = Vec::new();
         let mut texture_cache: HashMap<String, GpuTexture> = HashMap::new();
+        let mut bone_world_map: HashMap<i32, Mat4> = HashMap::new();
         let default_texture = GpuTexture::create_default_white(device, queue);
         let default_normal_texture = GpuTexture::create_default_normal(device, queue);
         let default_glow_texture = GpuTexture::create_default_black(device, queue);
 
         // ルートブロック（通常 0 番）からトラバース開始
         let root_transform = NiTransform::default();
+
+        // プレパス: スケルトン階層全体のワールド変換を先に蓄積する。
+        // NiTriShape がボーン NiNode より先のブロック順 / 子ノード配列順で
+        // 現れる NIF ファイルでも、スキニング時に全ボーン行列が解決済みであることを保証する。
+        // 参照元: knowledge/actor_and_skin_mesh.md, Gamebryo 2.6 NiAVObject::UpdateDownwardPass
         if !nif.blocks.is_empty() {
+            collect_bone_world_transforms(0, &root_transform, nif, &mut bone_world_map);
             traverse_block(
                 0,
                 &root_transform,
@@ -74,6 +91,7 @@ impl RenderScene {
                 context,
                 &mut meshes,
                 &mut texture_cache,
+                &mut bone_world_map,
                 &default_texture,
                 &default_normal_texture,
                 &default_glow_texture,
@@ -145,6 +163,7 @@ impl RenderScene {
         let mut meshes = Vec::new();
         let mut collision_meshes = Vec::new();
         let mut texture_cache: HashMap<String, GpuTexture> = HashMap::new();
+        let mut bone_world_map: HashMap<i32, Mat4> = HashMap::new();
         let default_texture = GpuTexture::create_default_white(device, queue);
         let default_normal_texture = GpuTexture::create_default_normal(device, queue);
         let default_glow_texture = GpuTexture::create_default_black(device, queue);
@@ -361,6 +380,13 @@ impl RenderScene {
             // 2. 配置された 3D オブジェクト (REFR) の走査と登録
             for (nif, world_transform) in *placed_nifs {
                 if !nif.blocks.is_empty() {
+                    // NIF ファイルごとにボーン世界変換マップをクリア（ブロックインデックスは NIF ごとに独立）
+                    bone_world_map.clear();
+                    // プレパス: スキルトン階層全体のワールド変換を先に蓄積する
+                    // (装備 NIF のように NiTriShape がボーン NiNode より前のブロック順で
+                    //  配置されていても、スキニング時に全ボーン行列が解決済みとする)
+                    // 参照元: knowledge/actor_and_skin_mesh.md, Gamebryo 2.6 NiAVObject::UpdateDownwardPass
+                    collect_bone_world_transforms(0, world_transform, nif, &mut bone_world_map);
                     traverse_block(
                         0,
                         world_transform,
@@ -373,6 +399,7 @@ impl RenderScene {
                         context,
                         &mut meshes,
                         &mut texture_cache,
+                        &mut bone_world_map,
                         &default_texture,
                         &default_normal_texture,
                         &default_glow_texture,
@@ -500,6 +527,7 @@ fn traverse_block(
     context: &RenderContext,
     out_meshes: &mut Vec<RenderMesh>,
     texture_cache: &mut HashMap<String, GpuTexture>,
+    bone_world_map: &mut HashMap<i32, Mat4>,
     default_texture: &GpuTexture,
     default_normal_texture: &GpuTexture,
     default_glow_texture: &GpuTexture,
@@ -516,6 +544,9 @@ fn traverse_block(
             }
             let local_transform = to_core_transform(&node.av);
             let world_transform = parent_world.compose(&local_transform);
+            // ボーン階層構築: 各 NiNode のワールド変換行列を block_index → Mat4 で蓄積
+            // 参照元: Gamebryo 2.6 NiAVObject::UpdateDownwardPass
+            bone_world_map.insert(block_index, world_transform.to_mat4());
             let current_alpha = find_alpha_property(&node.av.properties, nif).or(parent_alpha);
             let current_material = find_material_property(&node.av.properties, nif).or(parent_material);
             for &child in &node.children {
@@ -531,6 +562,7 @@ fn traverse_block(
                     context,
                     out_meshes,
                     texture_cache,
+                    bone_world_map,
                     default_texture,
                     default_normal_texture,
                     default_glow_texture,
@@ -543,6 +575,8 @@ fn traverse_block(
             }
             let local_transform = to_core_transform(&fade.node.av);
             let world_transform = parent_world.compose(&local_transform);
+            // BSFadeNode もボーン階層に含まれる場合があるため蓄積
+            bone_world_map.insert(block_index, world_transform.to_mat4());
             let current_alpha = find_alpha_property(&fade.node.av.properties, nif).or(parent_alpha);
             let current_material = find_material_property(&fade.node.av.properties, nif).or(parent_material);
             for &child in &fade.node.children {
@@ -558,6 +592,7 @@ fn traverse_block(
                     context,
                     out_meshes,
                     texture_cache,
+                    bone_world_map,
                     default_texture,
                     default_normal_texture,
                     default_glow_texture,
@@ -579,14 +614,20 @@ fn traverse_block(
                     let gpu_mesh = if shape.geom.skin_instance >= 0 {
                         let inst_idx = shape.geom.skin_instance as usize;
                         if inst_idx < nif.blocks.len() {
-                            // NiSkinInstance への参照を取得（BSDismemberSkinInstance も内包する）
                             let skin_inst_ref = match &nif.blocks[inst_idx] {
                                 NifBlock::NiSkinInstance(ref inst) => Some(inst),
                                 NifBlock::BSDismemberSkinInstance(ref bdsi) => Some(&bdsi.skin_instance),
                                 _ => None,
                             };
                             if let Some(inst) = skin_inst_ref {
-                                if let Some((pos, nrm)) = apply_skinning_cpu(data, inst, nif) {
+                                // NiSkinInstance.bones から各ボーンのワールド行列を解決
+                                let bone_transforms = resolve_bone_world_transforms(inst, bone_world_map);
+                                let bone_refs = if bone_transforms.is_empty() {
+                                    None
+                                } else {
+                                    Some(bone_transforms.as_slice())
+                                };
+                                if let Some((pos, nrm)) = apply_skinning_cpu_with_bones(data, inst, nif, bone_refs) {
                                     GpuMesh::from_tri_shape_skinned(device, data, &pos, &nrm)
                                 } else {
                                     GpuMesh::from_tri_shape(device, data)
@@ -661,6 +702,160 @@ fn traverse_block(
         }
         _ => {}
     }
+}
+
+/// スケルトン階層の全 NiNode / BSFadeNode ワールド変換行列を `bone_world_map` に蓄積する。
+///
+/// `traverse_block` に先立って実行するプレパス。単一パスの深さ優先トラバースでは、
+/// 装備 NIF (`meshes\armor\...\outfit*.nif`) のように NiTriShape ブロックがボーン
+/// NiNode ブロックより先の位置・子ノード配列順で現れる場合、NiTriShape のスキニング
+/// 処理時にボーンが未登録のまま `Mat4::IDENTITY` へフォールバックしてしまう。
+/// このプレパスにより全ボーンのワールド変換が先に解決され、アニメーション適用時に
+/// 常に正しい現在行列を参照できる。
+///
+/// 参照元: Gamebryo 2.6 `NiAVObject::UpdateDownwardPass`, `NiSkinInstance::Update`
+fn collect_bone_world_transforms(
+    block_index: i32,
+    parent_world: &NiTransform,
+    nif: &NifFile,
+    bone_world_map: &mut HashMap<i32, Mat4>,
+) {
+    if block_index < 0 || block_index as usize >= nif.blocks.len() {
+        return;
+    }
+
+    let block = &nif.blocks[block_index as usize];
+    match block {
+        NifBlock::NiNode(node) => {
+            if is_node_hidden(&node.av, nif) {
+                return;
+            }
+            let local_transform = to_core_transform(&node.av);
+            let world_transform = parent_world.compose(&local_transform);
+            bone_world_map.insert(block_index, world_transform.to_mat4());
+            for &child in &node.children {
+                collect_bone_world_transforms(child, &world_transform, nif, bone_world_map);
+            }
+        }
+        NifBlock::BSFadeNode(fade) => {
+            if is_node_hidden(&fade.node.av, nif) {
+                return;
+            }
+            let local_transform = to_core_transform(&fade.node.av);
+            let world_transform = parent_world.compose(&local_transform);
+            bone_world_map.insert(block_index, world_transform.to_mat4());
+            for &child in &fade.node.children {
+                collect_bone_world_transforms(child, &world_transform, nif, bone_world_map);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// 姿勢 (`SkeletonPose`) をスケルトン NIF のボーン階層へ適用し、Forward Kinematics を再計算する。
+///
+/// バインドポーズ用のプレパス (`collect_bone_world_transforms`) が保持する各ボーンの
+/// ワールド変換行列を、`pose.overrides[bone_name]` のローカルトランスフォームで上書き
+/// した上で、ルートから再帰的にワールド合成し直す。これによりアニメーション適用時の
+/// 各ボーン現在行列 (`$M_{\text{bone}}[i]$`) が得られ、`apply_skinning_cpu_with_bones` に
+/// 渡すことでスキンメッシュが正しく変形される。
+///
+/// - ポーズに含まれないボーンはバインドポーズのワールド行列のまま維持される。
+/// - 上書き対象は `NiNode` / `BSFadeNode` のローカル変換である（Gamebryo 2.6 では
+///   アニメーションは NiAVObject のローカル変換として適用される）。
+///
+/// 参照元:
+/// - Gamebryo 2.6 `NiControllerSequence::Update` (ボーンローカル変換の適用)
+/// - Gamebryo 2.6 `NiAVObject::UpdateDownwardPass` (FK ワールド合成)
+/// - `knowledge/animation_kf_format.md` (セクション 5)
+pub fn recompute_bone_world_map_with_pose(
+    nif: &NifFile,
+    pose: &crate::animation::SkeletonPose,
+    bone_world_map: &mut HashMap<i32, Mat4>,
+) {
+    bone_world_map.clear();
+    recompute_fk(0, &NiTransform::default(), nif, pose, bone_world_map);
+}
+
+/// Forward Kinematics 再帰: `pose.overrides` に一致するノードはローカル変換を差し替えて
+/// ワールド合成し、`bone_world_map` に登録する。
+fn recompute_fk(
+    block_index: i32,
+    parent_world: &NiTransform,
+    nif: &NifFile,
+    pose: &crate::animation::SkeletonPose,
+    bone_world_map: &mut HashMap<i32, Mat4>,
+) {
+    if block_index < 0 || block_index as usize >= nif.blocks.len() {
+        return;
+    }
+
+    let block = &nif.blocks[block_index as usize];
+    match block {
+        NifBlock::NiNode(node) => {
+            if is_node_hidden(&node.av, nif) {
+                return;
+            }
+            let base = to_core_transform(&node.av);
+            let local = lookup_override(base, &node.av, nif, pose);
+            let world = parent_world.compose(&local);
+            bone_world_map.insert(block_index, world.to_mat4());
+            for &child in &node.children {
+                recompute_fk(child, &world, nif, pose, bone_world_map);
+            }
+        }
+        NifBlock::BSFadeNode(fade) => {
+            if is_node_hidden(&fade.node.av, nif) {
+                return;
+            }
+            let base = to_core_transform(&fade.node.av);
+            let local = lookup_override(base, &fade.node.av, nif, pose);
+            let world = parent_world.compose(&local);
+            bone_world_map.insert(block_index, world.to_mat4());
+            for &child in &fade.node.children {
+                recompute_fk(child, &world, nif, pose, bone_world_map);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// ノード名がポーズのオーバーライドに存在する場合はそのローカル変換を返す。
+fn lookup_override(
+    base: NiTransform,
+    av: &fo3_nif::NiAVObject,
+    nif: &NifFile,
+    pose: &crate::animation::SkeletonPose,
+) -> NiTransform {
+    if let Some(name) = nif.get_string(av.net.name_index) {
+        if let Some(t) = pose.overrides.get(name) {
+            return *t;
+        }
+    }
+    base
+}
+
+/// `NiSkinInstance.bones` の各ブロックインデックスからワールド変換行列配列を解決する。
+///
+/// `bone_world_map` (traverse_block 中に蓄積された block_index → Mat4) を参照し、
+/// `NiSkinInstance.bones[i]` が指す各 NiNode の現在のワールド行列を返す。
+/// マップに存在しないボーンは `Mat4::IDENTITY` で埋める。
+///
+/// 参照元: `knowledge/actor_and_skin_mesh.md`, Gamebryo 2.6 `NiSkinInstance::Update`
+fn resolve_bone_world_transforms(
+    skin_instance: &fo3_nif::NiSkinInstance,
+    bone_world_map: &HashMap<i32, Mat4>,
+) -> Vec<Mat4> {
+    skin_instance
+        .bones
+        .iter()
+        .map(|&bone_block_idx| {
+            bone_world_map
+                .get(&bone_block_idx)
+                .copied()
+                .unwrap_or(Mat4::IDENTITY)
+        })
+        .collect()
 }
 
 /// ノードが非表示（App Culled / エディタマーカー）であるかを判定する。
@@ -928,6 +1123,318 @@ fn normalize_texture_path(path: &str) -> String {
         p
     } else {
         format!("textures\\{}", p)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `resolve_bone_world_transforms` が `NiSkinInstance.bones` のブロックインデックスから
+    /// 各ボーンのワールド変換行列を正しく解決できることを検証する。
+    #[test]
+    fn test_resolve_bone_world_transforms() {
+        // block_index 0: ルートボーン "Bip01" → 並進 (1, 2, 3)
+        // block_index 1: 子ボーン "Bip01 Pelvis" → 並進 (4, 5, 6)
+        let mut bone_world_map = HashMap::new();
+        bone_world_map.insert(
+            0i32,
+            Mat4::from_translation(Vec3::new(1.0, 2.0, 3.0)),
+        );
+        bone_world_map.insert(
+            1i32,
+            Mat4::from_translation(Vec3::new(4.0, 5.0, 6.0)),
+        );
+
+        let skin_instance = fo3_nif::NiSkinInstance {
+            data: -1,
+            skin_partition: -1,
+            skeleton_root: 0,
+            bones: vec![0, 1],
+        };
+
+        let transforms = resolve_bone_world_transforms(&skin_instance, &bone_world_map);
+        assert_eq!(transforms.len(), 2);
+        // ボーン 0: 並進 (1, 2, 3) が保持されている
+        assert_eq!(
+            transforms[0].transform_point3(Vec3::ZERO),
+            Vec3::new(1.0, 2.0, 3.0)
+        );
+        // ボーン 1: 並進 (4, 5, 6) が保持されている
+        assert_eq!(
+            transforms[1].transform_point3(Vec3::ZERO),
+            Vec3::new(4.0, 5.0, 6.0)
+        );
+    }
+
+    /// マップに存在しないブロックインデックスは `Mat4::IDENTITY` で補完されることを検証する。
+    #[test]
+    fn test_resolve_bone_missing_identity() {
+        let mut bone_world_map = HashMap::new();
+        bone_world_map.insert(10i32, Mat4::from_scale(Vec3::splat(2.0)));
+
+        let skin_instance = fo3_nif::NiSkinInstance {
+            data: -1,
+            skin_partition: -1,
+            skeleton_root: 10,
+            bones: vec![10, 999], // 999 はマップに存在しない
+        };
+
+        let transforms = resolve_bone_world_transforms(&skin_instance, &bone_world_map);
+        assert_eq!(transforms.len(), 2);
+        assert_eq!(transforms[1], Mat4::IDENTITY);
+    }
+
+    /// プレパス `collect_bone_world_transforms` が、NiTriShape (メッシュ) ブロックが
+    /// ボーン NiNode より先の子ノード配列順で現れる NIF でも全ボーンのワールド変換を
+    /// 解決できることを検証する。
+    ///
+    /// 装備 NIF (`meshes\armor\...\outfit*.nif`) では NiTriShape が NiNode (ボーン) より
+    /// ブロック先頭側に配置されるため、メッシュビルドより先に全ボーンを登録しておく必要がある。
+    #[test]
+    fn test_collect_bone_world_transforms_mesh_first_order() {
+        use fo3_nif::blocks::{NiAVObject, NiNode, NiObjectNET};
+        use fo3_nif::header::{BSStreamHeader, ExportString, NifHeader};
+        use fo3_nif::NifFile;
+        use fo3_nif::{Matrix33, Vector3};
+
+        let make_av = |translation: Vector3| NiAVObject {
+            net: NiObjectNET {
+                name_index: 0,
+                extra_data_list: vec![],
+                controller: -1,
+            },
+            flags: 0,
+            translation,
+            rotation: Matrix33 {
+                m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            },
+            scale: 1.0,
+            properties: vec![],
+            collision_object: -1,
+        };
+
+        // ルート[0] の子ノード配列: 並び順は [メッシュ1, ボーン2]
+        let root = NiNode {
+            av: make_av(Vector3 { x: 0.0, y: 0.0, z: 0.0 }),
+            children: vec![1, 2],
+            effects: vec![],
+        };
+        // ボーン[2] "Bip01" はローカル並進 (10, 20, 30)
+        let bone = NiNode {
+            av: make_av(Vector3 { x: 10.0, y: 20.0, z: 30.0 }),
+            children: vec![],
+            effects: vec![],
+        };
+
+        let nif = NifFile {
+            header: NifHeader {
+                header_string: "Gamebryo File Format, Version 20.2.0.7\n".to_string(),
+                version: 0x14020007,
+                endian_type: 1,
+                user_version: 11,
+                num_blocks: 0,
+                bs_header: BSStreamHeader {
+                    bs_version: 34,
+                    author: ExportString { value: String::new() },
+                    process_script: None,
+                    export_script: ExportString { value: String::new() },
+                },
+                block_types: vec![],
+                block_type_indices: vec![],
+                block_sizes: vec![],
+                strings: vec![],
+            },
+            blocks: vec![
+                NifBlock::NiNode(root),
+                // スキンメッシュを模した未対応ブロック (メッシュが先)
+                NifBlock::Unknown {
+                    type_name: "NiTriShape".to_string(),
+                    data: vec![],
+                },
+                NifBlock::NiNode(bone),
+            ],
+        };
+
+        let mut bone_world_map = HashMap::new();
+        collect_bone_world_transforms(0, &NiTransform::default(), &nif, &mut bone_world_map);
+
+        // ルート[0] とボーン[2] の両方がワールド行列として登録されている
+        assert!(bone_world_map.contains_key(&0));
+        assert!(bone_world_map.contains_key(&2));
+        // ボーン[2] のワールド並進が (10, 20, 30) として保持されている
+        assert_eq!(
+            bone_world_map[&2].transform_point3(Vec3::ZERO),
+            Vec3::new(10.0, 20.0, 30.0)
+        );
+    }
+
+    /// プレパスが BSFadeNode ルート (skeleton.nif の "Scene Root") でも
+    /// 正しくボーン階層を登録できることを検証する。
+    #[test]
+    fn test_collect_bone_world_transforms_bsfade_root() {
+        use fo3_nif::blocks::{BSFadeNode, NiAVObject, NiNode, NiObjectNET};
+        use fo3_nif::header::{BSStreamHeader, ExportString, NifHeader};
+        use fo3_nif::NifFile;
+        use fo3_nif::{Matrix33, Vector3};
+
+        let make_av = |translation: Vector3| NiAVObject {
+            net: NiObjectNET {
+                name_index: 0,
+                extra_data_list: vec![],
+                controller: -1,
+            },
+            flags: 0,
+            translation,
+            rotation: Matrix33 {
+                m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            },
+            scale: 1.0,
+            properties: vec![],
+            collision_object: -1,
+        };
+
+        // [0] BSFadeNode "Scene Root" (skeleton.nif のルート) → 子 [1]
+        let fade_root = BSFadeNode {
+            node: NiNode {
+                av: make_av(Vector3 { x: 0.0, y: 0.0, z: 0.0 }),
+                children: vec![1],
+                effects: vec![],
+            },
+        };
+        // [1] ボーン "Bip01" (ローカル並進 (1, 2, 3))
+        let pelvis = NiNode {
+            av: make_av(Vector3 { x: 1.0, y: 2.0, z: 3.0 }),
+            children: vec![],
+            effects: vec![],
+        };
+
+        let nif = NifFile {
+            header: NifHeader {
+                header_string: "Gamebryo File Format, Version 20.2.0.7\n".to_string(),
+                version: 0x14020007,
+                endian_type: 1,
+                user_version: 11,
+                num_blocks: 0,
+                bs_header: BSStreamHeader {
+                    bs_version: 34,
+                    author: ExportString { value: String::new() },
+                    process_script: None,
+                    export_script: ExportString { value: String::new() },
+                },
+                block_types: vec![],
+                block_type_indices: vec![],
+                block_sizes: vec![],
+                strings: vec![],
+            },
+            blocks: vec![NifBlock::BSFadeNode(fade_root), NifBlock::NiNode(pelvis)],
+        };
+
+        let mut bone_world_map = HashMap::new();
+        collect_bone_world_transforms(0, &NiTransform::default(), &nif, &mut bone_world_map);
+
+        assert!(bone_world_map.contains_key(&0));
+        assert_eq!(
+            bone_world_map[&1].transform_point3(Vec3::ZERO),
+            Vec3::new(1.0, 2.0, 3.0)
+        );
+    }
+
+    /// `recompute_bone_world_map_with_pose` が、姿勢のオーバーライドをボーンのローカル変換に
+    /// 反映し、Forward Kinematics でワールド行列を再計算できることを検証する。
+    #[test]
+    fn test_recompute_bone_world_map_with_pose() {
+        use crate::animation::SkeletonPose;
+        use fo3_nif::blocks::{NiAVObject, NiNode, NiObjectNET};
+        use fo3_nif::header::{BSStreamHeader, ExportString, NifHeader};
+        use fo3_nif::NifFile;
+        use fo3_nif::{Matrix33, Vector3};
+
+        let make_av = |name_idx: u32, translation: Vector3| NiAVObject {
+            net: NiObjectNET {
+                name_index: name_idx,
+                extra_data_list: vec![],
+                controller: -1,
+            },
+            flags: 0,
+            translation,
+            rotation: Matrix33 {
+                m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            },
+            scale: 1.0,
+            properties: vec![],
+            collision_object: -1,
+        };
+
+        // [0] "Bip01": ローカル並進 (1, 2, 3) → 子 [1]
+        let root = NiNode {
+            av: make_av(1, Vector3 { x: 1.0, y: 2.0, z: 3.0 }),
+            children: vec![1],
+            effects: vec![],
+        };
+        // [1] "Bip01 Pelvis": ローカル並進 (4, 5, 6)
+        let pelvis = NiNode {
+            av: make_av(2, Vector3 { x: 4.0, y: 5.0, z: 6.0 }),
+            children: vec![],
+            effects: vec![],
+        };
+
+        // 文字列プール: 0 = "", 1 = "Bip01", 2 = "Bip01 Pelvis"
+        let nif = NifFile {
+            header: NifHeader {
+                header_string: "Gamebryo File Format, Version 20.2.0.7\n".to_string(),
+                version: 0x14020007,
+                endian_type: 1,
+                user_version: 11,
+                num_blocks: 0,
+                bs_header: BSStreamHeader {
+                    bs_version: 34,
+                    author: ExportString { value: String::new() },
+                    process_script: None,
+                    export_script: ExportString { value: String::new() },
+                },
+                block_types: vec![],
+                block_type_indices: vec![],
+                block_sizes: vec![],
+                strings: vec![
+                    String::new(),
+                    "Bip01".to_string(),
+                    "Bip01 Pelvis".to_string(),
+                ],
+            },
+            blocks: vec![NifBlock::NiNode(root), NifBlock::NiNode(pelvis)],
+        };
+
+        // バインドポーズ FK: 骨盤のワールド並進 = (1+4, 2+5, 3+6) = (5, 7, 9)
+        let mut map = HashMap::new();
+        collect_bone_world_transforms(0, &NiTransform::default(), &nif, &mut map);
+        assert_eq!(
+            map[&1].transform_point3(Vec3::ZERO),
+            Vec3::new(5.0, 7.0, 9.0)
+        );
+
+        // 姿勢: "Bip01 Pelvis" のローカル並進を (10, 20, 30) に上書き
+        let mut pose = SkeletonPose::default();
+        pose.overrides.insert(
+            "Bip01 Pelvis".to_string(),
+            NiTransform {
+                rotation: glam::Mat3::IDENTITY,
+                translation: Vec3::new(10.0, 20.0, 30.0),
+                scale: 1.0,
+            },
+        );
+
+        recompute_bone_world_map_with_pose(&nif, &pose, &mut map);
+        // 骨盤のワールド並進 = (1+10, 2+20, 3+30) = (11, 22, 33)
+        assert_eq!(
+            map[&1].transform_point3(Vec3::ZERO),
+            Vec3::new(11.0, 22.0, 33.0)
+        );
+        // ルート自体はポーズ対象外なのでバインドポーズのまま
+        assert_eq!(
+            map[&0].transform_point3(Vec3::ZERO),
+            Vec3::new(1.0, 2.0, 3.0)
+        );
     }
 }
 
