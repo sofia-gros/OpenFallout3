@@ -12,6 +12,8 @@ pub mod wrld;
 
 pub mod armo;
 pub mod npc;
+pub mod otft;
+pub mod hair;
 
 pub use tes4::Tes4Header;
 pub use stat::StatRecord;
@@ -24,5 +26,7 @@ pub use txst::TextureSetRecord;
 pub use wrld::WorldRecord;
 pub use armo::ArmorRecord;
 pub use npc::NpcRecord;
+pub use otft::OtftRecord;
+pub use hair::HairRecord;
 
 

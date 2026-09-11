@@ -262,7 +262,7 @@ impl ViewerState {
 
                     let is_female = outfit_or_naked.to_ascii_lowercase().contains("female")
                         || outfit_or_naked.to_ascii_lowercase().contains("outfitf");
-                    let part_paths = get_actor_part_paths(is_female, &body_path);
+                    let part_paths = get_actor_part_paths(is_female, &body_path, None);
 
                     let mut parts = Vec::new();
                     for path in &part_paths {
@@ -396,12 +396,14 @@ impl ViewerState {
                         .read_all_models_map()
                         .expect("Failed to read models map");
                     println!("モデルマップ登録件数: {} 件", model_map.len());
-                    let (npc_map, armor_map) =
+                    let (npc_map, armor_map, outfit_map, hair_map) =
                         esm_reader.read_npc_and_armor_map().unwrap_or_default();
                     println!(
-                        "アクター定義: {} 件, 防具定義: {} 件",
+                        "アクター定義: {} 件, 防具定義: {} 件, 衣装定義: {} 件, 髪型定義: {} 件",
                         npc_map.len(),
-                        armor_map.len()
+                        armor_map.len(),
+                        outfit_map.len(),
+                        hair_map.len()
                     );
                     let light_map = esm_reader.read_light_map().unwrap_or_default();
                     println!("光源レコード (LIGHT) 登録件数: {} 件", light_map.len());
@@ -412,6 +414,7 @@ impl ViewerState {
                         transform: NiTransform,
                         is_female: bool,
                         outfit_model: Option<String>,
+                        hair_model: Option<String>,
                     }
                     let mut cell_npcs: Vec<CellNpcSpawn> = Vec::new();
 
@@ -501,7 +504,13 @@ impl ViewerState {
                                 let world_transform =
                                     NiTransform::from_euler_xyz(pos, rot, refr.scale);
 
-                                let outfit_model = npc.default_armor
+                                // 1. 衣装モデルの解決 (DOFT のインベントリ ARMO を最優先、次いで default_armor WNAM)
+                                let resolved_armor_id = npc.default_outfit
+                                    .and_then(|doft_id| outfit_map.get(&doft_id))
+                                    .and_then(|otft| otft.inventory.first().copied())
+                                    .or(npc.default_armor);
+
+                                let outfit_model = resolved_armor_id
                                     .and_then(|armo_id| armor_map.get(&armo_id))
                                     .and_then(|armo| {
                                         let m = if npc.is_female && !armo.female_model.is_empty() {
@@ -516,6 +525,17 @@ impl ViewerState {
                                         }
                                     });
 
+                                // 2. 髪型モデルの解決 (HNAM -> HAIR -> MODL)
+                                let hair_model = npc.hair
+                                    .and_then(|hair_id| hair_map.get(&hair_id))
+                                    .and_then(|hair| {
+                                        if !hair.model.is_empty() {
+                                            Some(hair.model.clone())
+                                        } else {
+                                            None
+                                        }
+                                    });
+
                                 let name = npc.full_name.clone().unwrap_or_else(|| npc.edid.clone());
                                 cell_npcs.push(CellNpcSpawn {
                                     form_id: refr.form_id.0,
@@ -523,6 +543,7 @@ impl ViewerState {
                                     transform: world_transform,
                                     is_female: npc.is_female,
                                     outfit_model,
+                                    hair_model,
                                 });
                                 continue;
                             }
@@ -702,7 +723,7 @@ impl ViewerState {
                                 "meshes\\characters\\_male\\upperbody.nif".to_string()
                             };
 
-                            let part_paths = get_actor_part_paths(npc.is_female, &body_path);
+                            let part_paths = get_actor_part_paths(npc.is_female, &body_path, npc.hair_model.as_deref());
                             let mut parts = Vec::new();
                             for path in &part_paths {
                                 let nif = if let Some(cached) = nif_cache.get(path) {
@@ -1006,7 +1027,7 @@ impl ViewerState {
                 };
                 let is_female = outfit_or_naked.to_ascii_lowercase().contains("female")
                     || outfit_or_naked.to_ascii_lowercase().contains("outfitf");
-                let part_paths = get_actor_part_paths(is_female, &body_path);
+                let part_paths = get_actor_part_paths(is_female, &body_path, None);
                 let mut anim_parts = Vec::new();
                 for path in &part_paths {
                     if let Ok(bytes) = vfs.read(path) {
@@ -1664,23 +1685,29 @@ fn is_editor_marker_or_effect(edid: &str, model: &str) -> bool {
 
 /// 人型アクターのパーツ NIF 相対パス一覧を取得する。
 ///
-/// 頭部、目 (左右)、歯 (上下)、舌、胴体/衣装、手 (左右) を過不足なく構成する。
+/// 頭部、目 (左右)、歯 (上下)、舌、髪型 (指定時)、胴体/衣装、手 (左右) を過不足なく構成する。
 /// 参照元: Gamebryo 2.6 キャラクタパーツ合成, `knowledge/actor_and_skin_mesh.md` (セクション 4.6, 4.7)
-fn get_actor_part_paths(is_female: bool, body_path: &str) -> Vec<String> {
+fn get_actor_part_paths(is_female: bool, body_path: &str, hair_path: Option<&str>) -> Vec<String> {
     let (right_hand, left_hand) = if is_female {
-        ("meshes\\characters\\_female\\righthand.nif", "meshes\\characters\\_female\\lefthand.nif")
+        ("meshes\\characters\\_male\\femalerighthand.nif", "meshes\\characters\\_male\\femalelefthand.nif")
     } else {
         ("meshes\\characters\\_male\\righthand.nif", "meshes\\characters\\_male\\lefthand.nif")
     };
-    vec![
+    let mut parts = vec![
         "meshes\\characters\\head\\headhuman.nif".to_string(),
         "meshes\\characters\\head\\eyelefthuman.nif".to_string(),
         "meshes\\characters\\head\\eyerighthuman.nif".to_string(),
         "meshes\\characters\\head\\teethupperhuman.nif".to_string(),
         "meshes\\characters\\head\\teethlowerhuman.nif".to_string(),
         "meshes\\characters\\head\\tonguehuman.nif".to_string(),
-        body_path.to_string(),
-        right_hand.to_string(),
-        left_hand.to_string(),
-    ]
+    ];
+    if let Some(hair) = hair_path {
+        if !hair.is_empty() {
+            parts.push(hair.to_string());
+        }
+    }
+    parts.push(body_path.to_string());
+    parts.push(right_hand.to_string());
+    parts.push(left_hand.to_string());
+    parts
 }

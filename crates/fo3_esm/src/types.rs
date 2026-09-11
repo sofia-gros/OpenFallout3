@@ -76,11 +76,15 @@ pub const REC_NAVM: FourCC = FourCC(*b"NAVM");
 pub const REC_LGTM: FourCC = FourCC(*b"LGTM");
 pub const REC_LTEX: FourCC = FourCC(*b"LTEX");
 pub const REC_TXST: FourCC = FourCC(*b"TXST");
+pub const REC_OTFT: FourCC = FourCC(*b"OTFT");
+pub const REC_HAIR: FourCC = FourCC(*b"HAIR");
 
 pub const SUB_EDID: FourCC = FourCC(*b"EDID");
 pub const SUB_HEDR: FourCC = FourCC(*b"HEDR");
 pub const SUB_CNAM: FourCC = FourCC(*b"CNAM");
 pub const SUB_SNAM: FourCC = FourCC(*b"SNAM");
+pub const SUB_INAM: FourCC = FourCC(*b"INAM");
+pub const SUB_DOFT: FourCC = FourCC(*b"DOFT");
 pub const SUB_MAST: FourCC = FourCC(*b"MAST");
 pub const SUB_DATA: FourCC = FourCC(*b"DATA");
 pub const SUB_HNAM: FourCC = FourCC(*b"HNAM");

@@ -18,8 +18,8 @@ pub use types::{FormId, FourCC, ObjectBounds, REC_ACHR, REC_ACRE, REC_LTEX, REC_
 pub use header::{GroupHeader, RecordHeader, SubrecordHeader};
 pub use subrecord::Subrecord;
 pub use records::{
-    ArmorRecord, CellLighting, CellRecord, EnableParent, LandRecord, LandTextureLayer, LightRecord, LockData, LtexRecord,
-    NpcRecord, RefrRecord, StatRecord, TeleportDoor, Tes4Header, TextureSetRecord, WorldRecord,
+    ArmorRecord, CellLighting, CellRecord, EnableParent, HairRecord, LandRecord, LandTextureLayer, LightRecord, LockData, LtexRecord,
+    NpcRecord, OtftRecord, RefrRecord, StatRecord, TeleportDoor, Tes4Header, TextureSetRecord, WorldRecord,
     LAND_HEIGHT_SCALE, LAND_NUM_VERTS, LAND_REAL_SIZE, LAND_VERTS_PER_SIDE,
 };
 pub use reader::{BaseObjectInfo, EsmEntry, EsmReader};

@@ -7,17 +7,14 @@
 
 ## 1. 開発の基本鉄則（Mandates）
 
-### Rule 0: Code Context Engine (CCE) によるコードベース探索の絶対義務化 (CCE-First Exploration)
-- **コードベースの調査、関数・型の検索、構造把握にあたっては、ファイルを直接閲覧・全読込するのではなく、必ず CCE (`context_search` ツール等) を最優先で使用すること。**
-- `context_search` は信頼度スコア付きで最小限のコードチャンクを返すため、トークン消費を最小化し的確にコンテキストを取得できる。
-- 非自明な質問への回答や方針決定の前には必ず `session_recall` を実行し、決定後は `record_decision` / `record_code_area` でクロスセッション記憶へ永続化すること。
-
 ### Rule 1: オリジナル設計・推測による実装の絶対禁止 (Zero Speculation)
+
 - 「こう動くはず」「現代的なゲームエンジンならこう設計する」といった推測やモダンエンジンのパラダイムを絶対に持ち込んではならない。
 - すべてのデータ構造、フィールド名、ビットフラグ、親参照・子参照構造、更新順序は、**Gamebryo 2.6 の設計** および `references/nifxml/nif.xml` に定義された仕様に厳密に準拠すること。
 - 未知のブロックや挙動に遭遇した場合は、コードを書く前に必ず調査し、文献・コードを特定すること。
 
 ### Rule 2: 一次文献・既存実装の参照と引用の義務付け (Evidence-Based Coding)
+
 - 実装する構造体、列挙型、パース関数には、必ず根拠となるリファレンスを日本語 DOC コメントに明記すること。
   - 例: `/// 参照元: references/nifxml/nif.xml:L1234 (NiTriShapeData)`
   - 例: `/// 参照元: references/nifskope/src/spells/mesh.cpp, Gamebryo 2.6 NiAVObject::Update`
@@ -27,12 +24,14 @@
   3. `references/openmw/components/nif/` (OpenMW C++ 実装)
 
 ### Rule 3: トークン浪費防止と知識の永続化義務 (Knowledge-First Workflow)
+
 - **Web 検索の禁止（ローカル優先）**: 外部 Web 検索ではなく、ローカルの `references/` ディレクトリを `grep_search` や `view_file` で調査すること（トークン消費ゼロ・高速）。
 - **知識ベース (`knowledge/`) への記録**:
   新しく調査・判明したブロック仕様、トランスフォーム計算式、シェーダーパラメータ、Gamebryo のクラス関係は、コードを書く前に必ず `knowledge/*.md` に日本語で詳細に記録すること。
   一度調べた知識を永続化することで、AI の忘却による再調査（トークンの無駄）を完全に防止する。
 
 ### Rule 4: DOC コメントの日本語義務
+
 - すべての Rust ソースコードの doc コメント (`///`, `//!`) および内部説明コメントは、ユーザーの指定通り**必ず日本語で記述**すること。
 
 ---
@@ -50,11 +49,6 @@
 4. **Step 4: テスト駆動検証 (TDD Verification)**
    - 実アセットまたはダミーバイナリを用いてパースを検証し、余計なバイト残り（バッファ未読）やアライメントエラーがないことを確認。
 
-## Context Engine (CCE)
-
-This project uses Code Context Engine for intelligent code retrieval and
-cross-session memory.
-
 ### Searching the codebase
 
 **Use `context_search` instead of reading files directly** when exploring
@@ -63,11 +57,13 @@ work. `context_search` returns the most relevant code chunks with
 confidence scores instead of whole files.
 
 When to use `context_search`:
+
 - Answering questions about the codebase ("how does X work?", "where is Y?")
 - Exploring structure or architecture
 - Finding related code, functions, or patterns
 
 Other tools:
+
 - `expand_chunk` for full source of a compressed result
 - `related_context` for what calls/imports a function
 - `session_recall` to recall past decisions

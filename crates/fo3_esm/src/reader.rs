@@ -12,15 +12,15 @@ use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::header::{GroupHeader, RecordHeader};
 use crate::records::{
-    ArmorRecord, CellRecord, LandRecord, LightRecord, LtexRecord, NpcRecord, RefrRecord, StatRecord,
-    Tes4Header, TextureSetRecord, WorldRecord,
+    ArmorRecord, CellRecord, HairRecord, LandRecord, LightRecord, LtexRecord, NpcRecord, OtftRecord,
+    RefrRecord, StatRecord, Tes4Header, TextureSetRecord, WorldRecord,
 };
 use crate::subrecord::{parse_subrecords, Subrecord};
 use crate::types::{
     FormId, FourCC, REC_ACHR, REC_ACRE, REC_ACTI, REC_ALCH, REC_AMMO, REC_ARMO, REC_BOOK, REC_CELL,
-    REC_CONT, REC_DOOR, REC_FURN, REC_KEYM, REC_LAND, REC_LIGH, REC_LTEX, REC_MISC, REC_MSTT,
-    REC_NPC_, REC_REFR, REC_SCOL, REC_STAT, REC_TERM, REC_TES4, REC_TXST, REC_WEAP, REC_WRLD,
-    SUB_EDID, SUB_MODL,
+    REC_CONT, REC_DOOR, REC_FURN, REC_HAIR, REC_KEYM, REC_LAND, REC_LIGH, REC_LTEX, REC_MISC,
+    REC_MSTT, REC_NPC_, REC_OTFT, REC_REFR, REC_SCOL, REC_STAT, REC_TERM, REC_TES4, REC_TXST,
+    REC_WEAP, REC_WRLD, SUB_EDID, SUB_MODL,
 };
 
 /// 配置元ベースオブジェクトのメタ情報（モデルパス、エディタID、レコード型）。
@@ -456,10 +456,19 @@ impl<R: Read + Seek> EsmReader<R> {
         Ok(map)
     }
 
-    /// ESM 内の NPC_ (NPC定義) および ARMO (防具定義) を一括収集する。
-    pub fn read_npc_and_armor_map(&mut self) -> io::Result<(HashMap<FormId, NpcRecord>, HashMap<FormId, ArmorRecord>)> {
+    /// ESM 内の NPC_ (NPC定義)、ARMO (防具定義)、OTFT (衣装定義)、HAIR (髪型定義) を一括収集する。
+    pub fn read_npc_and_armor_map(
+        &mut self,
+    ) -> io::Result<(
+        HashMap<FormId, NpcRecord>,
+        HashMap<FormId, ArmorRecord>,
+        HashMap<FormId, OtftRecord>,
+        HashMap<FormId, HairRecord>,
+    )> {
         let mut npcs = HashMap::new();
         let mut armors = HashMap::new();
+        let mut outfits = HashMap::new();
+        let mut hairs = HashMap::new();
 
         let start_pos = 24 + self.header_record.data_size as u64;
         self.reader.seek(SeekFrom::Start(start_pos))?;
@@ -468,7 +477,11 @@ impl<R: Read + Seek> EsmReader<R> {
             match entry {
                 EsmEntry::Group(group) => {
                     let rtype = group.target_record_type();
-                    if rtype == Some(REC_NPC_) || rtype == Some(REC_ARMO) {
+                    if rtype == Some(REC_NPC_)
+                        || rtype == Some(REC_ARMO)
+                        || rtype == Some(REC_OTFT)
+                        || rtype == Some(REC_HAIR)
+                    {
                         let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
                         while self.reader.stream_position()? < group_end {
                             if let Some(inner) = self.read_next_entry()? {
@@ -481,6 +494,14 @@ impl<R: Read + Seek> EsmReader<R> {
                                         } else if header.type_id == REC_ARMO {
                                             if let Ok(armor) = ArmorRecord::from_record(&header, &subs) {
                                                 armors.insert(header.form_id, armor);
+                                            }
+                                        } else if header.type_id == REC_OTFT {
+                                            if let Ok(otft) = OtftRecord::from_record(&header, &subs) {
+                                                outfits.insert(header.form_id, otft);
+                                            }
+                                        } else if header.type_id == REC_HAIR {
+                                            if let Ok(hair) = HairRecord::from_record(&header, &subs) {
+                                                hairs.insert(header.form_id, hair);
                                             }
                                         }
                                     }
@@ -504,7 +525,7 @@ impl<R: Read + Seek> EsmReader<R> {
             }
         }
 
-        Ok((npcs, armors))
+        Ok((npcs, armors, outfits, hairs))
     }
 
     /// 指定された EDID を持つ CELL レコード、その子 REFR レコード群、および地形 LAND レコード（存在する場合）を検索・取得する。

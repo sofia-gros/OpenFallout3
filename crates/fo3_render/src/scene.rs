@@ -282,16 +282,17 @@ impl RenderScene {
             let has_skin = !part_anim_skins.is_empty();
             anim_skin_meshes.extend(part_anim_skins);
 
-            // スキンを持たずアタッチボーンが指定されている剛体パーツの場合、全メッシュを AnimatedRigidMesh として登録
+            // スキンを持たずアタッチボーンが指定されている剛体パーツの場合、各メッシュの相対姿勢を保持して AnimatedRigidMesh として登録
             if !has_skin {
                 if let Some(bone_name) = attach_bone_opt {
-                    for mesh_idx in mesh_offset..meshes.len() {
-                        anim_rigid_meshes.push(AnimatedRigidMesh {
-                            mesh_index: mesh_idx,
-                            bone_name: bone_name.clone(),
-                            local_transform: Mat4::IDENTITY,
-                        });
-                    }
+                    let mesh_names: Vec<&str> = meshes.iter().map(|m| m.name.as_str()).collect();
+                    let rigids = collect_anim_rigid_meshes_for_part(
+                        mesh_offset,
+                        &bone_name,
+                        part_nif,
+                        &mesh_names,
+                    );
+                    anim_rigid_meshes.extend(rigids);
                 }
             }
         }
@@ -1200,6 +1201,62 @@ pub fn collect_anim_skin_meshes_for_names(
     result
 }
 
+/// スキンを持たない剛体パーツ NIF (目、歯、舌、髪など) について、
+/// 各メッシュの NIF 内ローカルトランスフォームを保持した `AnimatedRigidMesh` を収集する。
+///
+/// 参照元: Gamebryo 2.6 `NiAVObject::m_kLocal`, `NiNode::AttachChild`, `knowledge/actor_and_skin_mesh.md` (セクション 4.7)
+pub fn collect_anim_rigid_meshes_for_part(
+    mesh_offset: usize,
+    bone_name: &str,
+    nif: &NifFile,
+    mesh_names: &[&str],
+) -> Vec<AnimatedRigidMesh> {
+    let mut result = Vec::new();
+    let relevant_names = if mesh_offset < mesh_names.len() {
+        &mesh_names[mesh_offset..]
+    } else {
+        &[]
+    };
+
+    for (block_idx, block) in nif.blocks.iter().enumerate() {
+        let (name_index, av_obj) = match block {
+            NifBlock::NiTriShape(shape) => (shape.geom.av.net.name_index, &shape.geom.av),
+            NifBlock::NiTriStrips(strips) => (strips.geom.av.net.name_index, &strips.geom.av),
+            _ => continue,
+        };
+
+        if is_node_hidden(av_obj, nif) {
+            continue;
+        }
+
+        let mesh_name = nif.get_string(name_index).unwrap_or("");
+        let block_hint = block_idx.to_string();
+        if let Some(pos) = relevant_names.iter().position(|name| {
+            *name == mesh_name || name.contains(&block_hint)
+        }) {
+            let local_transform = to_core_transform(av_obj).to_mat4();
+            result.push(AnimatedRigidMesh {
+                mesh_index: mesh_offset + pos,
+                bone_name: bone_name.to_string(),
+                local_transform,
+            });
+        }
+    }
+
+    // もしブロック名でマッチしなかった場合のフォールバック: mesh_offset 以降の全メッシュを IDENTITY で登録
+    if result.is_empty() && !relevant_names.is_empty() {
+        for pos in 0..relevant_names.len() {
+            result.push(AnimatedRigidMesh {
+                mesh_index: mesh_offset + pos,
+                bone_name: bone_name.to_string(),
+                local_transform: Mat4::IDENTITY,
+            });
+        }
+    }
+
+    result
+}
+
 impl RenderScene {
     /// アニメーション更新後のボーン行列で、全スキンメッシュの頂点バッファを更新する。
     ///
@@ -1420,13 +1477,14 @@ impl RenderScene {
 
             if !has_skin {
                 if let Some(bone_name) = attach_bone_opt {
-                    for mesh_idx in mesh_offset..self.meshes.len() {
-                        actor_anim_rigids.push(AnimatedRigidMesh {
-                            mesh_index: mesh_idx,
-                            bone_name: bone_name.clone(),
-                            local_transform: Mat4::IDENTITY,
-                        });
-                    }
+                    let mesh_names: Vec<&str> = self.meshes.iter().map(|m| m.name.as_str()).collect();
+                    let rigids = collect_anim_rigid_meshes_for_part(
+                        mesh_offset,
+                        &bone_name,
+                        part_nif,
+                        &mesh_names,
+                    );
+                    actor_anim_rigids.extend(rigids);
                 }
             }
         }
