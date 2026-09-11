@@ -30,8 +30,8 @@ use fo3_nif::collision::extract_collision_data;
 use fo3_nif::NifFile;
 use fo3_physics::{RapierCharacterController, RapierPhysicsWorld};
 use fo3_render::{
-    recompute_bone_world_map_with_pose, AnimationPlayer, LightingUniform, OrbitCamera,
-    PlacedPointLight, RenderContext, RenderScene, SkeletonPose,
+    AnimationPlayer, LightingUniform, OrbitCamera, PlacedPointLight, RenderContext,
+    RenderScene, SkeletonPose,
 };
 use fo3_vfs::VfsManager;
 use glam::Mat4;
@@ -108,12 +108,16 @@ struct ViewerState {
     anim_player: Option<AnimationPlayer>,
     /// KF ファイルの NifFile（アニメーションデータ）
     anim_kf_nif: Option<NifFile>,
-    /// スキンメッシュ NIF（ボーン階層走査用）
+    /// パーツメッシュ NIF（スキニング変形対象）
+    anim_mesh_nif: Option<NifFile>,
+    /// スケルトン NIF（真のボーン階層ツリー走査用）
     anim_skeleton_nif: Option<NifFile>,
     /// 現在の骨格姿勢（KF → SkeletonPose のオーバーライド）
     anim_pose: SkeletonPose,
     /// ボーンワールド行列マップ（block_index → Mat4）
     anim_bone_world_map: HashMap<i32, Mat4>,
+    /// ボーン名ワールド行列マップ（bone_name → Mat4）
+    anim_bone_name_world_map: HashMap<String, Mat4>,
 }
 
 impl ViewerState {
@@ -720,12 +724,20 @@ impl ViewerState {
 
         let character_controller = RapierCharacterController::new(spawn_pos);
 
-        // アニメーションモード時: KF + スキンメッシュ NIF を追加ロードして AnimationPlayer を構築
-        let (anim_player, anim_kf_nif, anim_skeleton_nif, anim_pose, anim_bone_world_map) = {
+        // アニメーションモード時: KF + メッシュ NIF + スケルトン NIF をロードして AnimationPlayer を構築
+        let (
+            anim_player,
+            anim_kf_nif,
+            anim_mesh_nif,
+            anim_skeleton_nif,
+            anim_pose,
+            anim_bone_world_map,
+            anim_bone_name_world_map,
+        ) = {
             if let ViewerTarget::Anim { nif_path, kf_path } = target {
-                use fo3_render::{collect_bone_world_transforms, AnimationClip};
+                use fo3_render::{recompute_bone_world_maps_with_pose, AnimationClip};
 
-                // KF ファイル読み込み
+                // 1. KF ファイル読み込み
                 let kf_bytes = vfs
                     .read(kf_path)
                     .expect("KF ファイルの読み込みに失敗しました");
@@ -734,24 +746,55 @@ impl ViewerState {
                     NifFile::read(&mut kf_cursor).expect("KF ファイルのパースに失敗しました");
                 println!("KF パース成功 (ブロック数: {})", kf_nif.blocks.len());
 
-                // スキンメッシュ NIF（ボーン階層）再読み込み
-                let skel_bytes = vfs
+                // 2. メッシュ NIF 読み込み
+                let mesh_bytes = vfs
                     .read(nif_path)
-                    .expect("スケルトン NIF の読み込みに失敗しました");
-                let mut skel_cursor = Cursor::new(skel_bytes);
-                let skel_nif =
-                    NifFile::read(&mut skel_cursor).expect("スケルトン NIF のパースに失敗しました");
+                    .expect("メッシュ NIF の読み込みに失敗しました");
+                let mut mesh_cursor = Cursor::new(mesh_bytes);
+                let mesh_nif =
+                    NifFile::read(&mut mesh_cursor).expect("メッシュ NIF のパースに失敗しました");
 
-                // バインドポーズのボーンワールド行列を収集
+                // 3. スケルトン NIF（真のボーン階層ツリー）の自動検出と読み込み
+                // キャラクタパーツ（upperbody.nif, outfit*.nif など）はボーン階層がフラットなため、
+                // 完全な親子ツリーを持つ skeleton.nif をロードしてアニメーションを適用する。
+                // 参照元: Gamebryo 2.6 アクター構造、knowledge/actor_and_skin_mesh.md (セクション 4.4)
+                let lower_path = nif_path.to_ascii_lowercase();
+                let candidate_skel_path = if lower_path.contains("characters\\_female") || lower_path.contains("characters/_female") {
+                    "meshes\\characters\\_female\\skeleton.nif"
+                } else {
+                    "meshes\\characters\\_male\\skeleton.nif"
+                };
+
+                let skel_nif = match vfs.read(candidate_skel_path) {
+                    Ok(skel_bytes) => {
+                        let mut skel_cursor = Cursor::new(skel_bytes);
+                        match NifFile::read(&mut skel_cursor) {
+                            Ok(parsed) => {
+                                println!("キャラクタスケルトン \"{}\" を自動検出・ロード完了 (ブロック数: {})", candidate_skel_path, parsed.blocks.len());
+                                parsed
+                            }
+                            Err(e) => {
+                                eprintln!("警告: スケルトン \"{}\" のパースに失敗しました: {}。指定メッシュをスケルトンとして代用します。", candidate_skel_path, e);
+                                mesh_nif.clone()
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        println!("指定メッシュ自身をスケルトン階層として使用します: {}", nif_path);
+                        mesh_nif.clone()
+                    }
+                };
+
+                // 初期ポーズでボーンワールド行列およびボーン名マップを計算
                 let mut bone_world_map = HashMap::new();
-                if !skel_nif.blocks.is_empty() {
-                    collect_bone_world_transforms(
-                        0,
-                        &NiTransform::default(),
-                        &skel_nif,
-                        &mut bone_world_map,
-                    );
-                }
+                let mut bone_name_world_map = HashMap::new();
+                let initial_pose = SkeletonPose::default();
+                recompute_bone_world_maps_with_pose(
+                    &skel_nif,
+                    &initial_pose,
+                    &mut bone_world_map,
+                    &mut bone_name_world_map,
+                );
 
                 // AnimationClip を構築して AnimationPlayer を作成
                 let player = AnimationClip::from_kf(&kf_nif).map(|clip| {
@@ -765,12 +808,22 @@ impl ViewerState {
                 (
                     player,
                     Some(kf_nif),
+                    Some(mesh_nif),
                     Some(skel_nif),
-                    SkeletonPose::default(),
+                    initial_pose,
                     bone_world_map,
+                    bone_name_world_map,
                 )
             } else {
-                (None, None, None, SkeletonPose::default(), HashMap::new())
+                (
+                    None,
+                    None,
+                    None,
+                    None,
+                    SkeletonPose::default(),
+                    HashMap::new(),
+                    HashMap::new(),
+                )
             }
         };
 
@@ -810,9 +863,11 @@ impl ViewerState {
             last_mouse_pos: None,
             anim_player,
             anim_kf_nif,
+            anim_mesh_nif,
             anim_skeleton_nif,
             anim_pose,
             anim_bone_world_map,
+            anim_bone_name_world_map,
         }
     }
 
@@ -929,24 +984,27 @@ impl ViewerState {
 
         // アニメーション更新ループ (Anim モード時)
         // 参照元: Gamebryo 2.6 `NiControllerSequence::Update` → `NiSkinInstance::Update`
-        if let (Some(player), Some(kf_nif), Some(skel_nif)) = (
+        // 参照元: `knowledge/actor_and_skin_mesh.md` (セクション 4.4: スケルトン分離とボーン名マッピング)
+        if let (Some(player), Some(kf_nif), Some(skel_nif), Some(mesh_nif)) = (
             self.anim_player.as_mut(),
             self.anim_kf_nif.as_ref(),
             self.anim_skeleton_nif.as_ref(),
+            self.anim_mesh_nif.as_ref(),
         ) {
             // 1. アニメーション時刻を進めてボーン姿勢を更新
             player.update(kf_nif, dt, &mut self.anim_pose);
 
-            // 2. スケルトン NIF の FK を再計算（アニメーション姿勢適用後のボーンワールド行列）
-            recompute_bone_world_map_with_pose(
+            // 2. スケルトン NIF の FK を再計算（アニメーション姿勢適用後のボーンワールド行列 & ボーン名マップ）
+            fo3_render::recompute_bone_world_maps_with_pose(
                 skel_nif,
                 &self.anim_pose,
                 &mut self.anim_bone_world_map,
+                &mut self.anim_bone_name_world_map,
             );
 
-            // 3. スキンメッシュの頂点バッファをアニメーション姿勢で更新
+            // 3. スキンメッシュの頂点バッファをスケルトンのボーン名ワールド行列で更新
             self.scene
-                .update_animated_skins(&self.device, skel_nif, &self.anim_bone_world_map);
+                .update_animated_skins_with_skeleton(&self.device, mesh_nif, &self.anim_bone_name_world_map);
         }
     }
 

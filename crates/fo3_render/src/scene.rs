@@ -736,6 +736,17 @@ fn traverse_block(
 /// 常に正しい現在行列を参照できる。
 ///
 /// 参照元: Gamebryo 2.6 `NiAVObject::UpdateDownwardPass`, `NiSkinInstance::Update`
+
+/// スケルトン階層の全 NiNode / BSFadeNode ワールド変換行列を `bone_world_map` に蓄積する。
+///
+/// `traverse_block` に先立って実行するプレパス。単一パスの深さ優先トラバースでは、
+/// 装備 NIF (`meshes\armor\...\outfit*.nif`) のように NiTriShape ブロックがボーン
+/// NiNode ブロックより先の位置・子ノード配列順で現れる場合、NiTriShape のスキニング
+/// 処理時にボーンが未登録のまま `Mat4::IDENTITY` へフォールバックしてしまう。
+/// このプレパスにより全ボーンのワールド変換が先に解決され、アニメーション適用時に
+/// 常に正しい現在行列を参照できる。
+///
+/// 参照元: Gamebryo 2.6 `NiAVObject::UpdateDownwardPass`, `NiSkinInstance::Update`
 pub fn collect_bone_world_transforms(
     block_index: i32,
     parent_world: &NiTransform,
@@ -774,17 +785,26 @@ pub fn collect_bone_world_transforms(
     }
 }
 
-/// 姿勢 (`SkeletonPose`) をスケルトン NIF のボーン階層へ適用し、Forward Kinematics を再計算する。
+/// スケルトン NIF の Forward Kinematics (FK) を再計算し、
+/// ブロックインデックスマップ (`bone_world_map`) およびボーン名マップ (`bone_name_world_map`) の両方を更新する。
 ///
-/// バインドポーズ用のプレパス (`collect_bone_world_transforms`) が保持する各ボーンの
-/// ワールド変換行列を、`pose.overrides[bone_name]` のローカルトランスフォームで上書き
-/// した上で、ルートから再帰的にワールド合成し直す。これによりアニメーション適用時の
-/// 各ボーン現在行列 (`$M_{\text{bone}}[i]$`) が得られ、`apply_skinning_cpu_with_bones` に
-/// 渡すことでスキンメッシュが正しく変形される。
-///
-/// - ポーズに含まれないボーンはバインドポーズのワールド行列のまま維持される。
-/// - 上書き対象は `NiNode` / `BSFadeNode` のローカル変換である（Gamebryo 2.6 では
-///   アニメーションは NiAVObject のローカル変換として適用される）。
+/// 参照元:
+/// - Gamebryo 2.6 `NiControllerSequence::Update` (ボーンローカル変換の適用)
+/// - Gamebryo 2.6 `NiAVObject::UpdateDownwardPass` (FK ワールド合成)
+/// - `knowledge/actor_and_skin_mesh.md` (セクション 4.4: スケルトン分離とボーン名マッピング)
+pub fn recompute_bone_world_maps_with_pose(
+    nif: &NifFile,
+    pose: &crate::animation::SkeletonPose,
+    bone_world_map: &mut HashMap<i32, Mat4>,
+    bone_name_world_map: &mut HashMap<String, Mat4>,
+) {
+    bone_world_map.clear();
+    bone_name_world_map.clear();
+    recompute_fk_with_names(0, &NiTransform::default(), nif, pose, bone_world_map, bone_name_world_map);
+}
+
+/// NIF 内のボーン階層をアニメーション姿勢 (`pose`) で順運動学 (FK) 再計算し、
+/// 各ボーンノードのワールド変換行列を `bone_world_map` に格納する。
 ///
 /// 参照元:
 /// - Gamebryo 2.6 `NiControllerSequence::Update` (ボーンローカル変換の適用)
@@ -796,17 +816,19 @@ pub fn recompute_bone_world_map_with_pose(
     bone_world_map: &mut HashMap<i32, Mat4>,
 ) {
     bone_world_map.clear();
-    recompute_fk(0, &NiTransform::default(), nif, pose, bone_world_map);
+    let mut dummy_name_map = HashMap::new();
+    recompute_fk_with_names(0, &NiTransform::default(), nif, pose, bone_world_map, &mut dummy_name_map);
 }
 
 /// Forward Kinematics 再帰: `pose.overrides` に一致するノードはローカル変換を差し替えて
-/// ワールド合成し、`bone_world_map` に登録する。
-fn recompute_fk(
+/// ワールド合成し、`bone_world_map` および `bone_name_world_map` に登録する。
+fn recompute_fk_with_names(
     block_index: i32,
     parent_world: &NiTransform,
     nif: &NifFile,
     pose: &crate::animation::SkeletonPose,
     bone_world_map: &mut HashMap<i32, Mat4>,
+    bone_name_world_map: &mut HashMap<String, Mat4>,
 ) {
     if block_index < 0 || block_index as usize >= nif.blocks.len() {
         return;
@@ -821,9 +843,13 @@ fn recompute_fk(
             let base = to_core_transform(&node.av);
             let local = lookup_override(base, &node.av, nif, pose);
             let world = parent_world.compose(&local);
-            bone_world_map.insert(block_index, world.to_mat4());
+            let mat = world.to_mat4();
+            bone_world_map.insert(block_index, mat);
+            if let Some(name) = nif.get_string(node.av.net.name_index) {
+                bone_name_world_map.insert(name.to_string(), mat);
+            }
             for &child in &node.children {
-                recompute_fk(child, &world, nif, pose, bone_world_map);
+                recompute_fk_with_names(child, &world, nif, pose, bone_world_map, bone_name_world_map);
             }
         }
         NifBlock::BSFadeNode(fade) => {
@@ -833,9 +859,13 @@ fn recompute_fk(
             let base = to_core_transform(&fade.node.av);
             let local = lookup_override(base, &fade.node.av, nif, pose);
             let world = parent_world.compose(&local);
-            bone_world_map.insert(block_index, world.to_mat4());
+            let mat = world.to_mat4();
+            bone_world_map.insert(block_index, mat);
+            if let Some(name) = nif.get_string(fade.node.av.net.name_index) {
+                bone_name_world_map.insert(name.to_string(), mat);
+            }
             for &child in &fade.node.children {
-                recompute_fk(child, &world, nif, pose, bone_world_map);
+                recompute_fk_with_names(child, &world, nif, pose, bone_world_map, bone_name_world_map);
             }
         }
         _ => {}
@@ -855,6 +885,46 @@ fn lookup_override(
         }
     }
     base
+}
+
+/// `NiSkinInstance.bones` の各ブロックインデックスからパーツ NIF 側のボーンノード名を取得し、
+/// スケルトン側で計算されたボーン名→ワールド行列マップ (`bone_name_world_map`) から行列配列を解決する。
+///
+/// スケルトン側に同名ボーンが存在しない場合は、フォールバックとして `fallback_bone_world_map` を参照し、
+/// それもなければ `Mat4::IDENTITY` を返す。
+///
+/// 参照元:
+/// - Gamebryo 2.6 `NiSkinInstance::Update`
+/// - `knowledge/actor_and_skin_mesh.md` (セクション 4.4)
+pub fn resolve_bone_world_transforms_by_name(
+    skin_instance: &fo3_nif::NiSkinInstance,
+    mesh_nif: &NifFile,
+    bone_name_world_map: &HashMap<String, Mat4>,
+    fallback_bone_world_map: Option<&HashMap<i32, Mat4>>,
+) -> Vec<Mat4> {
+    skin_instance
+        .bones
+        .iter()
+        .map(|&bone_block_idx| {
+            if bone_block_idx >= 0 && (bone_block_idx as usize) < mesh_nif.blocks.len() {
+                let name = match &mesh_nif.blocks[bone_block_idx as usize] {
+                    NifBlock::NiNode(node) => mesh_nif.get_string(node.av.net.name_index),
+                    NifBlock::BSFadeNode(fade) => mesh_nif.get_string(fade.node.av.net.name_index),
+                    _ => None,
+                };
+                if let Some(name) = name {
+                    if let Some(&mat) = bone_name_world_map.get(name) {
+                        return mat;
+                    }
+                }
+            }
+            if let Some(fallback) = fallback_bone_world_map {
+                fallback.get(&bone_block_idx).copied().unwrap_or(Mat4::IDENTITY)
+            } else {
+                Mat4::IDENTITY
+            }
+        })
+        .collect()
 }
 
 /// `NiSkinInstance.bones` の各ブロックインデックスからワールド変換行列配列を解決する。
@@ -949,6 +1019,47 @@ impl RenderScene {
             let bone_transforms = resolve_bone_world_transforms(skin_inst, bone_world_map);
             let bone_refs = if bone_transforms.is_empty() { None } else { Some(bone_transforms.as_slice()) };
             if let Some((positions, normals)) = apply_skinning_cpu_with_bones(geo_data, skin_inst, nif, bone_refs) {
+                self.meshes[mesh_index].mesh.update_skinned_vertices(device, geo_data, &positions, &normals);
+            }
+        }
+    }
+
+    /// スケルトン側のボーン名ワールド行列を用いて、パーツメッシュ NIF の全スキンメッシュの頂点バッファを更新する。
+    ///
+    /// キャラクタの衣装やボディパーツ（`upperbody.nif` 等）は、スケルトン NIF（`skeleton.nif`）で計算された
+    /// 各ボーンノードのワールド変換をボーン名で引き当てて変形する。
+    ///
+    /// 参照元:
+    /// - Gamebryo 2.6 `NiSkinInstance::Update`
+    /// - `knowledge/actor_and_skin_mesh.md` (セクション 4.4: スケルトン分離とボーン名マッピング)
+    pub fn update_animated_skins_with_skeleton(
+        &mut self,
+        device: &wgpu::Device,
+        mesh_nif: &NifFile,
+        bone_name_world_map: &HashMap<String, Mat4>,
+    ) {
+        for anim in &self.anim_skin_meshes {
+            let mesh_index = anim.mesh_index;
+            if mesh_index >= self.meshes.len() { continue; }
+
+            // NiTriShapeData を解決
+            let geo_data_block = anim.geo_data_block as usize;
+            if geo_data_block >= mesh_nif.blocks.len() { continue; }
+            let NifBlock::NiTriShapeData(geo_data) = &mesh_nif.blocks[geo_data_block] else { continue };
+
+            // NiSkinInstance を解決
+            let skin_inst_block = anim.skin_instance_block as usize;
+            if skin_inst_block >= mesh_nif.blocks.len() { continue; }
+            let skin_inst = match &mesh_nif.blocks[skin_inst_block] {
+                NifBlock::NiSkinInstance(inst) => inst,
+                NifBlock::BSDismemberSkinInstance(bdsi) => &bdsi.skin_instance,
+                _ => continue,
+            };
+
+            // スケルトンのボーン名から現在のボーン行列を解決してスキニング計算
+            let bone_transforms = resolve_bone_world_transforms_by_name(skin_inst, mesh_nif, bone_name_world_map, None);
+            let bone_refs = if bone_transforms.is_empty() { None } else { Some(bone_transforms.as_slice()) };
+            if let Some((positions, normals)) = apply_skinning_cpu_with_bones(geo_data, skin_inst, mesh_nif, bone_refs) {
                 self.meshes[mesh_index].mesh.update_skinned_vertices(device, geo_data, &positions, &normals);
             }
         }
@@ -1531,6 +1642,150 @@ mod tests {
         assert_eq!(
             map[&0].transform_point3(Vec3::ZERO),
             Vec3::new(1.0, 2.0, 3.0)
+        );
+    }
+
+    /// `recompute_bone_world_maps_with_pose` と `resolve_bone_world_transforms_by_name` が、
+    /// スケルトン側のノード名とパーツメッシュ側のボーン名を正しくマッチングしてワールド変換を解決することを検証する。
+    ///
+    /// 参照元: `knowledge/actor_and_skin_mesh.md` (セクション 4.4)
+    #[test]
+    fn test_recompute_bone_world_maps_with_pose_and_name_resolution() {
+        use crate::animation::SkeletonPose;
+        use fo3_nif::blocks::{NiAVObject, NiNode, NiObjectNET};
+        use fo3_nif::header::{BSStreamHeader, ExportString, NifHeader};
+        use fo3_nif::NiSkinInstance;
+        use fo3_nif::NifFile;
+        use fo3_nif::{Matrix33, Vector3};
+
+        let make_av = |name_idx: u32, translation: Vector3| NiAVObject {
+            net: NiObjectNET {
+                name_index: name_idx,
+                extra_data_list: vec![],
+                controller: -1,
+            },
+            flags: 0,
+            translation,
+            rotation: Matrix33 {
+                m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            },
+            scale: 1.0,
+            properties: vec![],
+            collision_object: -1,
+        };
+
+        let root = NiNode {
+            av: make_av(1, Vector3 { x: 0.0, y: 0.0, z: 0.0 }),
+            children: vec![1],
+            effects: vec![],
+        };
+        let pelvis = NiNode {
+            av: make_av(2, Vector3 { x: 10.0, y: 0.0, z: 0.0 }),
+            children: vec![],
+            effects: vec![],
+        };
+
+        // スケルトン NIF: [0] = "Bip01", [1] = "Bip01 Pelvis"
+        let skel_nif = NifFile {
+            header: NifHeader {
+                header_string: "Gamebryo File Format, Version 20.2.0.7\n".to_string(),
+                version: 0x14020007,
+                endian_type: 1,
+                user_version: 11,
+                num_blocks: 0,
+                bs_header: BSStreamHeader {
+                    bs_version: 34,
+                    author: ExportString { value: String::new() },
+                    process_script: None,
+                    export_script: ExportString { value: String::new() },
+                },
+                block_types: vec![],
+                block_type_indices: vec![],
+                block_sizes: vec![],
+                strings: vec![
+                    String::new(),
+                    "Bip01".to_string(),
+                    "Bip01 Pelvis".to_string(),
+                ],
+            },
+            blocks: vec![NifBlock::NiNode(root), NifBlock::NiNode(pelvis)],
+        };
+
+        // パーツメッシュ NIF: [0] = ダミーボーン "Bip01 Pelvis" (親子なし)
+        let mesh_pelvis_bone = NiNode {
+            av: make_av(1, Vector3 { x: 0.0, y: 0.0, z: 0.0 }),
+            children: vec![],
+            effects: vec![],
+        };
+        let mesh_nif = NifFile {
+            header: NifHeader {
+                header_string: "Gamebryo File Format, Version 20.2.0.7\n".to_string(),
+                version: 0x14020007,
+                endian_type: 1,
+                user_version: 11,
+                num_blocks: 0,
+                bs_header: BSStreamHeader {
+                    bs_version: 34,
+                    author: ExportString { value: String::new() },
+                    process_script: None,
+                    export_script: ExportString { value: String::new() },
+                },
+                block_types: vec![],
+                block_type_indices: vec![],
+                block_sizes: vec![],
+                strings: vec![
+                    String::new(),
+                    "Bip01 Pelvis".to_string(),
+                ],
+            },
+            blocks: vec![NifBlock::NiNode(mesh_pelvis_bone)],
+        };
+
+        let mut pose = SkeletonPose::default();
+        pose.overrides.insert(
+            "Bip01 Pelvis".to_string(),
+            NiTransform {
+                rotation: glam::Mat3::IDENTITY,
+                translation: Vec3::new(100.0, 200.0, 300.0),
+                scale: 1.0,
+            },
+        );
+
+        let mut bone_world_map = HashMap::new();
+        let mut bone_name_world_map = HashMap::new();
+        recompute_bone_world_maps_with_pose(
+            &skel_nif,
+            &pose,
+            &mut bone_world_map,
+            &mut bone_name_world_map,
+        );
+
+        // スケルトンのボーン名マップに "Bip01 Pelvis" のワールド座標 (100, 200, 300) が格納されていること
+        assert!(bone_name_world_map.contains_key("Bip01 Pelvis"));
+        assert_eq!(
+            bone_name_world_map["Bip01 Pelvis"].transform_point3(Vec3::ZERO),
+            Vec3::new(100.0, 200.0, 300.0)
+        );
+
+        // パーツメッシュの NiSkinInstance がボーン [0] ("Bip01 Pelvis") を参照しているとき
+        let skin_instance = NiSkinInstance {
+            data: 0,
+            skin_partition: 0,
+            skeleton_root: 0,
+            bones: vec![0],
+        };
+
+        // 名前引きで解決すると、スケルトン側の (100, 200, 300) が得られること
+        let resolved = resolve_bone_world_transforms_by_name(
+            &skin_instance,
+            &mesh_nif,
+            &bone_name_world_map,
+            None,
+        );
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(
+            resolved[0].transform_point3(Vec3::ZERO),
+            Vec3::new(100.0, 200.0, 300.0)
         );
     }
 }
