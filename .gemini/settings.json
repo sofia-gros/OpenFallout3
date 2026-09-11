@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "context-engine": {
+      "command": "C:\\Users\\metal\\.local\\bin\\cce.exe",
+      "args": [
+        "serve",
+        "--project-dir",
+        "A:\\project\\openfallout3"
+      ]
+    }
+  }
+}

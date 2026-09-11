@@ -9,6 +9,7 @@
 //! - VFS 統合読み込み検証: `fo3_testbed vfs-test <data_dir> <relative/path>`
 
 use std::env;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Cursor};
 use std::path::Path;
@@ -33,6 +34,8 @@ fn print_usage() {
     println!("  cargo run -p fo3_testbed -- esm-cell <path/to/file.esm> <cell_edid>");
     println!("  cargo run -p fo3_testbed -- collision-batch <data_dir> [limit]");
     println!("  cargo run -p fo3_testbed -- collision-lines <data_dir> <relative/path>");
+    println!("  cargo run -p fo3_testbed -- skin-test <data_dir> <relative/path>");
+    println!("  cargo run -p fo3_testbed -- anim-test <data_dir> <relative/path> <kf_path>");
 }
 
 fn test_nif(nif_path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -395,11 +398,11 @@ fn test_bsa_list(bsa_path: &str, filter: Option<&str>) -> Result<(), Box<dyn std
         let q = query.to_ascii_lowercase();
         let matched: Vec<_> = files.iter().filter(|f| f.to_ascii_lowercase().contains(&q)).collect();
         println!("\n検索ワード '{}' に一致したファイル ({} 件):", query, matched.len());
-        for (i, f) in matched.iter().take(20).enumerate() {
+        for (i, f) in matched.iter().take(40).enumerate() {
             println!("  [{}] {}", i, f);
         }
-        if matched.len() > 20 {
-            println!("  ... (他 {} 件)", matched.len() - 20);
+        if matched.len() > 40 {
+            println!("  ... (他 {} 件)", matched.len() - 40);
         }
     } else {
         println!("\n先頭 10 件のファイル:");
@@ -961,6 +964,751 @@ fn scan_world_cells<R: std::io::Read + std::io::Seek>(
     Ok(())
 }
 
+/// 実アセットの T-Pose スキニングをヘッドレス検証する。
+///
+/// スキンメッシュ NIF (`meshes\armor\...\outfit*.nif` など) からボーン階層を解決し、
+/// `apply_skinning_cpu_with_bones` でバインドポーズ変形を適用して、
+/// 出力頂点が有限値かつ元のメッシュ BBox を保持していることを確認する。
+///
+/// 参照元: knowledge/actor_and_skin_mesh.md, Gamebryo 2.6 NiSkinInstance::Update
+fn test_skin(data_dir: &str, relative_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use fo3_gamebryo_core::NiTransform;
+    use fo3_render::{collect_bone_world_transforms, resolve_bone_world_transforms};
+    use fo3_render::skinning::apply_skinning_cpu_with_bones;
+    use glam::Vec3;
+
+    println!("=== スキンメッシュ T-Pose 変形検証: {} ===", relative_path);
+    let mut vfs = create_vfs(data_dir)?;
+    let bytes = vfs.read(relative_path)?;
+    let mut cursor = Cursor::new(bytes);
+    let nif = NifFile::read(&mut cursor)?;
+
+    // ボーン階層プレパス (バインドポーズのワールド変換を事前登録)
+    let mut bone_world_map = HashMap::new();
+    collect_bone_world_transforms(0, &NiTransform::default(), &nif, &mut bone_world_map);
+    println!("ボーン (NiNode/BSFadeNode) 登録数: {}", bone_world_map.len());
+
+    // ブロック9 (Pelvis) の親チェーンとローカル変換
+    let mut cur = 9i32;
+    println!("=== ブロック9 (Pelvis) の親チェーン ===");
+    while cur >= 0 && (cur as usize) < nif.blocks.len() {
+        let (name, trans, rot) = match &nif.blocks[cur as usize] {
+            NifBlock::NiNode(n) => (nif.get_string(n.av.net.name_index).unwrap_or(""), n.av.translation, n.av.rotation.m),
+            NifBlock::BSFadeNode(f) => (nif.get_string(f.node.av.net.name_index).unwrap_or(""), f.node.av.translation, f.node.av.rotation.m),
+            _ => break,
+        };
+        println!("  block {}: \"{}\" trans=({:.3},{:.3},{:.3}) rot={:?}", cur, name, trans.x, trans.y, trans.z, rot);
+        // 親を探す
+        let parent = nif.blocks.iter().position(|b| match b {
+            NifBlock::NiNode(n) => n.children.contains(&cur),
+            NifBlock::BSFadeNode(f) => f.node.children.contains(&cur),
+            _ => false,
+        });
+        match parent {
+            Some(p) => cur = p as i32,
+            None => break,
+        }
+    }
+
+    let mut shape_count = 0;
+    let mut skinned_count = 0;
+    let mut failed_count = 0;
+
+    for (i, block) in nif.blocks.iter().enumerate() {
+        let NifBlock::NiTriShape(shape) = block else { continue };
+        shape_count += 1;
+        if shape.geom.skin_instance < 0 {
+            println!("  [{:03}] NiTriShape (スキンなし): {}", i, nif.get_string(shape.geom.av.net.name_index).unwrap_or(""));
+            continue;
+        }
+        let inst_idx = shape.geom.skin_instance as usize;
+        if inst_idx >= nif.blocks.len() {
+            failed_count += 1;
+            continue;
+        }
+        let inst = match &nif.blocks[inst_idx] {
+            NifBlock::NiSkinInstance(x) => x,
+            NifBlock::BSDismemberSkinInstance(x) => &x.skin_instance,
+            _ => { failed_count += 1; continue; }
+        };
+        let data_idx = shape.geom.data as usize;
+        let data = match nif.blocks.get(data_idx) {
+            Some(NifBlock::NiTriShapeData(d)) => d,
+            _ => { failed_count += 1; continue; }
+        };
+
+        println!("shape i={} inst_idx={} inst.data={}", i, inst_idx, inst.data);
+        let input_min = data.common.vertices.iter().fold(Vec3::splat(f32::INFINITY), |a, v| a.min(Vec3::new(v.x, v.y, v.z)));
+        let input_max = data.common.vertices.iter().fold(Vec3::splat(f32::NEG_INFINITY), |a, v| a.max(Vec3::new(v.x, v.y, v.z)));
+
+        let bone_mats = resolve_bone_world_transforms(inst, &bone_world_map);
+        let bone_refs = if bone_mats.is_empty() { None } else { Some(bone_mats.as_slice()) };
+        match apply_skinning_cpu_with_bones(data, inst, &nif, bone_refs) {
+            Some((pos, nrm)) => {
+                let finite = pos.iter().chain(nrm.iter()).all(|v| v.iter().all(|c| c.is_finite()));
+                let out_min = pos.iter().fold(Vec3::splat(f32::INFINITY), |a, v| a.min(Vec3::from_slice(v)));
+                let out_max = pos.iter().fold(Vec3::splat(f32::NEG_INFINITY), |a, v| a.max(Vec3::from_slice(v)));
+                let name = nif.get_string(shape.geom.av.net.name_index).unwrap_or("");
+                println!(
+                    "  [{:03}] \"{}\" 頂点{} ボーン{}本 finite={} BBox 入力 {:?}~{:?} → 出力 {:?}~{:?}",
+                    i, name, pos.len(), inst.bones.len(), finite, input_min, input_max, out_min, out_max
+                );
+                if finite {
+                    skinned_count += 1;
+                } else {
+                    failed_count += 1;
+                    println!("        !! 出力頂点に非有限値が含まれています");
+                }
+            }
+            None => {
+                failed_count += 1;
+                println!("  [{:03}] スキニング失敗 (NiSkinData 未解決): {}", i, nif.get_string(shape.geom.av.net.name_index).unwrap_or(""));
+            }
+        }
+    }
+
+    println!("\n【結果】NiTriShape: {} 個, スキン正常: {} 個, 失敗/スキップ: {} 個, 登録ボーン: {} 本",
+        shape_count, skinned_count, failed_count, bone_world_map.len());
+    if skinned_count == 0 {
+        println!("警告: スキンメッシュが 1 件も正常変形していません。");
+    }
+    Ok(())
+}
+
+/// 一時プローブ: 全合成式×行列変換の組合せでバインドポーズ一致度を測定する。
+fn skin_matrix_probe(data_dir: &str, relative_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use fo3_gamebryo_core::NiTransform;
+    use fo3_nif::types::{Matrix33, Vector3};
+    use fo3_render::{collect_bone_world_transforms, resolve_bone_world_transforms};
+    use glam::{Mat3, Mat4, Vec3, Vec4};
+
+    fn build_mat(translation: Vector3, rotation: Matrix33, scale: f32, transpose: bool) -> Mat4 {
+        let r = &rotation.m;
+        let rot = if transpose {
+            Mat4::from_mat3(Mat3::from_cols_array_2d(r) * scale)
+        } else {
+            Mat4::from_mat3(Mat3::from_cols_array(&[
+                r[0][0], r[1][0], r[2][0],
+                r[0][1], r[1][1], r[2][1],
+                r[0][2], r[1][2], r[2][2],
+            ]) * scale)
+        };
+        Mat4::from_translation(Vec3::new(translation.x, translation.y, translation.z)) * rot
+    }
+
+    let mut vfs = create_vfs(data_dir)?;
+    let bytes = vfs.read(relative_path)?;
+    let mut cursor = Cursor::new(bytes);
+    let nif = NifFile::read(&mut cursor)?;
+
+    let mut bone_world_map = HashMap::new();
+    collect_bone_world_transforms(0, &NiTransform::default(), &nif, &mut bone_world_map);
+
+    let formulas: Vec<(&str, fn(Mat4, Mat4, Mat4) -> Mat4)> = vec![
+        ("I*B*R", |i, b, r| i * b * r),
+        ("B*I*R", |i, b, r| b * i * r),
+        ("I*B", |i, b, _r| i * b),
+        ("B*R*I", |i, b, r| b * r * i),
+        ("R*I*B", |i, b, r| r * i * b),
+        ("R*B*I", |i, b, r| r * b * i),
+        ("B*I", |i, b, _r| b * i),
+        ("I*R*B", |i, b, r| i * r * b),
+    ];
+    let convs: Vec<(&str, bool)> = vec![("nontrans", false), ("trans", true)];
+
+    // 形状ごとの測定: combo -> max dev
+    let mut shapes: Vec<(String, Vec<(usize, Vec<(String, String, f32)>)>)> = Vec::new();
+
+    for (i, block) in nif.blocks.iter().enumerate() {
+        let NifBlock::NiTriShape(shape) = block else { continue };
+        if shape.geom.skin_instance < 0 { continue; }
+        let inst_idx = shape.geom.skin_instance as usize;
+        if inst_idx >= nif.blocks.len() { continue; }
+        let inst = match &nif.blocks[inst_idx] {
+            NifBlock::NiSkinInstance(x) => x,
+            NifBlock::BSDismemberSkinInstance(x) => &x.skin_instance,
+            _ => continue,
+        };
+        let data_idx = shape.geom.data as usize;
+        let data = match nif.blocks.get(data_idx) {
+            Some(NifBlock::NiTriShapeData(d)) => d,
+            _ => continue,
+        };
+        let skin_data = match &nif.blocks[inst.data as usize] {
+            NifBlock::NiSkinData(d) => d,
+            _ => continue,
+        };
+        let part_data = match &nif.blocks[inst.skin_partition as usize] {
+            NifBlock::NiSkinPartition(p) => p,
+            _ => continue,
+        };
+        let bone_worlds = resolve_bone_world_transforms(inst, &bone_world_map);
+
+        let name = nif.get_string(shape.geom.av.net.name_index).unwrap_or("?").to_string();
+        let n_verts = data.common.vertices.len();
+        let src: Vec<Vec4> = data.common.vertices.iter().map(|v| Vec4::new(v.x, v.y, v.z, 1.0)).collect();
+
+        // 最初の形状 or 単ボーン形状の構造を印字
+        let is_single_bone = part_data.partitions.iter().all(|p| p.bones.len() <= 1) && !part_data.partitions.is_empty();
+        if shapes.is_empty() || is_single_bone {
+            println!("--- 最初の形状 \"{}\" の構造 ---", name);
+            println!("  NiSkinData#{} root: t=({:.4},{:.4},{:.4}) s={}", inst.data,
+                skin_data.skin_transform_translation.x, skin_data.skin_transform_translation.y, skin_data.skin_transform_translation.z,
+                skin_data.skin_transform_scale);
+            println!("  root rot m = {:?}", skin_data.skin_transform_rotation.m);
+            for (pi, partition) in part_data.partitions.iter().enumerate() {
+                println!("  partition[{}]: num_bones={} num_verts={} n_weights={}", pi, partition.bones.len(),
+                    partition.vertex_map.len(), partition.num_weights_per_vertex);
+                for (bi, &b_in_list) in partition.bones.iter().enumerate() {
+let bd = if (b_in_list as usize) < skin_data.bone_list.len() { Some(&skin_data.bone_list[b_in_list as usize]) } else { None };
+                        let bw = if (b_in_list as usize) < bone_worlds.len() { bone_worlds[b_in_list as usize] } else { continue };
+                        let btrans = if let Some(bd) = bd { format!("({:.4},{:.4},{:.4})", bd.skin_transform_translation.x, bd.skin_transform_translation.y, bd.skin_transform_translation.z) } else { "??".into() };
+                        let bfix = if let Some(bd) = bd { format!("rot rows: {:?}", bd.skin_transform_rotation.m.iter().map(|r| format!("({:.3},{:.3},{:.3})", r[0], r[1], r[2])).collect::<Vec<_>>().join(" ")) } else { "rot: ?".into() };
+                        println!("    bone[{}] in_list={}  invBind t={}  {}  boneWorld t=({:.4},{:.4},{:.4})",
+                            bi, b_in_list, btrans, bfix, bw.transform_point3(Vec3::ZERO).x, bw.transform_point3(Vec3::ZERO).y, bw.transform_point3(Vec3::ZERO).z);
+                    if let Some(bd) = bd {
+                        let nel = |m: Mat4| format!("t=({:.2},{:.2},{:.2}) rot=({:.3},{:.3},{:.3})", m.transform_point3(Vec3::ZERO).x, m.transform_point3(Vec3::ZERO).y, m.transform_point3(Vec3::ZERO).z, m.to_cols_array()[0], m.to_cols_array()[4], m.to_cols_array()[8]);
+                        let mi_t = build_mat(bd.skin_transform_translation, bd.skin_transform_rotation, bd.skin_transform_scale, true);
+                        let mi_n = build_mat(bd.skin_transform_translation, bd.skin_transform_rotation, bd.skin_transform_scale, false);
+                        println!("        Mb*Mi(trans) = {}  |  Mi*Mb(trans) = {}", nel(bw * mi_t), nel(mi_t * bw));
+                        println!("        Mb*Mi(nontr) = {}  |  Mi*Mb(nontr) = {}", nel(bw * mi_n), nel(mi_n * bw));
+                    }
+                }
+                if let Some(first_w) = partition.vertex_weights.first() {
+                    println!("    vertex[0]: weights={:?} bone_idx={:?} → geo={}", first_w, partition.bone_indices[0], partition.vertex_map[0]);
+                }
+            }
+        }
+
+        let mut combo_max: Vec<(String, String, f32)> = Vec::new();
+        for (fname, f) in &formulas {
+            for (cname, transpose) in &convs {
+                let root = build_mat(skin_data.skin_transform_translation, skin_data.skin_transform_rotation, skin_data.skin_transform_scale, *transpose);
+                let mut worst = 0.0f32;
+                for partition in &part_data.partitions {
+                    if partition.vertex_map.is_empty() || partition.vertex_weights.is_empty() { continue; }
+                    let mut bm: Vec<Mat4> = Vec::with_capacity(partition.bones.len());
+                    for &bone_in_list in &partition.bones {
+                        let bone_in_list = bone_in_list as usize;
+                        if bone_in_list < skin_data.bone_list.len() && bone_in_list < bone_worlds.len() {
+                            let bd = &skin_data.bone_list[bone_in_list];
+                            let ib = build_mat(bd.skin_transform_translation, bd.skin_transform_rotation, bd.skin_transform_scale, *transpose);
+                            let bw = bone_worlds[bone_in_list];
+                            bm.push(f(ib, bw, root));
+                        } else {
+                            bm.push(Mat4::IDENTITY);
+                        }
+                    }
+                    let n_inf = (partition.num_weights_per_vertex as usize).min(4);
+                    for vi in 0..partition.vertex_map.len() {
+                        let geo_idx = partition.vertex_map[vi] as usize;
+                        if geo_idx >= n_verts { continue; }
+                        let mut acc = Vec4::ZERO;
+                        for k in 0..n_inf {
+                            let w = partition.vertex_weights[vi][k];
+                            if w < 1e-6 { continue; }
+                            let bi = partition.bone_indices[vi][k] as usize;
+                            if bi >= bm.len() { continue; }
+                            acc += w * (bm[bi] * src[geo_idx]);
+                        }
+                        if !acc.is_finite() { continue; }
+                        let dev = (acc.truncate() - src[geo_idx].truncate()).length();
+                        if dev > worst { worst = dev; }
+                    }
+                }
+                let best = worst;
+                combo_max.push((fname.to_string(), cname.to_string(), best));
+            }
+        }
+        // 良い組合せ順 (min dev asc)
+        combo_max.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+        shapes.push((name, vec![(i, combo_max)]));
+    }
+
+    // 報告: 各形状の best 3 と、形状横断で最も小さな max を得る combo
+    println!("形状ごとの best (maxdev)：");
+    for (name, v) in &shapes {
+        let (_, combos) = &v[0];
+        let best3: Vec<String> = combos.iter().take(4)
+            .map(|(f, c, d)| format!("{} {} = {:.4}", f, c, d))
+            .collect();
+        println!("  \"{}\": {}", name, best3.join(" | "));
+    }
+    // ボード全体で全形状 maxdev<0.5 を満たす combo を探す
+    let mut winners: Vec<(String, String)> = Vec::new();
+    let combo_keys: Vec<(String, String)> = {
+        let mut s = std::collections::BTreeSet::new();
+        for (_, vv) in &shapes { for (_, combos) in vv { for (f, c, _) in combos { s.insert((f.clone(), c.clone())); } } }
+        s.into_iter().collect()
+    };
+    for (f, c) in &combo_keys {
+        let all_ok = shapes.iter().all(|(_, vv)| {
+            vv[0].1.iter().any(|(f2, c2, d)| f2 == f && c2 == c && *d < 0.5)
+        });
+        if all_ok { winners.push((f.clone(), c.clone())); }
+    }
+    println!("\n全形状で maxdev<0.5 を満たす組合せ: {:?}", winners);
+
+    // ——— OpenMW 流 (NiSkinData.bone_list の BoneData weights を使用) ———
+    println!("\n=== NiSkinData.bone_list の BoneVertData 重みで OpenMW 式 (I*B*R trans) を検証 ===");
+    for (_i, block) in nif.blocks.iter().enumerate() {
+        let NifBlock::NiTriShape(shape) = block else { continue };
+        if shape.geom.skin_instance < 0 { continue; }
+        let inst = match &nif.blocks[shape.geom.skin_instance as usize] {
+            NifBlock::NiSkinInstance(x) => x,
+            NifBlock::BSDismemberSkinInstance(x) => &x.skin_instance,
+            _ => continue,
+        };
+        let data = match nif.blocks.get(shape.geom.data as usize) {
+            Some(NifBlock::NiTriShapeData(d)) => d,
+            _ => continue,
+        };
+        let skin_data = match &nif.blocks[inst.data as usize] {
+            NifBlock::NiSkinData(d) => d,
+            _ => continue,
+        };
+        let bone_worlds = resolve_bone_world_transforms(inst, &bone_world_map);
+        let root = build_mat(skin_data.skin_transform_translation, skin_data.skin_transform_rotation, skin_data.skin_transform_scale, true);
+        let n_verts = data.common.vertices.len();
+        let src: Vec<Vec4> = data.common.vertices.iter().map(|v| Vec4::new(v.x, v.y, v.z, 1.0)).collect();
+        let mut acc: Vec<Vec4> = vec![Vec4::ZERO; n_verts];
+        let mut n_inf: Vec<f32> = vec![0.0; n_verts];
+        for (bi, bd) in skin_data.bone_list.iter().enumerate() {
+            let bw = if bi < bone_worlds.len() { bone_worlds[bi] } else { continue };
+            let ib = build_mat(bd.skin_transform_translation, bd.skin_transform_rotation, bd.skin_transform_scale, true);
+            let mat = ib * bw * root;
+            for bv in &bd.vertex_weights {
+                let vidx = bv.index as usize;
+                if vidx < n_verts {
+                    acc[vidx] += bv.weight * (mat * src[vidx]);
+                    n_inf[vidx] += bv.weight;
+                }
+            }
+        }
+        let mut worst = 0.0f32;
+        let mut used = 0usize;
+        for vidx in 0..n_verts {
+            if n_inf[vidx] < 1e-6 { continue; }
+            used += 1;
+            // 重み正規化
+            let out = acc[vidx] / n_inf[vidx];
+            let dev = (out.truncate() - src[vidx].truncate()).length();
+            if dev > worst { worst = dev; }
+        }
+        let name = nif.get_string(shape.geom.av.net.name_index).unwrap_or("?").to_string();
+        // 形状ノード自身のローカル変換と親チェーンにおける世界変換
+        let (tnx, tny, tnz) = (shape.geom.av.translation.x, shape.geom.av.translation.y, shape.geom.av.translation.z);
+        let (scx, _scz) = (shape.geom.av.scale, 0.0f32);
+        println!("  \"{}\" blob={} verts={} used={} worst_dev={:.4}  | shape_node t=({:.3},{:.3},{:.3}) scale={} rot0={:.3}", name, skin_data.bone_list.len(), n_verts, used, worst, tnx, tny, tnz, scx, shape.geom.av.rotation.m[0][0]);
+        // 各形状の bone[0] の invBind と boneWorld を対比 + meathead のパーティション経路を再検証
+        if let (Some(bd), Some(bw)) = (skin_data.bone_list.first(), bone_worlds.first().copied()) {
+            let ib = build_mat(bd.skin_transform_translation, bd.skin_transform_rotation, bd.skin_transform_scale, true);
+            let ip = ib.inverse();
+            println!("      bone0: inst_bone={}  invBind t=({:.3},{:.3},{:.3})  ->  boneWorld t=({:.3},{:.3},{:.3})  invBind^-1 t=({:.3},{:.3},{:.3})",
+                inst.bones.first().map(|b| *b).unwrap_or(-1),
+                bd.skin_transform_translation.x, bd.skin_transform_translation.y, bd.skin_transform_translation.z,
+                bw.transform_point3(Vec3::ZERO).x, bw.transform_point3(Vec3::ZERO).y, bw.transform_point3(Vec3::ZERO).z,
+                ip.transform_point3(Vec3::ZERO).x, ip.transform_point3(Vec3::ZERO).y, ip.transform_point3(Vec3::ZERO).z);
+            println!("        invBind rot rows: {:?}", bd.skin_transform_rotation.m.iter().map(|r| format!("({:.3},{:.3},{:.3})", r[0], r[1], r[2])).collect::<Vec<_>>().join(" "));
+            println!("        boneWorld rot cols: {:?}", (0..3).map(|cc| { let c = bw.to_cols_array(); format!("({:.3},{:.3},{:.3})", c[cc*4], c[cc*4+1], c[cc*4+2]) }).collect::<Vec<_>>().join(" "));
+            println!("      root: t=({:.3},{:.3},{:.3}) rot rows: {:?}",
+                skin_data.skin_transform_translation.x, skin_data.skin_transform_translation.y, skin_data.skin_transform_translation.z,
+                skin_data.skin_transform_rotation.m.iter().map(|r| format!("({:.3},{:.3},{:.3})", r[0], r[1], r[2])).collect::<Vec<_>>().join(" "));
+            // パーティション経路（combo probe と同じ実装）で meathead/meatneck の正確な dev を出す
+            if let NifBlock::NiSkinPartition(part_data) = &nif.blocks[inst.skin_partition as usize] {
+                for (pi, partition) in part_data.partitions.iter().enumerate() {
+                    if partition.vertex_map.is_empty() || partition.vertex_weights.is_empty() { continue; }
+                    let mut bm: Vec<Mat4> = Vec::with_capacity(partition.bones.len());
+                    for &b_in_list in &partition.bones {
+                        let b_in_list = b_in_list as usize;
+                        if b_in_list < skin_data.bone_list.len() && b_in_list < bone_worlds.len() {
+                            let bdd = &skin_data.bone_list[b_in_list];
+                            let iib = build_mat(bdd.skin_transform_translation, bdd.skin_transform_rotation, bdd.skin_transform_scale, true);
+                            bm.push(iib * bone_worlds[b_in_list] * root);
+                        } else { bm.push(Mat4::IDENTITY); }
+                    }
+                    let n_inf = (partition.num_weights_per_vertex as usize).min(4);
+                    let mut worst_p = 0.0f32;
+                    for vi in 0..partition.vertex_map.len() {
+                        let geo_idx = partition.vertex_map[vi] as usize;
+                        if geo_idx >= n_verts { continue; }
+                        let mut acc = Vec4::ZERO;
+                        for k in 0..n_inf {
+                            let w = partition.vertex_weights[vi][k];
+                            if w < 1e-6 { continue; }
+                            let bi = partition.bone_indices[vi][k] as usize;
+                            if bi >= bm.len() { continue; }
+                            acc += w * (bm[bi] * src[geo_idx]);
+                        }
+                        if !acc.is_finite() { continue; }
+                        let dev = (acc.truncate() - src[geo_idx].truncate()).length();
+                        if dev > worst_p { worst_p = dev; }
+                    }
+                    println!("      partition[{}]: bones={} worst_dev={:.4} bm[0].t=({:.2},{:.2},{:.2})",
+                        pi, partition.bones.len(), worst_p,
+                        bm.first().map(|m| m.transform_point3(Vec3::ZERO)).unwrap_or(Vec3::ZERO).x,
+                        bm.first().map(|m| m.transform_point3(Vec3::ZERO)).unwrap_or(Vec3::ZERO).y,
+                        bm.first().map(|m| m.transform_point3(Vec3::ZERO)).unwrap_or(Vec3::ZERO).z);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+/// 仮説検証プローブ:
+/// アーマー NIF 内の"代理ボーン"ではなく、実スケルトン (skeleton.nif) のバインド
+/// ワールド変換を名前解決で引き、NifSkope 準拠の nodeWorld·Σ(w·(boneWorld·invBind)) が
+/// すべての形状でバインドポーズ一致 (dev≈0) になるかを確認する。
+fn skeleton_bind_probe(data_dir: &str, relative_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use fo3_gamebryo_core::NiTransform;
+    use fo3_nif::types::{Matrix33, Vector3};
+    use fo3_render::collect_bone_world_transforms;
+    use glam::{Mat3, Mat4, Vec3, Vec4};
+
+    fn build_mat(translation: Vector3, rotation: Matrix33, scale: f32) -> Mat4 {
+        let r = &rotation.m;
+        let rot = Mat4::from_mat3(Mat3::from_cols_array_2d(r) * scale);
+        Mat4::from_translation(Vec3::new(translation.x, translation.y, translation.z)) * rot
+    }
+    fn default_ni() -> NiTransform {
+        NiTransform { rotation: Mat3::IDENTITY, translation: Vec3::ZERO, scale: 1.0 }
+    }
+
+    let mut vfs = create_vfs(data_dir)?;
+
+    // 1) スケルトン NIF を候補パスからロードし、name -> world(trans) を構築
+    let candidates = [
+        "meshes/characters/_male/skeleton.nif",
+        "meshes/characters/male/skeleton.nif",
+        "meshes/characters/_female/skeleton.nif",
+        "meshes/characters/female/skeleton.nif",
+        "meshes/characters/_1stperson/skeleton.nif",
+    ];
+    let mut skeleton_name_world: HashMap<String, Mat4> = HashMap::new();
+    for c in candidates {
+        let Ok(bytes) = vfs.read(c) else { continue };
+        let mut cur = Cursor::new(bytes);
+        if let Ok(skel) = NifFile::read(&mut cur) {
+            let mut world_map = HashMap::new();
+            collect_bone_world_transforms(0, &default_ni(), &skel, &mut world_map);
+            for (idx, block) in skel.blocks.iter().enumerate() {
+                let av_opt = match block {
+                    NifBlock::NiNode(n) => Some(&n.av),
+                    NifBlock::BSFadeNode(n) => Some(&n.node.av),
+                    _ => None,
+                };
+                if let Some(av) = av_opt {
+                    if let Some(names) = skel.get_string(av.net.name_index) {
+                        if let Some(m) = world_map.get(&(idx as i32)) {
+                            skeleton_name_world.insert(names.to_string(), *m);
+                        }
+                    }
+                }
+            }
+            println!("SKELETON '{}' ロード成功 (name->world {} 件)", c, skeleton_name_world.len());
+            break;
+        }
+    }
+    if skeleton_name_world.is_empty() {
+        println!("スケルトンがロードできませんでした (候補全滅)");
+    }
+
+    // 2) アーマー NIF
+    let bytes = vfs.read(relative_path)?;
+    let mut cursor = Cursor::new(bytes);
+    let nif = NifFile::read(&mut cursor)?;
+    let mut armor_world_map = HashMap::new();
+    collect_bone_world_transforms(0, &default_ni(), &nif, &mut armor_world_map);
+
+    let name_of = |idx: u32| nif.get_string(idx).map(|s| s.to_string());
+
+    for (i, block) in nif.blocks.iter().enumerate() {
+        let NifBlock::NiTriShape(shape) = block else { continue };
+        if shape.geom.skin_instance < 0 { continue; }
+        let inst = match &nif.blocks[shape.geom.skin_instance as usize] {
+            NifBlock::NiSkinInstance(x) => x,
+            NifBlock::BSDismemberSkinInstance(x) => &x.skin_instance,
+            _ => continue,
+        };
+        let data = match nif.blocks.get(shape.geom.data as usize) {
+            Some(NifBlock::NiTriShapeData(d)) => d,
+            _ => continue,
+        };
+        let skin_data = match &nif.blocks[inst.data as usize] {
+            NifBlock::NiSkinData(d) => d,
+            _ => continue,
+        };
+        let part_data = match &nif.blocks[inst.skin_partition as usize] {
+            NifBlock::NiSkinPartition(p) => p,
+            _ => continue,
+        };
+        let _shape_name = name_of(shape.geom.av.net.name_index).unwrap_or_default();
+        let n_verts = data.common.vertices.len();
+        let src: Vec<Vec4> = data.common.vertices.iter().map(|v| Vec4::new(v.x, v.y, v.z, 1.0)).collect();
+
+        // shape のワールド変換 (親チェーンで armor_world_map の世界変換を合成)
+        let shape_world = {
+            let av = &shape.geom.av;
+            let mut acc = Mat4::from_translation(Vec3::new(av.translation.x, av.translation.y, av.translation.z))
+                * Mat4::from_mat3(Mat3::from_cols_array_2d(&av.rotation.m) * av.scale);
+            let mut cur = i as i32;
+            loop {
+                let parent = nif.blocks.iter().position(|b| match b {
+                    NifBlock::NiNode(n) => n.children.contains(&cur),
+                    NifBlock::BSFadeNode(b) => b.node.children.contains(&cur),
+                    _ => false,
+                });
+                match parent {
+                    Some(pi) => {
+                        if let Some(pw) = armor_world_map.get(&(pi as i32)) {
+                            acc = *pw * acc;
+                            break;
+                        }
+                        cur = pi as i32;
+                    }
+                    None => break,
+                }
+            }
+            acc
+        };
+
+        // ボーン名解決: 形状の inst.bones[i] -> block name -> skeleton world (無ければ proxy world)
+        let bone_names: Vec<Option<String>> = inst.bones.iter().map(|&b| name_of(b.max(0) as u32)).collect();
+        let mut _resolved_names = 0usize;
+        let mut bone_worlds: Vec<Mat4> = inst.bones.iter().map(|&b| armor_world_map.get(&b).copied().unwrap_or(Mat4::IDENTITY)).collect();
+        for (bi, bname) in bone_names.iter().enumerate() {
+            if let Some(name) = bname {
+                if let Some(skw) = skeleton_name_world.get(name) {
+                    bone_worlds[bi] = *skw;
+                    _resolved_names += 1;
+                }
+            }
+        }
+
+        // dev 測定 (NifSkope 準拠: nodeWorld · Σ w·(boneWorld·invBind) · v  vs nodeWorld·v)
+        let root = build_mat(skin_data.skin_transform_translation, skin_data.skin_transform_rotation, skin_data.skin_transform_scale);
+        let mut worst_a = 0.0f32; // ノード・ルートなし
+        let mut worst_b = 0.0f32; // nodeWorld あり (NifSkope 相当)
+        let mut worst_c = 0.0f32; // nodeWorld · root あり
+        for partition in &part_data.partitions {
+            if partition.vertex_map.is_empty() || partition.vertex_weights.is_empty() { continue; }
+            let mut bm_skel: Vec<Mat4> = Vec::with_capacity(partition.bones.len());
+            for &b_in_list in &partition.bones {
+                let bi = b_in_list as usize;
+                if bi < skin_data.bone_list.len() {
+                    let bd = &skin_data.bone_list[bi];
+                    bm_skel.push(build_mat(bd.skin_transform_translation, bd.skin_transform_rotation, bd.skin_transform_scale) * bone_worlds[bi]);
+                } else { bm_skel.push(Mat4::ZERO); }
+            }
+            let n_inf = (partition.num_weights_per_vertex as usize).min(4);
+            for vi in 0..partition.vertex_map.len() {
+                let geo_idx = partition.vertex_map[vi] as usize;
+                if geo_idx >= n_verts { continue; }
+                let mut acc = Vec4::ZERO;
+                for k in 0..n_inf {
+                    let w = partition.vertex_weights[vi][k];
+                    if w < 1e-6 { continue; }
+                    let pbi = partition.bone_indices[vi][k] as usize;
+                    if pbi >= bm_skel.len() { continue; }
+                    acc += w * (bm_skel[pbi] * src[geo_idx]);
+                }
+                if !acc.is_finite() { continue; }
+                let ref_mesh = shape_world * src[geo_idx];
+                worst_a = worst_a.max((acc.truncate() - src[geo_idx].truncate()).length());
+                worst_b = worst_b.max(((shape_world * acc).truncate() - ref_mesh.truncate()).length());
+                worst_c = worst_c.max(((shape_world * root * acc).truncate() - ref_mesh.truncate()).length());
+            }
+        }
+
+        // 全ボーンの対比 (invBind⁻¹ vs proxy world vs skeleton world)
+        for (bi, bd) in skin_data.bone_list.iter().enumerate().take(9) {
+            let ib = build_mat(bd.skin_transform_translation, bd.skin_transform_rotation, bd.skin_transform_scale);
+            let ip = ib.inverse();
+            let proxy = bone_worlds.get(bi).copied().unwrap_or(Mat4::IDENTITY);
+            let bname = bone_names.get(bi).and_then(|s| s.clone()).unwrap_or_default();
+            let skw = skeleton_name_world.get(&bname).copied().unwrap_or(proxy);
+            let d_skel = (ip.transform_point3(Vec3::ZERO) - skw.transform_point3(Vec3::ZERO)).length();
+            let d_proxy = (ip.transform_point3(Vec3::ZERO) - proxy.transform_point3(Vec3::ZERO)).length();
+            println!(
+                "      bone[{}]({}) skel_t={:?} | invBind^-1_t={:?} | d_skel={:.3} proxy_t={:?} d_proxy={:.3}",
+                bi, bname,
+                skw.transform_point3(Vec3::ZERO),
+                ip.transform_point3(Vec3::ZERO),
+                d_skel,
+                proxy.transform_point3(Vec3::ZERO),
+                d_proxy,
+            );
+        }
+    }
+    Ok(())
+}
+fn skin_probe(data_dir: &str, relative_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use fo3_gamebryo_core::NiTransform;
+    use fo3_render::collect_bone_world_transforms;
+    use glam::Mat4;
+    let mut vfs = create_vfs(data_dir)?;
+    let bytes = vfs.read(relative_path)?;
+    let mut cursor = Cursor::new(bytes);
+    let nif = NifFile::read(&mut cursor)?;
+    let mut bone_world_map = HashMap::new();
+    collect_bone_world_transforms(0, &NiTransform::default(), &nif, &mut bone_world_map);
+
+    let name_of = |idx: i32| -> String {
+        if let Some(name) = nif.get_string(idx.max(0) as u32) { name.to_string() } else { format!("#{}", idx) }
+    };
+
+    for (i, block) in nif.blocks.iter().enumerate() {
+        let (inst, label) = match block {
+            NifBlock::NiSkinInstance(x) => (x, format!("NiSkinInstance#{}", i)),
+            NifBlock::BSDismemberSkinInstance(x) => (&x.skin_instance, format!("BSDismember#{}", i)),
+            _ => continue,
+        };
+        println!("{}: skeleton_root={}({})", label, name_of(inst.skeleton_root), inst.skeleton_root);
+        for (bi, &b) in inst.bones.iter().enumerate() {
+            let bw = bone_world_map.get(&b).copied().unwrap_or(Mat4::IDENTITY);
+            println!("   bone[{}] -> block {} ({})  bone_world_t={:?}", bi, b, name_of(b), bw.transform_point3(glam::Vec3::ZERO));
+        }
+    }
+    Ok(())
+}
+
+/// 実アセットの KF アニメーション適用をヘッドレス検証する。
+///
+/// スキン NIF + KF を読み込み、`AnimationPlayer` で時間を進めながら
+/// `apply_pose` → `recompute_bone_world_map_with_pose` を実行し、
+/// KF が駆動するボーンのワールド変換が時間経過で実際に変化すること、
+/// およびメッシュがスキン変形されることを確認する。
+///
+/// 参照元: knowledge/animation_kf_format.md (セクション 5, 5.6)
+fn test_anim(data_dir: &str, relative_path: &str, kf_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use fo3_gamebryo_core::NiTransform;
+    use fo3_render::animation::{AnimationClip, AnimationPlayer, SkeletonPose};
+    use fo3_render::{
+        collect_bone_world_transforms, recompute_bone_world_map_with_pose,
+        resolve_bone_world_transforms,
+    };
+    use fo3_render::skinning::apply_skinning_cpu_with_bones;
+    use glam::{Mat4, Vec3};
+
+    println!("=== KF アニメーション適用検証: {} + {} ===", relative_path, kf_path);
+    let mut vfs = create_vfs(data_dir)?;
+
+    let nif_bytes = vfs.read(relative_path)?;
+    let mut nif_cursor = Cursor::new(nif_bytes);
+    let nif = NifFile::read(&mut nif_cursor)?;
+
+    let kf_bytes = vfs.read(kf_path)?;
+    let mut kf_cursor = Cursor::new(kf_bytes);
+    let kf = NifFile::read(&mut kf_cursor)?;
+
+    // 配下ボーンノードの名前→ブロックインデックスを収集 (FK で上書きされるか判定用)
+    let mut bone_index_by_name: HashMap<String, i32> = HashMap::new();
+    for (i, block) in nif.blocks.iter().enumerate() {
+        let name = match block {
+            NifBlock::NiNode(n) => nif.get_string(n.av.net.name_index).unwrap_or("").to_string(),
+            NifBlock::BSFadeNode(f) => nif.get_string(f.node.av.net.name_index).unwrap_or("").to_string(),
+            _ => continue,
+        };
+        if !name.is_empty() {
+            bone_index_by_name.insert(name, i as i32);
+        }
+    }
+
+    let clip = AnimationClip::from_kf(&kf)
+        .ok_or("KF から NiControllerSequence を検出できませんでした")?;
+    println!(
+        "クリップ: \"{}\" ({:.2}s - {:.2}s, duration {:.2}s, cycle={}, チャンネル {} 本)",
+        clip.name, clip.start_time, clip.stop_time, clip.duration, clip.cycle_type, clip.channels.len()
+    );
+
+    // KF チャンネル名と NIF ボーンの共通集合 (実際に動かせるボーン)
+    let drivable: Vec<(&String, i32)> = clip.channels.keys()
+        .filter_map(|name| bone_index_by_name.get(name).map(|idx| (name, *idx)))
+        .collect();
+    println!("NIF 内に存在する駆動対象ボーン: {} 本", drivable.len());
+    for (name, _) in drivable.iter().take(10) {
+        println!("   - {}", name);
+    }
+    if drivable.is_empty() {
+        return Err("アニメーションを NIF のボーンに適用できません（名前不一致）".into());
+    }
+
+    // バインドポーズのボーンワールド変換 (比較基準)
+    let mut bind_map = HashMap::new();
+    collect_bone_world_transforms(0, &NiTransform::default(), &nif, &mut bind_map);
+    let bind_t = |idx: i32| bind_map.get(&idx).copied().unwrap_or(Mat4::IDENTITY).transform_point3(Vec3::ZERO);
+
+    // アニメーション再生: 30 フレームで 1 ループ
+    let mut player = AnimationPlayer::new(clip.clone());
+    let mut pose = SkeletonPose::default();
+    let steps = 30;
+    let dt = clip.duration / steps as f32;
+
+    let mut max_drift = 0.0f32;
+    for step in 0..=steps {
+        let updated = if step == 0 { Vec::new() } else { player.update(&kf, dt, &mut pose) };
+        let mut map = HashMap::new();
+        recompute_bone_world_map_with_pose(&nif, &pose, &mut map);
+        // 駆動ボーンのうち最初の 3 本のワールド位置をサンプリング
+        for (_, idx) in drivable.iter().take(3) {
+            let p = map.get(idx).copied().unwrap_or(Mat4::IDENTITY).transform_point3(Vec3::ZERO);
+            let bind_p = bind_t(*idx);
+            let drift = (p - bind_p).length();
+            max_drift = max_drift.max(drift);
+        }
+        if updated.is_empty() && step > 0 {
+            // 途中でボーン更新が止まるのは問題
+            println!("  ステップ {}: ボーン更新なし (still {}", step, player.current_time);
+        }
+    }
+
+    // 最初のスキンメッシュを最終フレームの姿勢で再スキニングし、BBox の移動を確認
+    let mut skinned_drift = 0.0f32;
+    for block in &nif.blocks {
+        let NifBlock::NiTriShape(shape) = block else { continue };
+        if shape.geom.skin_instance < 0 { continue; }
+        let inst_idx = shape.geom.skin_instance as usize;
+        let Some(inst) = (match nif.blocks.get(inst_idx) {
+            Some(NifBlock::NiSkinInstance(x)) => Some(x),
+            Some(NifBlock::BSDismemberSkinInstance(x)) => Some(&x.skin_instance),
+            _ => None,
+        }) else { continue };
+        let Some(NifBlock::NiTriShapeData(data)) = nif.blocks.get(shape.geom.data as usize) else { continue };
+
+        let mut map = HashMap::new();
+        recompute_bone_world_map_with_pose(&nif, &pose, &mut map);
+        let bone_mats = resolve_bone_world_transforms(inst, &map);
+        let bone_refs = if bone_mats.is_empty() { None } else { Some(bone_mats.as_slice()) };
+        let bind_mats = resolve_bone_world_transforms(inst, &bind_map);
+        let bind_refs = if bind_mats.is_empty() { None } else { Some(bind_mats.as_slice()) };
+
+        if let (Some((pos, _)), Some((bind_pos, _))) =
+            (apply_skinning_cpu_with_bones(data, inst, &nif, bone_refs),
+             apply_skinning_cpu_with_bones(data, inst, &nif, bind_refs))
+        {
+            let center = |p: &[[f32; 3]]| {
+                let mut s = Vec3::ZERO;
+                for v in p { s += Vec3::from_slice(v); }
+                if !p.is_empty() { s / p.len() as f32 } else { s }
+            };
+            skinned_drift = skinned_drift.max((center(&pos) - center(&bind_pos)).length());
+            println!("スキンメッシュ \"{}\": 頂点中心のバインドからの移動 {:.4} units",
+                nif.get_string(shape.geom.av.net.name_index).unwrap_or(""), skinned_drift);
+            break;
+        }
+    }
+
+    println!("\n【結果】クリップ duration {:.2}s を {} ステップで再生",
+        clip.duration, steps);
+    if max_drift > 1e-3 {
+        println!("  ボーンワールド変換の最大変化量: {:.4} units (アニメーション適用 OK)", max_drift);
+    } else {
+        println!("  ボーンワールド変換の最大変化量: {:.4} units (変化が検出されません)", max_drift);
+    }
+    println!("  スキンメッシュ頂点中心の移動量: {:.4} units", skinned_drift);
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
@@ -1085,6 +1833,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             let limit = args.get(3).and_then(|s| s.parse::<usize>().ok()).unwrap_or(1000);
             test_nif_coverage(&args[2], limit)?;
+        }
+        "skin-test" => {
+            if args.len() < 4 {
+                println!("使用法: skin-test <data_dir> <relative/nif/path>");
+                return Ok(());
+            }
+            test_skin(&args[2], &args[3])?;
+        }
+        "anim-test" => {
+            if args.len() < 5 {
+                println!("使用法: anim-test <data_dir> <relative/nif/path> <kf_path>");
+                return Ok(());
+            }
+            test_anim(&args[2], &args[3], &args[4])?;
+        }
+        "skeleton-bind-probe" => {
+            if args.len() < 4 {
+                print_usage();
+                return Ok(());
+            }
+            skeleton_bind_probe(&args[2], &args[3])?;
+        }
+        "skin-probe" => {
+            if args.len() < 4 {
+                println!("使用法: skin-probe <data_dir> <relative/nif/path>");
+                return Ok(());
+            }
+            skin_probe(&args[2], &args[3])?;
+        }
+        "skin-matrix-probe" => {
+            if args.len() < 4 {
+                println!("使用法: skin-matrix-probe <data_dir> <relative/nif/path>");
+                return Ok(());
+            }
+            skin_matrix_probe(&args[2], &args[3])?;
         }
         _ => {
             if args[1].ends_with(".nif") {

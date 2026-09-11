@@ -6,6 +6,7 @@
 //!   - NIF 単体表示: `cargo run -p fo3_viewer -- <data_dir> <nif_relative_path>`
 //!   - セル一括表示: `cargo run -p fo3_viewer -- cell <data_dir> <cell_edid>`
 //!   - ワールド表示: `cargo run -p fo3_viewer -- world <data_dir> <world_edid> [grid_x] [grid_y]`
+//!   - アニメーション: `cargo run -p fo3_viewer -- anim <data_dir> <nif_relative_path> <kf_relative_path>`
 //!
 //! 例:
 //!   `cargo run -p fo3_viewer -- "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "meshes\weapons\1handpistol\10mmpistol.nif"`
@@ -14,6 +15,7 @@
 //!   `cargo run -p fo3_viewer -- world "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "MegatonWorld"`
 //!   `cargo run -p fo3_viewer -- world "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "DCWorld01"`
 //!   `cargo run -p fo3_viewer -- world "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "Wasteland" -1 2`
+//!   `cargo run -p fo3_viewer -- anim "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "meshes\characters\_male\upperbody.nif" "meshes\characters\_male\idleanims\ttnpchappysubtlelistena.kf"`
 
 use std::collections::HashMap;
 use std::env;
@@ -27,8 +29,12 @@ use fo3_gamebryo_core::NiTransform;
 use fo3_nif::collision::extract_collision_data;
 use fo3_nif::NifFile;
 use fo3_physics::{RapierCharacterController, RapierPhysicsWorld};
-use fo3_render::{LightingUniform, OrbitCamera, PlacedPointLight, RenderContext, RenderScene};
+use fo3_render::{
+    recompute_bone_world_map_with_pose, AnimationPlayer, LightingUniform, OrbitCamera,
+    PlacedPointLight, RenderContext, RenderScene, SkeletonPose,
+};
 use fo3_vfs::VfsManager;
+use glam::Mat4;
 use pollster::FutureExt;
 use std::time::Instant;
 use wgpu::util::DeviceExt;
@@ -54,6 +60,11 @@ enum ViewerTarget {
     Mesh(String),
     Cell(String),
     World(String, Option<(i32, i32)>),
+    /// スキンメッシュ + KF アニメーション再生モード
+    Anim {
+        nif_path: String,
+        kf_path: String,
+    },
 }
 
 struct ViewerState {
@@ -93,6 +104,16 @@ struct ViewerState {
     left_mouse_down: bool,
     right_mouse_down: bool,
     last_mouse_pos: Option<(f64, f64)>,
+    // アニメーション再生状態 (Anim モード時のみ Some)
+    anim_player: Option<AnimationPlayer>,
+    /// KF ファイルの NifFile（アニメーションデータ）
+    anim_kf_nif: Option<NifFile>,
+    /// スキンメッシュ NIF（ボーン階層走査用）
+    anim_skeleton_nif: Option<NifFile>,
+    /// 現在の骨格姿勢（KF → SkeletonPose のオーバーライド）
+    anim_pose: SkeletonPose,
+    /// ボーンワールド行列マップ（block_index → Mat4）
+    anim_bone_world_map: HashMap<i32, Mat4>,
 }
 
 impl ViewerState {
@@ -102,7 +123,9 @@ impl ViewerState {
         let height = size.height.max(1);
 
         let instance = wgpu::Instance::default();
-        let surface = instance.create_surface(window.clone()).expect("Failed to create surface");
+        let surface = instance
+            .create_surface(window.clone())
+            .expect("Failed to create surface");
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -169,308 +192,412 @@ impl ViewerState {
         }
 
         // 表示ターゲットに応じたシーンの構築
-        let (scene, cell_lighting, placed_lights, clear_color, physics_world, door_spawn_point) = match target {
-            ViewerTarget::Mesh(nif_path) => {
-                println!("VFS から NIF ファイルを取得中: {}", nif_path);
-                let nif_bytes = vfs.read(nif_path).expect("Failed to read NIF from VFS");
-                let mut cursor = Cursor::new(nif_bytes);
-                let nif_file = NifFile::read(&mut cursor).expect("Failed to parse NIF");
-                println!("NIF パース成功 (ブロック数: {})。GPU シーンを構築中...", nif_file.blocks.len());
-                let scene = RenderScene::from_nif(&device, &queue, &context, &nif_file, &mut vfs);
-
-                let mut physics_world = RapierPhysicsWorld::new();
-                let col_data = extract_collision_data(&nif_file);
-                if !col_data.bodies.is_empty() {
-                    physics_world.add_nif_collision(&col_data, glam::Vec3::ZERO, glam::Quat::IDENTITY);
-                    println!("物理ワールド登録: 単体メッシュ コリジョン剛体数 {}", col_data.bodies.len());
-                }
-
-                (
-                    scene,
-                    None,
-                    Vec::new(),
-                    wgpu::Color {
-                        r: 0.1,
-                        g: 0.12,
-                        b: 0.15,
-                        a: 1.0,
-                    },
-                    physics_world,
-                    None,
-                )
-            }
-            ViewerTarget::Cell(..) | ViewerTarget::World(..) => {
-                let esm_path = data_p.join("Fallout3.esm");
-                let mut esm_reader = EsmReader::open(&esm_path).expect("Failed to open Fallout3.esm");
-
-                // セル群の検索
-                let cells: Vec<(CellRecord, Vec<RefrRecord>, Option<LandRecord>)> = match target {
-                    ViewerTarget::Cell(cell_edid) => {
-                        println!("ESM からセル \"{}\" および近傍セルを検索中...", cell_edid);
-                        esm_reader
-                            .find_cell_and_neighbors(cell_edid, 1)
-                            .expect("Failed to find cell and neighbors")
-                            .unwrap_or_else(|| panic!("セル \"{}\" が見つかりませんでした", cell_edid))
-                    }
-                    ViewerTarget::World(world_edid, grid_opt) => {
-                        println!("ESM からワールド \"{}\" を検索中...", world_edid);
-                        let (world_rec, group_start, group_end) = esm_reader
-                            .find_world_by_edid(world_edid)
-                            .expect("Failed to search world")
-                            .unwrap_or_else(|| panic!("ワールドスペース \"{}\" が見つかりませんでした", world_edid));
-                        println!(
-                            "ワールドスペース発見: \"{}\" (FormID: 0x{:08X}, 表示名: {:?})",
-                            world_rec.edid, world_rec.form_id.0, world_rec.full_name
-                        );
-                        println!("ワールド所属セル群を走査中 (中心グリッド: {:?}, 半径: 1)...", grid_opt);
-                        let (resolved_center, cells) = esm_reader
-                            .read_cells_in_world_region(group_start, group_end, *grid_opt, 1)
-                            .expect("Failed to read world cells");
-                        println!("走査結果: 解決中心グリッド: {:?}, 取得セル数: {}", resolved_center, cells.len());
-                        if cells.is_empty() {
-                            panic!("ワールド \"{}\" 内に指定グリッドのセルが見つかりませんでした", world_edid);
-                        }
-                        cells
-                    }
-                    _ => unreachable!(),
-                };
-
-                println!("取得セル総数: {} 件", cells.len());
-                for (c, r, l) in &cells {
+        let (scene, cell_lighting, placed_lights, clear_color, physics_world, door_spawn_point) =
+            match target {
+                ViewerTarget::Mesh(nif_path) | ViewerTarget::Anim { nif_path, .. } => {
+                    println!("VFS から NIF ファイルを取得中: {}", nif_path);
+                    let nif_bytes = vfs.read(nif_path).expect("Failed to read NIF from VFS");
+                    let mut cursor = Cursor::new(nif_bytes);
+                    let nif_file = NifFile::read(&mut cursor).expect("Failed to parse NIF");
                     println!(
-                        "  - セル \"{}\" (Grid: {:?}, REFR: {}, LAND: {})",
-                        c.edid,
-                        c.grid,
-                        r.len(),
-                        if l.is_some() { "あり" } else { "なし" }
+                        "NIF パース成功 (ブロック数: {})。GPU シーンを構築中...",
+                        nif_file.blocks.len()
                     );
+                    let scene =
+                        RenderScene::from_nif(&device, &queue, &context, &nif_file, &mut vfs);
+
+                    let mut physics_world = RapierPhysicsWorld::new();
+                    let col_data = extract_collision_data(&nif_file);
+                    if !col_data.bodies.is_empty() {
+                        physics_world.add_nif_collision(
+                            &col_data,
+                            glam::Vec3::ZERO,
+                            glam::Quat::IDENTITY,
+                        );
+                        println!(
+                            "物理ワールド登録: 単体メッシュ コリジョン剛体数 {}",
+                            col_data.bodies.len()
+                        );
+                    }
+
+                    (
+                        scene,
+                        None,
+                        Vec::new(),
+                        wgpu::Color {
+                            r: 0.1,
+                            g: 0.12,
+                            b: 0.15,
+                            a: 1.0,
+                        },
+                        physics_world,
+                        None,
+                    )
                 }
+                ViewerTarget::Cell(..) | ViewerTarget::World(..) => {
+                    let esm_path = data_p.join("Fallout3.esm");
+                    let mut esm_reader =
+                        EsmReader::open(&esm_path).expect("Failed to open Fallout3.esm");
 
-                println!("3D モデル保持レコード (STAT, SCOL, DOOR, ACTI, FURN, etc.) を一括走査中...");
-                let model_map = esm_reader.read_all_models_map().expect("Failed to read models map");
-                println!("モデルマップ登録件数: {} 件", model_map.len());
-                let (npc_map, armor_map) = esm_reader.read_npc_and_armor_map().unwrap_or_default();
-                println!("アクター定義: {} 件, 防具定義: {} 件", npc_map.len(), armor_map.len());
-                let light_map = esm_reader.read_light_map().unwrap_or_default();
-                println!("光源レコード (LIGHT) 登録件数: {} 件", light_map.len());
+                    // セル群の検索
+                    let cells: Vec<(CellRecord, Vec<RefrRecord>, Option<LandRecord>)> = match target
+                    {
+                        ViewerTarget::Cell(cell_edid) => {
+                            println!("ESM からセル \"{}\" および近傍セルを検索中...", cell_edid);
+                            esm_reader
+                                .find_cell_and_neighbors(cell_edid, 1)
+                                .expect("Failed to find cell and neighbors")
+                                .unwrap_or_else(|| {
+                                    panic!("セル \"{}\" が見つかりませんでした", cell_edid)
+                                })
+                        }
+                        ViewerTarget::World(world_edid, grid_opt) => {
+                            println!("ESM からワールド \"{}\" を検索中...", world_edid);
+                            let (world_rec, group_start, group_end) = esm_reader
+                                .find_world_by_edid(world_edid)
+                                .expect("Failed to search world")
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "ワールドスペース \"{}\" が見つかりませんでした",
+                                        world_edid
+                                    )
+                                });
+                            println!(
+                                "ワールドスペース発見: \"{}\" (FormID: 0x{:08X}, 表示名: {:?})",
+                                world_rec.edid, world_rec.form_id.0, world_rec.full_name
+                            );
+                            println!(
+                                "ワールド所属セル群を走査中 (中心グリッド: {:?}, 半径: 1)...",
+                                grid_opt
+                            );
+                            let (resolved_center, cells) = esm_reader
+                                .read_cells_in_world_region(group_start, group_end, *grid_opt, 1)
+                                .expect("Failed to read world cells");
+                            println!(
+                                "走査結果: 解決中心グリッド: {:?}, 取得セル数: {}",
+                                resolved_center,
+                                cells.len()
+                            );
+                            if cells.is_empty() {
+                                panic!(
+                                    "ワールド \"{}\" 内に指定グリッドのセルが見つかりませんでした",
+                                    world_edid
+                                );
+                            }
+                            cells
+                        }
+                        _ => unreachable!(),
+                    };
 
-                let mut nif_cache: HashMap<String, Arc<NifFile>> = HashMap::new();
-                let mut all_cell_items: Vec<Vec<(Arc<NifFile>, NiTransform)>> = Vec::new();
-                let mut placed_lights: Vec<PlacedPointLight> = Vec::new();
-                let mut skipped_markers = 0;
-                let mut primary_lighting: Option<CellLighting> = None;
-                let mut door_spawn_point: Option<(glam::Vec3, f32)> = None;
-
-                for (cell, refrs, _) in &cells {
-                    if primary_lighting.is_none() && cell.lighting.is_some() {
-                        primary_lighting = cell.lighting.clone();
+                    println!("取得セル総数: {} 件", cells.len());
+                    for (c, r, l) in &cells {
+                        println!(
+                            "  - セル \"{}\" (Grid: {:?}, REFR: {}, LAND: {})",
+                            c.edid,
+                            c.grid,
+                            r.len(),
+                            if l.is_some() { "あり" } else { "なし" }
+                        );
                     }
 
-                    // 出入口ドア (XTEL) またはプレイヤー出現ポイントの検索
-                    // 外部洞窟出口 (CaveDoor / ExitDoor) ではなく、Vault 内部居住区への連絡ドアを優先する
-                    if door_spawn_point.is_none() {
-                        let mut fallback_door = None;
-                        for refr in refrs {
-                            if refr.teleport.is_some() {
-                                let is_exit = refr.edid.to_ascii_lowercase().contains("cave")
-                                    || refr.edid.to_ascii_lowercase().contains("exit");
-                                let door_pos = glam::Vec3::new(refr.position[0], refr.position[1], refr.position[2]);
-                                let yaw = refr.rotation[2];
-                                if is_exit {
-                                    if fallback_door.is_none() {
-                                        fallback_door = Some((door_pos, yaw));
-                                    }
-                                } else {
-                                    door_spawn_point = Some((door_pos, yaw));
-                                    break;
-                                }
-                            }
+                    println!("3D モデル保持レコード (STAT, SCOL, DOOR, ACTI, FURN, etc.) を一括走査中...");
+                    let model_map = esm_reader
+                        .read_all_models_map()
+                        .expect("Failed to read models map");
+                    println!("モデルマップ登録件数: {} 件", model_map.len());
+                    let (npc_map, armor_map) =
+                        esm_reader.read_npc_and_armor_map().unwrap_or_default();
+                    println!(
+                        "アクター定義: {} 件, 防具定義: {} 件",
+                        npc_map.len(),
+                        armor_map.len()
+                    );
+                    let light_map = esm_reader.read_light_map().unwrap_or_default();
+                    println!("光源レコード (LIGHT) 登録件数: {} 件", light_map.len());
+
+                    let mut nif_cache: HashMap<String, Arc<NifFile>> = HashMap::new();
+                    let mut all_cell_items: Vec<Vec<(Arc<NifFile>, NiTransform)>> = Vec::new();
+                    let mut placed_lights: Vec<PlacedPointLight> = Vec::new();
+                    let mut skipped_markers = 0;
+                    let mut primary_lighting: Option<CellLighting> = None;
+                    let mut door_spawn_point: Option<(glam::Vec3, f32)> = None;
+
+                    for (cell, refrs, _) in &cells {
+                        if primary_lighting.is_none() && cell.lighting.is_some() {
+                            primary_lighting = cell.lighting.clone();
                         }
+
+                        // 出入口ドア (XTEL) またはプレイヤー出現ポイントの検索
+                        // 外部洞窟出口 (CaveDoor / ExitDoor) ではなく、Vault 内部居住区への連絡ドアを優先する
                         if door_spawn_point.is_none() {
-                            door_spawn_point = fallback_door;
-                        }
-                    }
-
-                    let mut cell_items: Vec<(Arc<NifFile>, NiTransform)> = Vec::new();
-                    for refr in refrs {
-                        // 配置点光源の収集 (LIGHT レコード)
-                        if let Some(light_rec) = light_map.get(&refr.base_object) {
-                            let pos = glam::Vec3::new(refr.position[0], refr.position[1], refr.position[2]);
-                            let r = light_rec.colour[0] as f32 / 255.0;
-                            let g = light_rec.colour[1] as f32 / 255.0;
-                            let b = light_rec.colour[2] as f32 / 255.0;
-                            let radius = if light_rec.radius > 0 { light_rec.radius as f32 } else { 500.0 };
-                            let falloff = if light_rec.falloff > 0.01 { light_rec.falloff } else { 1.0 };
-                            placed_lights.push(PlacedPointLight {
-                                position: pos,
-                                radius,
-                                color: [r, g, b],
-                                falloff,
-                            });
-                        }
-
-                        // 3D モデルパスの決定 (通常オブジェクトまたは ACHR アクター)
-                        let mesh_file_path = if let Some(obj_info) = model_map.get(&refr.base_object) {
-                            if obj_info.model.is_empty() {
-                                None
-                            } else if is_editor_marker_or_effect(&obj_info.edid, &obj_info.model) {
-                                skipped_markers += 1;
-                                None
-                            } else {
-                                Some(obj_info.model.clone())
-                            }
-                        } else if let Some(npc) = npc_map.get(&refr.base_object) {
-                            // NPC_ のデフォルト装備防具から NIF パスを解決
-                            npc.default_armor.and_then(|armo_id| armor_map.get(&armo_id)).and_then(|armo| {
-                                let m = if npc.is_female && !armo.female_model.is_empty() {
-                                    &armo.female_model
-                                } else {
-                                    &armo.male_model
-                                };
-                                if !m.is_empty() {
-                                    Some(m.clone())
-                                } else {
-                                    None
-                                }
-                            })
-                        } else {
-                            None
-                        };
-
-                        if let Some(model_path) = mesh_file_path {
-                            let model_key = model_path.to_ascii_lowercase();
-                            let nif = if let Some(n) = nif_cache.get(&model_key) {
-                                n.clone()
-                            } else {
-                                let path = if model_key.starts_with("meshes\\") || model_key.starts_with("meshes/") {
-                                    model_path.clone()
-                                } else {
-                                    format!("meshes\\{}", model_path)
-                                };
-                                match vfs.read(&path) {
-                                    Ok(bytes) => {
-                                        let mut cursor = Cursor::new(bytes);
-                                        match NifFile::read(&mut cursor) {
-                                            Ok(parsed) => {
-                                                let arc = Arc::new(parsed);
-                                                nif_cache.insert(model_key, arc.clone());
-                                                arc
-                                            }
-                                            Err(e) => {
-                                                eprintln!("警告: メッシュ \"{}\" のパースに失敗しました（スキップします）: {}", path, e);
-                                                continue;
-                                            }
+                            let mut fallback_door = None;
+                            for refr in refrs {
+                                if refr.teleport.is_some() {
+                                    let is_exit = refr.edid.to_ascii_lowercase().contains("cave")
+                                        || refr.edid.to_ascii_lowercase().contains("exit");
+                                    let door_pos = glam::Vec3::new(
+                                        refr.position[0],
+                                        refr.position[1],
+                                        refr.position[2],
+                                    );
+                                    let yaw = refr.rotation[2];
+                                    if is_exit {
+                                        if fallback_door.is_none() {
+                                            fallback_door = Some((door_pos, yaw));
                                         }
+                                    } else {
+                                        door_spawn_point = Some((door_pos, yaw));
+                                        break;
                                     }
-                                    Err(_) => continue,
                                 }
+                            }
+                            if door_spawn_point.is_none() {
+                                door_spawn_point = fallback_door;
+                            }
+                        }
+
+                        let mut cell_items: Vec<(Arc<NifFile>, NiTransform)> = Vec::new();
+                        for refr in refrs {
+                            // 配置点光源の収集 (LIGHT レコード)
+                            if let Some(light_rec) = light_map.get(&refr.base_object) {
+                                let pos = glam::Vec3::new(
+                                    refr.position[0],
+                                    refr.position[1],
+                                    refr.position[2],
+                                );
+                                let r = light_rec.colour[0] as f32 / 255.0;
+                                let g = light_rec.colour[1] as f32 / 255.0;
+                                let b = light_rec.colour[2] as f32 / 255.0;
+                                let radius = if light_rec.radius > 0 {
+                                    light_rec.radius as f32
+                                } else {
+                                    500.0
+                                };
+                                let falloff = if light_rec.falloff > 0.01 {
+                                    light_rec.falloff
+                                } else {
+                                    1.0
+                                };
+                                placed_lights.push(PlacedPointLight {
+                                    position: pos,
+                                    radius,
+                                    color: [r, g, b],
+                                    falloff,
+                                });
+                            }
+
+                            // 3D モデルパスの決定 (通常オブジェクトまたは ACHR アクター)
+                            let mesh_file_path = if let Some(obj_info) =
+                                model_map.get(&refr.base_object)
+                            {
+                                if obj_info.model.is_empty() {
+                                    None
+                                } else if is_editor_marker_or_effect(
+                                    &obj_info.edid,
+                                    &obj_info.model,
+                                ) {
+                                    skipped_markers += 1;
+                                    None
+                                } else {
+                                    Some(obj_info.model.clone())
+                                }
+                            } else if let Some(npc) = npc_map.get(&refr.base_object) {
+                                // NPC_ のデフォルト装備防具から NIF パスを解決
+                                npc.default_armor
+                                    .and_then(|armo_id| armor_map.get(&armo_id))
+                                    .and_then(|armo| {
+                                        let m = if npc.is_female && !armo.female_model.is_empty() {
+                                            &armo.female_model
+                                        } else {
+                                            &armo.male_model
+                                        };
+                                        if !m.is_empty() {
+                                            Some(m.clone())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                            } else {
+                                None
                             };
 
-                            let pos = glam::Vec3::new(refr.position[0], refr.position[1], refr.position[2]);
-                            let rot = glam::Vec3::new(refr.rotation[0], refr.rotation[1], refr.rotation[2]);
-                            let world_transform = NiTransform::from_euler_xyz(pos, rot, refr.scale);
-                            cell_items.push((nif, world_transform));
-                        }
-                    }
-                    all_cell_items.push(cell_items);
-                }
+                            if let Some(model_path) = mesh_file_path {
+                                let model_key = model_path.to_ascii_lowercase();
+                                let nif = if let Some(n) = nif_cache.get(&model_key) {
+                                    n.clone()
+                                } else {
+                                    let path = if model_key.starts_with("meshes\\")
+                                        || model_key.starts_with("meshes/")
+                                    {
+                                        model_path.clone()
+                                    } else {
+                                        format!("meshes\\{}", model_path)
+                                    };
+                                    match vfs.read(&path) {
+                                        Ok(bytes) => {
+                                            let mut cursor = Cursor::new(bytes);
+                                            match NifFile::read(&mut cursor) {
+                                                Ok(parsed) => {
+                                                    let arc = Arc::new(parsed);
+                                                    nif_cache.insert(model_key, arc.clone());
+                                                    arc
+                                                }
+                                                Err(e) => {
+                                                    eprintln!("警告: メッシュ \"{}\" のパースに失敗しました（スキップします）: {}", path, e);
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                        Err(_) => continue,
+                                    }
+                                };
 
-                let total_placed: usize = all_cell_items.iter().map(|it| it.len()).sum();
-                println!(
+                                let pos = glam::Vec3::new(
+                                    refr.position[0],
+                                    refr.position[1],
+                                    refr.position[2],
+                                );
+                                let rot = glam::Vec3::new(
+                                    refr.rotation[0],
+                                    refr.rotation[1],
+                                    refr.rotation[2],
+                                );
+                                let world_transform =
+                                    NiTransform::from_euler_xyz(pos, rot, refr.scale);
+                                cell_items.push((nif, world_transform));
+                            }
+                        }
+                        all_cell_items.push(cell_items);
+                    }
+
+                    let total_placed: usize = all_cell_items.iter().map(|it| it.len()).sum();
+                    println!(
                     "全セル配置メッシュロード完了: {} 件 (マーカー/エフェクト除外: {} 件), 点光源: {} 灯。GPU シーン構築中...",
                     total_placed,
                     skipped_markers,
                     placed_lights.len()
                 );
 
-                let cell_inputs: Vec<(Vec<(&NifFile, NiTransform)>, Option<(&LandRecord, i32, i32)>)> =
-                    cells.iter().zip(all_cell_items.iter()).map(|((cell, _, land), items)| {
-                        let placed_refs: Vec<(&NifFile, NiTransform)> = items.iter().map(|(n, t)| (n.as_ref(), *t)).collect();
-                        let land_info = land.as_ref().and_then(|l| cell.grid.map(|(gx, gy)| (l, gx, gy)));
-                        (placed_refs, land_info)
-                    }).collect();
+                    let cell_inputs: Vec<(
+                        Vec<(&NifFile, NiTransform)>,
+                        Option<(&LandRecord, i32, i32)>,
+                    )> = cells
+                        .iter()
+                        .zip(all_cell_items.iter())
+                        .map(|((cell, _, land), items)| {
+                            let placed_refs: Vec<(&NifFile, NiTransform)> =
+                                items.iter().map(|(n, t)| (n.as_ref(), *t)).collect();
+                            let land_info = land
+                                .as_ref()
+                                .and_then(|l| cell.grid.map(|(gx, gy)| (l, gx, gy)));
+                            (placed_refs, land_info)
+                        })
+                        .collect();
 
-                let cell_refs: Vec<(&[(&NifFile, NiTransform)], Option<(&LandRecord, i32, i32)>)> =
-                    cell_inputs.iter().map(|(refs, land_info)| (refs.as_slice(), *land_info)).collect();
+                    let cell_refs: Vec<(
+                        &[(&NifFile, NiTransform)],
+                        Option<(&LandRecord, i32, i32)>,
+                    )> = cell_inputs
+                        .iter()
+                        .map(|(refs, land_info)| (refs.as_slice(), *land_info))
+                        .collect();
 
-                let landscape_texture_map = esm_reader.read_landscape_texture_map().ok();
-                if let Some(ref tex_map) = landscape_texture_map {
-                    println!("地形テクスチャセット解決: {} 件", tex_map.len());
-                }
+                    let landscape_texture_map = esm_reader.read_landscape_texture_map().ok();
+                    if let Some(ref tex_map) = landscape_texture_map {
+                        println!("地形テクスチャセット解決: {} 件", tex_map.len());
+                    }
 
-                let scene = RenderScene::from_cells(
-                    &device,
-                    &queue,
-                    &context,
-                    &cell_refs,
-                    landscape_texture_map.as_ref(),
-                    &mut vfs,
-                );
+                    let scene = RenderScene::from_cells(
+                        &device,
+                        &queue,
+                        &context,
+                        &cell_refs,
+                        landscape_texture_map.as_ref(),
+                        &mut vfs,
+                    );
 
-                let clear_color = if let Some(ref cl) = primary_lighting {
-                    if cl.fog_far > 0.0 {
-                        wgpu::Color {
-                            r: (cl.fog_color[0] as f64) / 255.0 * 0.25,
-                            g: (cl.fog_color[1] as f64) / 255.0 * 0.25,
-                            b: (cl.fog_color[2] as f64) / 255.0 * 0.25,
-                            a: 1.0,
+                    let clear_color = if let Some(ref cl) = primary_lighting {
+                        if cl.fog_far > 0.0 {
+                            wgpu::Color {
+                                r: (cl.fog_color[0] as f64) / 255.0 * 0.25,
+                                g: (cl.fog_color[1] as f64) / 255.0 * 0.25,
+                                b: (cl.fog_color[2] as f64) / 255.0 * 0.25,
+                                a: 1.0,
+                            }
+                        } else {
+                            wgpu::Color {
+                                r: (cl.ambient[0] as f64) / 255.0 * 0.4,
+                                g: (cl.ambient[1] as f64) / 255.0 * 0.4,
+                                b: (cl.ambient[2] as f64) / 255.0 * 0.4,
+                                a: 1.0,
+                            }
                         }
                     } else {
                         wgpu::Color {
-                            r: (cl.ambient[0] as f64) / 255.0 * 0.4,
-                            g: (cl.ambient[1] as f64) / 255.0 * 0.4,
-                            b: (cl.ambient[2] as f64) / 255.0 * 0.4,
+                            r: 0.12,
+                            g: 0.14,
+                            b: 0.18,
                             a: 1.0,
                         }
-                    }
-                } else {
-                    wgpu::Color {
-                        r: 0.12,
-                        g: 0.14,
-                        b: 0.18,
-                        a: 1.0,
-                    }
-                };
+                    };
 
-                println!("セル内の Havok コリジョン情報を物理ワールドに登録中...");
-                let mut physics_world = RapierPhysicsWorld::new();
-                let mut total_colliders = 0;
+                    println!("セル内の Havok コリジョン情報を物理ワールドに登録中...");
+                    let mut physics_world = RapierPhysicsWorld::new();
+                    let mut total_colliders = 0;
 
-                // 1. 地形 (LAND) コライダーの登録
-                for (_, land_info) in &cell_inputs {
-                    if let Some((land, gx, gy)) = land_info {
-                        let heights = land.compute_heights();
-                        if physics_world.add_land_collision(&heights, *gx, *gy).is_some() {
-                            total_colliders += 1;
+                    // 1. 地形 (LAND) コライダーの登録
+                    for (_, land_info) in &cell_inputs {
+                        if let Some((land, gx, gy)) = land_info {
+                            let heights = land.compute_heights();
+                            if physics_world
+                                .add_land_collision(&heights, *gx, *gy)
+                                .is_some()
+                            {
+                                total_colliders += 1;
+                            }
                         }
                     }
-                }
 
-                // 2. 配置オブジェクト (REFR) コライダーの登録
-                for (nif, world_transform) in cell_inputs.iter().flat_map(|(items, _)| items.iter()) {
-                    let col_data = extract_collision_data(nif);
-                    if !col_data.bodies.is_empty() {
-                        total_colliders += col_data.bodies.len();
-                        let quat = glam::Quat::from_mat3(&world_transform.rotation);
-                        physics_world.add_nif_collision(
-                            &col_data,
-                            world_transform.translation,
-                            quat,
-                        );
+                    // 2. 配置オブジェクト (REFR) コライダーの登録
+                    for (nif, world_transform) in
+                        cell_inputs.iter().flat_map(|(items, _)| items.iter())
+                    {
+                        let col_data = extract_collision_data(nif);
+                        if !col_data.bodies.is_empty() {
+                            total_colliders += col_data.bodies.len();
+                            let quat = glam::Quat::from_mat3(&world_transform.rotation);
+                            physics_world.add_nif_collision(
+                                &col_data,
+                                world_transform.translation,
+                                quat,
+                            );
+                        }
                     }
+                    println!("物理ワールド構築完了: 登録剛体数 {}", total_colliders);
+
+                    (
+                        scene,
+                        primary_lighting,
+                        placed_lights,
+                        clear_color,
+                        physics_world,
+                        door_spawn_point,
+                    )
                 }
-                println!("物理ワールド構築完了: 登録剛体数 {}", total_colliders);
+            };
 
-                (scene, primary_lighting, placed_lights, clear_color, physics_world, door_spawn_point)
-            }
-        };
-
-        println!("GPU シーン構築完了: {} メッシュノード描画準備完了", scene.meshes.len());
+        println!(
+            "GPU シーン構築完了: {} メッシュノード描画準備完了",
+            scene.meshes.len()
+        );
 
         let title = match target {
             ViewerTarget::Mesh(path) => format!("OpenFallout3 - Mesh: {}", path),
             ViewerTarget::Cell(edid) => format!("OpenFallout3 - Cell: {}", edid),
             ViewerTarget::World(edid, _) => format!("OpenFallout3 - World: {}", edid),
+            ViewerTarget::Anim { nif_path, kf_path } => {
+                format!("OpenFallout3 - Anim: {} + {}", nif_path, kf_path)
+            }
         };
         window.set_title(&title);
 
@@ -566,16 +693,25 @@ impl ViewerState {
                 glam::Vec3::X
             };
             let pos = door_pos + into_room * 80.0 + glam::Vec3::new(0.0, 0.0, 65.0);
-            println!("出入口ドアから室内方向への初期スポーン地点を設定: {:?}", pos);
+            println!(
+                "出入口ドアから室内方向への初期スポーン地点を設定: {:?}",
+                pos
+            );
             // カメラの向きも室内方向に向ける
             camera.yaw = into_room.y.atan2(into_room.x);
             camera.pitch = 0.0;
             pos
         } else {
-            let ray_origin = scene.bounds_center + glam::Vec3::new(0.0, 0.0, scene.bounds_radius * 0.5);
+            let ray_origin =
+                scene.bounds_center + glam::Vec3::new(0.0, 0.0, scene.bounds_radius * 0.5);
             let ray_dir = glam::Vec3::new(0.0, 0.0, -1.0);
-            if let Some(hit) = physics_world.cast_ray(ray_origin, ray_dir, scene.bounds_radius * 2.0) {
-                println!("レイキャストによる安全な床面検出に成功: Z = {:.1}", hit.point.z);
+            if let Some(hit) =
+                physics_world.cast_ray(ray_origin, ray_dir, scene.bounds_radius * 2.0)
+            {
+                println!(
+                    "レイキャストによる安全な床面検出に成功: Z = {:.1}",
+                    hit.point.z
+                );
                 hit.point + glam::Vec3::new(0.0, 0.0, 65.0)
             } else {
                 scene.bounds_center + glam::Vec3::new(0.0, 0.0, 64.0)
@@ -583,6 +719,60 @@ impl ViewerState {
         };
 
         let character_controller = RapierCharacterController::new(spawn_pos);
+
+        // アニメーションモード時: KF + スキンメッシュ NIF を追加ロードして AnimationPlayer を構築
+        let (anim_player, anim_kf_nif, anim_skeleton_nif, anim_pose, anim_bone_world_map) = {
+            if let ViewerTarget::Anim { nif_path, kf_path } = target {
+                use fo3_render::{collect_bone_world_transforms, AnimationClip};
+
+                // KF ファイル読み込み
+                let kf_bytes = vfs
+                    .read(kf_path)
+                    .expect("KF ファイルの読み込みに失敗しました");
+                let mut kf_cursor = Cursor::new(kf_bytes);
+                let kf_nif =
+                    NifFile::read(&mut kf_cursor).expect("KF ファイルのパースに失敗しました");
+                println!("KF パース成功 (ブロック数: {})", kf_nif.blocks.len());
+
+                // スキンメッシュ NIF（ボーン階層）再読み込み
+                let skel_bytes = vfs
+                    .read(nif_path)
+                    .expect("スケルトン NIF の読み込みに失敗しました");
+                let mut skel_cursor = Cursor::new(skel_bytes);
+                let skel_nif =
+                    NifFile::read(&mut skel_cursor).expect("スケルトン NIF のパースに失敗しました");
+
+                // バインドポーズのボーンワールド行列を収集
+                let mut bone_world_map = HashMap::new();
+                if !skel_nif.blocks.is_empty() {
+                    collect_bone_world_transforms(
+                        0,
+                        &NiTransform::default(),
+                        &skel_nif,
+                        &mut bone_world_map,
+                    );
+                }
+
+                // AnimationClip を構築して AnimationPlayer を作成
+                let player = AnimationClip::from_kf(&kf_nif).map(|clip| {
+                    println!(
+                        "アニメーションクリップ \"{}\" ロード完了: {:.2}s〜{:.2}s, チャンネル数: {}",
+                        clip.name, clip.start_time, clip.stop_time, clip.channels.len()
+                    );
+                    AnimationPlayer::new(clip)
+                });
+
+                (
+                    player,
+                    Some(kf_nif),
+                    Some(skel_nif),
+                    SkeletonPose::default(),
+                    bone_world_map,
+                )
+            } else {
+                (None, None, None, SkeletonPose::default(), HashMap::new())
+            }
+        };
 
         ViewerState {
             window,
@@ -618,6 +808,11 @@ impl ViewerState {
             left_mouse_down: false,
             right_mouse_down: false,
             last_mouse_pos: None,
+            anim_player,
+            anim_kf_nif,
+            anim_skeleton_nif,
+            anim_pose,
+            anim_bone_world_map,
         }
     }
 
@@ -627,11 +822,8 @@ impl ViewerState {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
-            self.depth_view = RenderContext::create_depth_texture(
-                &self.device,
-                new_size.width,
-                new_size.height,
-            );
+            self.depth_view =
+                RenderContext::create_depth_texture(&self.device, new_size.width, new_size.height);
             self.camera.aspect = new_size.width as f32 / new_size.height as f32;
         }
     }
@@ -644,8 +836,10 @@ impl ViewerState {
         // FPS ウォークスルー歩行モード時の物理シミュレーション
         if self.camera_mode == CameraMode::Walkthrough {
             // 水平面上の移動方向（カメラのヨー角から計算: Z-up 右手系）
-            let forward = glam::Vec3::new(self.camera.yaw.cos(), self.camera.yaw.sin(), 0.0).normalize();
-            let right = glam::Vec3::new(self.camera.yaw.sin(), -self.camera.yaw.cos(), 0.0).normalize();
+            let forward =
+                glam::Vec3::new(self.camera.yaw.cos(), self.camera.yaw.sin(), 0.0).normalize();
+            let right =
+                glam::Vec3::new(self.camera.yaw.sin(), -self.camera.yaw.cos(), 0.0).normalize();
 
             let mut move_dir = glam::Vec3::ZERO;
             if self.key_forward {
@@ -681,7 +875,8 @@ impl ViewerState {
                 self.vertical_velocity = self.vertical_velocity.clamp(-1200.0, 500.0);
             }
 
-            let desired_translation = (horiz_velocity + glam::Vec3::new(0.0, 0.0, self.vertical_velocity)) * dt;
+            let desired_translation =
+                (horiz_velocity + glam::Vec3::new(0.0, 0.0, self.vertical_velocity)) * dt;
 
             // 物理エンジンによる移動計算 (階段自動昇降・衝突スライド・接地判定)
             self.character_controller.step_move(
@@ -700,11 +895,8 @@ impl ViewerState {
         }
 
         let uniform = self.camera.build_uniform();
-        self.queue.write_buffer(
-            &self.camera_buffer,
-            0,
-            bytemuck::cast_slice(&[uniform]),
-        );
+        self.queue
+            .write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
 
         let mut current_lighting = self.cell_lighting.clone();
         if !self.enable_fog {
@@ -734,15 +926,41 @@ impl ViewerState {
             0,
             bytemuck::cast_slice(&[light_uniform]),
         );
+
+        // アニメーション更新ループ (Anim モード時)
+        // 参照元: Gamebryo 2.6 `NiControllerSequence::Update` → `NiSkinInstance::Update`
+        if let (Some(player), Some(kf_nif), Some(skel_nif)) = (
+            self.anim_player.as_mut(),
+            self.anim_kf_nif.as_ref(),
+            self.anim_skeleton_nif.as_ref(),
+        ) {
+            // 1. アニメーション時刻を進めてボーン姿勢を更新
+            player.update(kf_nif, dt, &mut self.anim_pose);
+
+            // 2. スケルトン NIF の FK を再計算（アニメーション姿勢適用後のボーンワールド行列）
+            recompute_bone_world_map_with_pose(
+                skel_nif,
+                &self.anim_pose,
+                &mut self.anim_bone_world_map,
+            );
+
+            // 3. スキンメッシュの頂点バッファをアニメーション姿勢で更新
+            self.scene
+                .update_animated_skins(&self.device, skel_nif, &self.anim_bone_world_map);
+        }
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Render Encoder"),
-        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -768,7 +986,11 @@ impl ViewerState {
             });
 
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            self.scene.render_with_camera_pos(&mut render_pass, &self.context, Some(self.camera.eye_position()));
+            self.scene.render_with_camera_pos(
+                &mut render_pass,
+                &self.context,
+                Some(self.camera.eye_position()),
+            );
 
             if self.show_collision {
                 self.scene.render_collision(&mut render_pass, &self.context);
@@ -824,7 +1046,11 @@ impl ApplicationHandler for App {
                     Err(e) => eprintln!("レンダリングエラー: {:?}", e),
                 }
             }
-            WindowEvent::MouseInput { button, state: btn_state, .. } => {
+            WindowEvent::MouseInput {
+                button,
+                state: btn_state,
+                ..
+            } => {
                 let pressed = btn_state == ElementState::Pressed;
                 match button {
                     MouseButton::Left => state.left_mouse_down = pressed,
@@ -887,7 +1113,8 @@ impl ApplicationHandler for App {
                                         println!("\n[カメラモード] FPS ウォークスルー歩行モード (物理演算 & KCC 有効) に切り替えました。");
                                         println!("  WASD: 移動, Space: ジャンプ, マウスドラッグ: 視線変更, Tab/M: オービット復帰");
                                         // ロード時に決定した出入口ドア等の安全な初期スポーン地点に配置
-                                        state.character_controller.position = state.initial_spawn_point;
+                                        state.character_controller.position =
+                                            state.initial_spawn_point;
                                         state.vertical_velocity = 0.0;
                                         CameraMode::Walkthrough
                                     }
@@ -901,8 +1128,11 @@ impl ApplicationHandler for App {
                                 state.window.request_redraw();
                             }
                             KeyCode::KeyR => {
-                                state.camera.focus(state.scene.bounds_center, state.scene.bounds_radius);
-                                state.character_controller.position = state.scene.bounds_center + glam::Vec3::new(0.0, 0.0, 64.0);
+                                state
+                                    .camera
+                                    .focus(state.scene.bounds_center, state.scene.bounds_radius);
+                                state.character_controller.position =
+                                    state.scene.bounds_center + glam::Vec3::new(0.0, 0.0, 64.0);
                                 state.vertical_velocity = 0.0;
                                 state.window.request_redraw();
                             }
@@ -957,6 +1187,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  - メッシュ単体表示: cargo run -p fo3_viewer -- <DataDir> <RelativeNifPath>");
         println!("  - セル一括表示:     cargo run -p fo3_viewer -- cell <DataDir> <CellEDID>");
         println!("  - ワールド表示:     cargo run -p fo3_viewer -- world <DataDir> <WorldEDID> [GridX] [GridY]");
+        println!("  - アニメーション:   cargo run -p fo3_viewer -- anim <DataDir> <RelativeNifPath> <RelativeKfPath>");
         println!("例:");
         println!("  cargo run -p fo3_viewer -- \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" \"meshes\\weapons\\1handpistol\\10mmpistol.nif\"");
         println!("  cargo run -p fo3_viewer -- cell \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" \"Vault101a\"");
@@ -964,6 +1195,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  cargo run -p fo3_viewer -- world \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" \"MegatonWorld\"");
         println!("  cargo run -p fo3_viewer -- world \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" \"DCWorld01\"");
         println!("  cargo run -p fo3_viewer -- world \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" \"Wasteland\" -1 2");
+        println!("  cargo run -p fo3_viewer -- anim \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" \"meshes\\characters\\_male\\upperbody.nif\" \"meshes\\characters\\_male\\idleanims\\ttnpchappysubtlelistena.kf\"");
         return Ok(());
     }
 
@@ -986,6 +1218,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             None
         };
         (args[2].clone(), ViewerTarget::World(args[3].clone(), grid))
+    } else if args[1] == "anim" {
+        // anim <DataDir> <NifPath> <KfPath>
+        if args.len() < 5 {
+            eprintln!("エラー: アニメーションモードには <DataDir> <NifPath> <KfPath> が必要です。");
+            eprintln!("例: cargo run -p fo3_viewer -- anim \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" \"meshes\\characters\\_male\\upperbody.nif\" \"meshes\\characters\\_male\\idleanims\\ttnpchappysubtlelistena.kf\"");
+            return Ok(());
+        }
+        (
+            args[2].clone(),
+            ViewerTarget::Anim {
+                nif_path: args[3].clone(),
+                kf_path: args[4].clone(),
+            },
+        )
     } else {
         (args[1].clone(), ViewerTarget::Mesh(args[2].clone()))
     };

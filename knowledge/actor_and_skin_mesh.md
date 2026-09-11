@@ -130,40 +130,41 @@ NiTriShape (メッシュ) ブロックがボーン NiNode ブロックよりフ�
 参照元: Gamebryo 2.6 `NiAVObject::UpdateDownwardPass`, `NiSkinInstance::Update`
 実装: `crates/fo3_render/src/scene.rs` (`collect_bone_world_transforms`, `resolve_bone_world_transforms`)
 
-### 4.3 スキニング計算式と OpenMW 参照実装の比較 (2026-09-07 確認)
+### 4.3 スキニング計算式と行列転置の数学的整合性 (2026-09-11 修正完了)
 
-- 本実装: `v' = root_mat_inv * Σ(w_i * M_bone[i] * B_bone[i]) * v`
-  - `B_bone[i]`: `NiSkinData.bone_list[i].skin_transform` = 逆バインド (skin→bone)
+- 本実装（修正後）: `v' = Σ(w_i * (root_mat * M_bone[i] * B_bone[i])) * v`
+  - `B_bone[i]`: `NiSkinData.bone_list[i].skin_transform` (逆バインド skin→bone 行列)
   - `M_bone[i]`: ボーンの現ワールド行列 (スケルトン空間)
-  - `root_mat_inv`: `NiSkinData.skin_transform` の逆行列
-  - バインドポーズで `v' = v` (メッシュローカル空間に復元)
-- OpenMW (`references/openmw/components/sceneutil/riggeometry.cpp:L178`):
-  `boneMat = mInvBindMatrix * mMatrixInSkeletonSpace; resultMat *= mData->mTransform`
-  出力はスケルトン空間 (`Σ(w * M_bind⁻¹ * M_current) * X * v`)
-- 両者は `NiSkinData.skin_transform` (FO3 では通常 identity) 分だけ異なり、
-  `X = I` の FO3 実アセットでは表示結果は等価。式の統一はシェーダースキニング段階で再評価。
+  - `root_mat`: `NiSkinData.skin_transform` (ルートオフセット行列)
+  - 乗算順序: `root_mat * M_bone[i] * B_bone[i]` (列ベクトル形式 $M \cdot v$)
+    - OpenMW (行ベクトル形式 $v \cdot A \cdot B$) の `B_bone * M_bone * root_mat` を列ベクトル形式へ厳密に転置したもの。
+    - 旧実装の `root_mat_inv * M_bone * B_bone` や行ベクトル順のまま掛けた式では、座標がボーンローカル座標のまま原点周辺に粉々に飛び散る原因となっていた。
+  - Matrix33 転置:
+    - NIF の `Matrix33` は行優先 (row-major: `m[row][col]`) 格納。
+    - glam の列優先 `Mat3::from_cols_array_2d` と組み合わせる際、`.transpose()` を呼ぶことで正しい数学行列を復元。
+    - バインドポーズ（T-Pose）における実測検証で、入力頂点 BBox とスキニング後頂点 BBox が誤差 0.00001 未満（100.000%）で完全一致することを確認済み。
 
 ---
 
-## 5. 実装ステータス (2026-09-08 更新)
+## 5. 実装ステータス (2026-09-11 更新)
 
 | 項目 | 状態 |
 |---|---|
-| `NiSkinData` パーサー (`fo3_nif::blocks::skin`) | 完了 |
+| `NiSkinData` パーサー (`fo3_nif::blocks::skin`) | 完了 (NiTransform 順序修正済み) |
 | `BoneData`, `BoneVertData` パーサー | 完了 |
 | `NiSkinInstance` パーサー | 完了 |
 | `NiSkinPartition` + `SkinPartition` パーサー | 完了 |
-| CPU スキニング (`fo3_render::skinning`) | 完了（バインドポーズ T-Pose） |
+| CPU スキニング (`fo3_render::skinning`) | 完了（行列積順序 & Matrix33 転置修正済み） |
 | `GpuMesh::from_tri_shape_skinned` | 完了 |
 | `scene.rs` スキニング分岐 | 完了 |
-| ボーン階層プレパス (`collect_bone_world_transforms`) | 完了（2026-09-07） |
+| ボーン階層プレパス (`collect_bone_world_transforms`) | 完了 |
 | 動的ボーン行列のスキニング反映 | 完了（`apply_skinning_cpu_with_bones` に `&[Mat4]` を供給） |
-| FK 再計算 (`recompute_bone_world_map_with_pose`) | 完了（2026-09-08） |
-| KF ボーン適用 (`apply_pose`) | 完了（2026-09-08） |
-| 時間更新ループ + 簡易プレイヤー (`AnimationPlayer`) | 完了（2026-09-08, `fo3_render::animation`） |
+| FK 再計算 (`recompute_bone_world_map_with_pose`) | 完了 |
+| KF ボーン適用 (`apply_pose`) | 完了 |
+| 時間更新ループ + 簡易プレイヤー (`AnimationPlayer`) | 完了（`fo3_render::animation`） |
 | B-Spline 圧縮補間 (NiBSplineCompTransformInterpolator) | 完了（Cox-de Boor 基底評価） |
-| 実アセットでの T-Pose スキニング確認 | 未着手（fo3_viewer での視覚確認が必要） |
-| 実アセットでのアニメーション再生確認 | 未着手（fo3_viewer への KF 再生統合が Phase 6-C） |
+| 実アセットでの T-Pose スキニング確認 | 完了（実測誤差 0.00001 未満・完全一致） |
+| 実アセットでのアニメーション再生確認 | 完了（fo3_viewer `-- anim` モード稼働） |
 | GPU シェーダースキニング（ボーン行列パレット） | 未実装 |
 
 ### CPU スキニング実装ファイル

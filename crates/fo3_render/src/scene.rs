@@ -43,6 +43,21 @@ pub struct RenderMesh {
     pub world_center: Vec3,
 }
 
+/// アニメーション対応スキンメッシュの更新用情報。
+///
+/// スキニング計算に必要な NIF データへの参照（ブロックインデックス）を保持し、
+/// 毎フレームの姿勢更新時に `RenderScene::update_animated_skins` から参照される。
+///
+/// 参照元: Gamebryo 2.6 `NiSkinInstance::Update`（毎フレームの変形計算）
+pub struct AnimatedSkinMesh {
+    /// `RenderScene::meshes` 中の対象 `RenderMesh` インデックス
+    pub mesh_index: usize,
+    /// NiTriShapeData ブロックインデックス（NIF 内）
+    pub geo_data_block: i32,
+    /// NiSkinInstance ブロックインデックス（NIF 内）
+    pub skin_instance_block: i32,
+}
+
 /// NIF から構築された完全な描画シーン。
 pub struct RenderScene {
     pub meshes: Vec<RenderMesh>,
@@ -52,6 +67,8 @@ pub struct RenderScene {
     pub bounds_center: Vec3,
     /// シーン全体のバウンディング半径
     pub bounds_radius: f32,
+    /// アニメーション対応スキンメッシュの更新情報リスト
+    pub anim_skin_meshes: Vec<AnimatedSkinMesh>,
 }
 
 impl RenderScene {
@@ -108,11 +125,15 @@ impl RenderScene {
         // バウンディング計算 (簡易 AABB から包含球を概算)
         let (bounds_center, bounds_radius) = calculate_scene_bounds(nif);
 
+        // アニメーション対応スキンメッシュ情報を収集
+        let anim_skin_meshes = collect_anim_skin_meshes(nif, &meshes);
+
         RenderScene {
             meshes,
             collision_meshes,
             bounds_center,
             bounds_radius,
+            anim_skin_meshes,
         }
     }
 
@@ -450,6 +471,7 @@ impl RenderScene {
             collision_meshes,
             bounds_center,
             bounds_radius,
+            anim_skin_meshes: Vec::new(),
         }
     }
 
@@ -714,7 +736,7 @@ fn traverse_block(
 /// 常に正しい現在行列を参照できる。
 ///
 /// 参照元: Gamebryo 2.6 `NiAVObject::UpdateDownwardPass`, `NiSkinInstance::Update`
-fn collect_bone_world_transforms(
+pub fn collect_bone_world_transforms(
     block_index: i32,
     parent_world: &NiTransform,
     nif: &NifFile,
@@ -842,7 +864,7 @@ fn lookup_override(
 /// マップに存在しないボーンは `Mat4::IDENTITY` で埋める。
 ///
 /// 参照元: `knowledge/actor_and_skin_mesh.md`, Gamebryo 2.6 `NiSkinInstance::Update`
-fn resolve_bone_world_transforms(
+pub fn resolve_bone_world_transforms(
     skin_instance: &fo3_nif::NiSkinInstance,
     bone_world_map: &HashMap<i32, Mat4>,
 ) -> Vec<Mat4> {
@@ -856,6 +878,81 @@ fn resolve_bone_world_transforms(
                 .unwrap_or(Mat4::IDENTITY)
         })
         .collect()
+}
+
+/// NIF 内のスキンメッシュを走査し、アニメーション更新に必要な情報を収集する。
+///
+/// `RenderScene::anim_skin_meshes` の初期化に使用される。スキン情報（`NiSkinInstance`
+/// または `BSDismemberSkinInstance`）を持つ `NiTriShape` ブロックを検出し、
+/// `RenderScene::meshes` 内の対応インデックスとともに `AnimatedSkinMesh` を構築する。
+///
+/// 参照元: Gamebryo 2.6 `NiSkinInstance::Update`
+fn collect_anim_skin_meshes(nif: &NifFile, meshes: &[RenderMesh]) -> Vec<AnimatedSkinMesh> {
+    let mut result = Vec::new();
+    for (block_idx, block) in nif.blocks.iter().enumerate() {
+        let NifBlock::NiTriShape(shape) = block else { continue };
+        let skin_inst_block = shape.geom.skin_instance;
+        if skin_inst_block < 0 { continue; }
+        let geo_data_block = shape.geom.data;
+        if geo_data_block < 0 { continue; }
+        // NIF ブロック名でメッシュを検索
+        let mesh_name = nif.get_string(shape.geom.av.net.name_index).unwrap_or("");
+        let block_hint = block_idx.to_string();
+        // meshes 内で対応する RenderMesh を探す（名前一致 or ブロックインデックス含む）
+        if let Some(mesh_index) = meshes.iter().position(|m| {
+            m.name == mesh_name || m.name.contains(&block_hint)
+        }) {
+            result.push(AnimatedSkinMesh {
+                mesh_index,
+                geo_data_block,
+                skin_instance_block: skin_inst_block,
+            });
+        }
+    }
+    result
+}
+
+impl RenderScene {
+    /// アニメーション更新後のボーン行列で、全スキンメッシュの頂点バッファを更新する。
+    ///
+    /// `AnimationPlayer::update()` → `recompute_bone_world_map_with_pose()` 後に呼び出すことで、
+    /// 最新の姿勢が反映されたスキン変形結果をGPUバッファに書き込む。
+    ///
+    /// 参照元:
+    /// - Gamebryo 2.6 `NiSkinInstance::Update`（毎フレームの変形計算）
+    /// - `knowledge/actor_and_skin_mesh.md`（スキニング計算式）
+    pub fn update_animated_skins(
+        &mut self,
+        device: &wgpu::Device,
+        nif: &NifFile,
+        bone_world_map: &HashMap<i32, Mat4>,
+    ) {
+        for anim in &self.anim_skin_meshes {
+            let mesh_index = anim.mesh_index;
+            if mesh_index >= self.meshes.len() { continue; }
+
+            // NiTriShapeData を解決
+            let geo_data_block = anim.geo_data_block as usize;
+            if geo_data_block >= nif.blocks.len() { continue; }
+            let NifBlock::NiTriShapeData(geo_data) = &nif.blocks[geo_data_block] else { continue };
+
+            // NiSkinInstance を解決
+            let skin_inst_block = anim.skin_instance_block as usize;
+            if skin_inst_block >= nif.blocks.len() { continue; }
+            let skin_inst = match &nif.blocks[skin_inst_block] {
+                NifBlock::NiSkinInstance(inst) => inst,
+                NifBlock::BSDismemberSkinInstance(bdsi) => &bdsi.skin_instance,
+                _ => continue,
+            };
+
+            // 現在のボーン行列を解決してスキニング計算
+            let bone_transforms = resolve_bone_world_transforms(skin_inst, bone_world_map);
+            let bone_refs = if bone_transforms.is_empty() { None } else { Some(bone_transforms.as_slice()) };
+            if let Some((positions, normals)) = apply_skinning_cpu_with_bones(geo_data, skin_inst, nif, bone_refs) {
+                self.meshes[mesh_index].mesh.update_skinned_vertices(device, geo_data, &positions, &normals);
+            }
+        }
+    }
 }
 
 /// ノードが非表示（App Culled / エディタマーカー）であるかを判定する。
@@ -883,7 +980,7 @@ fn is_node_hidden(av: &fo3_nif::NiAVObject, nif: &NifFile) -> bool {
 }
 
 fn to_core_transform(av: &fo3_nif::NiAVObject) -> NiTransform {
-    let rot = glam::Mat3::from_cols_array_2d(&av.rotation.m);
+    let rot = glam::Mat3::from_cols_array_2d(&av.rotation.m).transpose();
     NiTransform {
         rotation: rot,
         translation: glam::Vec3::new(av.translation.x, av.translation.y, av.translation.z),

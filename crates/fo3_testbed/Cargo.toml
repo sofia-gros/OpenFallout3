@@ -10,3 +10,4 @@ fo3_bsa = { path = "../fo3_bsa" }
 fo3_vfs = { path = "../fo3_vfs" }
 fo3_esm = { path = "../fo3_esm" }
 fo3_render = { path = "../fo3_render" }
+glam = { workspace = true }

@@ -54,10 +54,14 @@ impl BoneData {
     ///
     /// `has_vertex_weights` が false の場合は頂点重みリストは空になる。
     pub fn read<R: Read>(reader: &mut R, has_vertex_weights: bool) -> io::Result<Self> {
-        // NiTransform: translation (Vec3), rotation (Matrix33), scale (f32)
-        // 参照元: nif.xml Skin Transform フィールド定義
-        let skin_transform_translation = Vector3::read(reader)?;
+        // NiTransform: rotation (Matrix33) → translation (Vec3) → scale (f32)
+        // 参照元: references/nifxml/nif.xml:L2206-2210 (NiTransform, size=52)
+        //   "Rotation" (Matrix33) が先頭、次に "Translation" (Vector3)、最後に "Scale" (float)。
+        //   ※旧実装では translation→rotation→scale の順で読んでおり、FO3 実アセット
+        //     (meshes\armor\leatherarmor\m\outfitm.nif) で rotation 第3行に
+        //     座標値が混入してスキン変形が壊れるバグがあった（2026-09-08 修正）。
         let skin_transform_rotation = Matrix33::read(reader)?;
+        let skin_transform_translation = Vector3::read(reader)?;
         let skin_transform_scale = reader.read_f32::<LittleEndian>()?;
 
         // NiBound: center (Vec3) + radius (f32)
@@ -103,14 +107,18 @@ impl NiSkinData {
     /// バイナリストリームから `NiSkinData` を読み込む。
     ///
     /// Fallout 3 (version 20.2.0.7, user_version 11) でのレイアウト:
-    /// (NiTransform = translation: Vec3, rotation: Mat3x3, scale: f32)
+    /// (NiTransform = rotation: Mat3x3, translation: Vec3, scale: f32 — 参照元: nif.xml:L2206-2210)
     /// 1. `NiTransform skin_transform`
     /// 2. `uint num_bones`
     /// 3. `bool has_vertex_weights` (since 4.2.1.0)
     /// 4. `[num_bones] BoneData { ... }`
     pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
-        let skin_transform_translation = Vector3::read(reader)?;
+        // NiTransform: rotation (Matrix33) → translation (Vec3) → scale (f32)
+        // 参照元: references/nifxml/nif.xml:L2206-2210 (NiTransform, size=52)
+        //   ※旧実装では translation→rotation→scale の順で読んでおり、rotation に
+        //     実際の translation 値が混入してスキン変形が壊れるバグがあった（2026-09-08 修正）。
         let skin_transform_rotation = Matrix33::read(reader)?;
+        let skin_transform_translation = Vector3::read(reader)?;
         let skin_transform_scale = reader.read_f32::<LittleEndian>()?;
 
         let num_bones = reader.read_u32::<LittleEndian>()? as usize;

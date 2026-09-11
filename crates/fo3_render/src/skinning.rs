@@ -29,19 +29,21 @@ use fo3_nif::types::{Matrix33, Vector3};
 ///
 /// Gamebryo の NiTransform は (translation, rotation, scale) の組み合わせで、
 /// 変換行列は M = T * R * S として計算される。
-/// 参照元: Gamebryo 2.6 `NiSkinData::BoneData::skin_transform`
+///
+/// 回転の行列化は **OpenMW の `NiTransform::toMatrix`（niftypes.hpp:74-84）と同一の
+/// 転置表現** を使う。NIF の Matrix33 は行優先 (row-major) で `m[row][col]` 格納だが、
+/// OpenMW は `transform(j,i) = mRotation[i][j]` とすることで数学行列に対して転置に展開する。
+/// これは `to_core_transform`（scene.rs）の `glam::Mat3::from_cols_array_2d` と同じ表現で、
+/// ボーンワールド行列 (`bone_world`) と逆バインド/ルート行列の回転向きを一致させるために必須。
+/// ※旧実装は `from_cols_array` で列 c に NIF の列 c を入れる非転置表現を使っていたため、
+///   `bone_world`（転置）との回転向きが逆になり、スキン変形が大きく崩れるバグがあった
+///   （2026-09-08 修正）。
 fn build_bone_matrix(translation: Vector3, rotation: Matrix33, scale: f32) -> Mat4 {
-    // nif.xml の Matrix33 は行優先 (row-major) で格納されている
     let r = &rotation.m;
-    let rot_mat = Mat4::from_cols_array(&[
-        r[0][0], r[1][0], r[2][0], 0.0,
-        r[0][1], r[1][1], r[2][1], 0.0,
-        r[0][2], r[1][2], r[2][2], 0.0,
-        0.0,     0.0,     0.0,     1.0,
-    ]);
+    // NIF の Matrix33 は行優先 (row-major) 格納。glam は列優先なので転置して正しい数学行列を構築する。
+    let rot_mat = Mat4::from_mat3(glam::Mat3::from_cols_array_2d(r).transpose() * scale);
     let trans_mat = Mat4::from_translation(Vec3::new(translation.x, translation.y, translation.z));
-    let scale_mat = Mat4::from_scale(Vec3::splat(scale));
-    trans_mat * rot_mat * scale_mat
+    trans_mat * rot_mat
 }
 
 /// CPU スキニングを適用し、変換後の頂点位置・法線を返す（バインドポーズ固定）。
@@ -96,12 +98,26 @@ pub fn apply_skinning_cpu_with_bones(
 
     // ルートスキン変換行列（NiSkinData の skin_transform）
     // 参照元: nif.xml:L5069 "Skin Transform"
+    //
+    // スキニング完全式（OpenMW riggeometry.cpp:L178,185,204 参照）:
+    //   boneMat_bone   = mInvBindMatrix * mMatrixInSkeletonSpace
+    //   resultMat      = [ Σ_bone weight * boneMat_bone ] * mData->mTransform
+    //   v'             = resultMat * v
+    // ここで
+    //   - mInvBindMatrix      = NiSkinData.bone_list[i].skin_transform (nifloader.cpp:L1708)
+    //   - mMatrixInSkeletonSpace = 現在のボーンワールド行列 (skeleton.cpp:L169)
+    //   - mData->mTransform   = NiSkinData.skin_transform (ルート) (nifloader.cpp:L1715)
+    //
+    // つまり 1 ボーン行列は  invBind * boneWorld * root  の順で合成する。
+    // ※旧実装では  root_mat_inv * boneWorld * invBind  の順で合成しており、
+    //   root を逆変換・積の先頭に置くため、骨格ワールドの並進（例 outfitm.nif の
+    //   meatneck: root z=-112.843 と boneWorld z=+112.84）が加算で二重適用され、
+    //   出力頂点が z 方向に大規模シフトするバグがあった（2026-09-08 修正）。
     let root_mat = build_bone_matrix(
         skin_data.skin_transform_translation,
         skin_data.skin_transform_rotation,
         skin_data.skin_transform_scale,
     );
-    let root_mat_inv = root_mat.inverse();
 
     for partition in &skin_partition.partitions {
         if partition.vertex_map.is_empty()
@@ -134,8 +150,9 @@ pub fn apply_skinning_cpu_with_bones(
                     Mat4::IDENTITY
                 };
 
-                // 合成変換行列: root_mat_inv * M_bone * B_bone
-                bone_matrices.push(root_mat_inv * m_bone * b_bone);
+                // 合成変換行列: root * boneWorld * invBind (列ベクトル形式 M * v)
+                // 参照元: OpenMW riggeometry.cpp:L178,204 を列ベクトル形式に転置
+                bone_matrices.push(root_mat * m_bone * b_bone);
             } else {
                 bone_matrices.push(Mat4::IDENTITY);
             }

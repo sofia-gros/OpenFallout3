@@ -11,7 +11,8 @@ Morrowind のオープンソース再実装プロジェクトである OpenMW �
 ## 主な機能と実装状況
 
 ### 1. アセット・バイナリパーサー (`crates/fo3_*`)
-- **fo3_esm**: Fallout 3 マスターファイル (`Fallout3.esm`) の直接ストリーミング走査。CELL、REFR、LAND、STAT、DOOR、LIGHT、NPC_、ARMO レコードの完全デシリアライズ。
+
+- **fo3_esm**: Fallout 3 マスターファイル (`Fallout3.esm`) の直接ストリーミング走査。CELL、REFR、LAND、STAT、DOOR、LIGHT、NPC\_、ARMO レコードの完全デシリアライズ。
 - **fo3_bsa**: Bethesda Archive 形式の高速インデックス解決、zlib リアルタイム解凍。
 - **fo3_vfs**: BSA アーカイブ群とルーズファイルを統合し、大文字小文字・セパレータ差分を吸収する仮想ファイルシステム。
 - **fo3_nif**: Gamebryo 2.6 NIF (`v20.2.0.7`, `User Version 11`, `User Version 2 34`) のブロックパーサー。NiNode、NiTriShape、NiTriStrips、NiAlphaProperty、bhkRigidBody、bhkPackedNiTriStripsShape、NiSkinInstance 等を忠実に再現。
@@ -19,6 +20,7 @@ Morrowind のオープンソース再実装プロジェクトである OpenMW �
 ![Megaton Interior Cell Walkthrough](docs/2.png)
 
 ### 2. GPU レンダリングエンジン (`fo3_render`, `fo3_viewer`)
+
 - **現代的低レベルグラフィックス API**: wgpu (Vulkan / DirectX 12 / Metal) による高効率描画パイプライン。
 - **テクスチャブレンディング**: ディフューズマップ、法線マップ（Tangent / Bitangent 従法線ベクトル計算対応）、グローマップのサンプリング。
 - **ランドスケープ（地形）マルチテクスチャリング**: セル単位のベーステクスチャ（BTXT）および追加ブレンドレイヤー（ATXT）のアルファ合成。
@@ -28,6 +30,7 @@ Morrowind のオープンソース再実装プロジェクトである OpenMW �
 ![Havok Collision Wireframes](docs/3.png)
 
 ### 3. 物理エンジン・キャラクタコントローラー (`fo3_physics`)
+
 - **Havok コリジョン変換**: NIF 内の Havok 物理ブロック（Box、Sphere、Capsule、ConvexHull、TriMesh）および ESM の LAND 標高グリッドを物理エンジンへマッピング。
 - **Parry3D 複合形状対応**: Compound 内の複合ネストや複数 TriMesh の結合処理により、安定した剛体登録を実現。
 - **リアルタイム KCC (Kinematic Character Controller)**: 重力加速度、斜面登坂、階段の自動昇降（ステップイン）、接地判定、衝突スライド移動を実装。
@@ -62,11 +65,13 @@ OpenFallout3/
 ## 必要環境・ビルド方法
 
 ### 動作要件
+
 - **Rust**: 1.80 以上 (最新の stable ツールチェーンを推奨)
 - **Fallout 3**: Steam 版または GOG 版の正規インストールデータ（`Fallout3.esm` および `Data/*.bsa`）
 - **GPU**: Vulkan 1.2、DirectX 12、または Metal に対応したグラフィックス環境
 
 ### リポジトリのクローンとビルド
+
 ```bash
 git clone https://github.com/sofia-gros/OpenFallout3.git
 cd OpenFallout3
@@ -74,6 +79,7 @@ cargo build --release
 ```
 
 ### 単体テストの実行
+
 ```bash
 cargo test
 ```
@@ -85,10 +91,13 @@ cargo test
 `fo3_viewer` を使用して、メッシュ単体、室内セル、または広域ワールドスペースを直接読み込んで探索できます。
 
 ### 1. 室内セル (Interior Cell) の読み込み
+
 ```bash
 cargo run --release -p fo3_viewer -- cell "<Fallout 3 Data ディレクトリのパス>" "<Cell EDID>"
 ```
+
 例:
+
 ```bash
 # Vault 101 エントランス
 cargo run --release -p fo3_viewer -- cell "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "Vault101a"
@@ -101,10 +110,13 @@ cargo run --release -p fo3_viewer -- cell "A:\SteamLibrary\steamapps\common\Fall
 ```
 
 ### 2. ワールドスペース (World Space) の読み込み
+
 ```bash
 cargo run --release -p fo3_viewer -- world "<Fallout 3 Data ディレクトリのパス>" "<World EDID>" [GridX] [GridY]
 ```
+
 例:
+
 ```bash
 # メガトン (MegatonWorld)
 cargo run --release -p fo3_viewer -- world "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "MegatonWorld"
@@ -117,32 +129,41 @@ cargo run --release -p fo3_viewer -- world "A:\SteamLibrary\steamapps\common\Fal
 ```
 
 ### 3. NIF メッシュ単体の読み込み
+
 ```bash
 cargo run --release -p fo3_viewer -- "<Fallout 3 Data ディレクトリのパス>" "<NIF ファイル相対パス>"
 ```
+
 例:
+
 ```bash
 cargo run --release -p fo3_viewer -- "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "meshes\weapons\1handpistol\10mmpistol.nif"
+```
+
+### 4. KFM アニメーションの読み込み
+
+```bash
+cargo run -p fo3_viewer -- anim "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "meshes\characters\_male\upperbody.nif" "meshes\characters\_male\idleanims\ttnpchappysubtlelistena.kf"
 ```
 
 ---
 
 ## 操作方法
 
-| キー / マウス操作 | 機能 |
-| :--- | :--- |
-| **Tab / M** | カメラモード切替（オービット周回 ⇔ FPS 歩行モード） |
-| **W / A / S / D** | 前進 / 左移動 / 後退 / 右移動（FPS 歩行モード時） |
-| **Space** | ジャンプ / 上昇（FPS 歩行モード時） |
-| **マウス移動** | 視線回転（Look） |
-| **マウス左ドラッグ** | カメラ回転（オービットモード時） |
-| **マウス右ドラッグ** | カメラ平行移動（Pan）（オービットモード時） |
-| **マウスホイール** | ズームイン / ズームアウト（オービットモード時） |
-| **C** | Havok コリジョンワイヤーフレーム表示切替 (Collision ON/OFF) |
-| **F** | セル環境フォグ表示切替 (Fog ON/OFF) |
-| **L** | ビューアー補助ヘッドライト切替 (Light ON/OFF) |
-| **R** | カメラ注視点自動再フォーカス |
-| **Esc** | ビューアー終了 |
+| キー / マウス操作    | 機能                                                        |
+| :------------------- | :---------------------------------------------------------- |
+| **Tab / M**          | カメラモード切替（オービット周回 ⇔ FPS 歩行モード）         |
+| **W / A / S / D**    | 前進 / 左移動 / 後退 / 右移動（FPS 歩行モード時）           |
+| **Space**            | ジャンプ / 上昇（FPS 歩行モード時）                         |
+| **マウス移動**       | 視線回転（Look）                                            |
+| **マウス左ドラッグ** | カメラ回転（オービットモード時）                            |
+| **マウス右ドラッグ** | カメラ平行移動（Pan）（オービットモード時）                 |
+| **マウスホイール**   | ズームイン / ズームアウト（オービットモード時）             |
+| **C**                | Havok コリジョンワイヤーフレーム表示切替 (Collision ON/OFF) |
+| **F**                | セル環境フォグ表示切替 (Fog ON/OFF)                         |
+| **L**                | ビューアー補助ヘッドライト切替 (Light ON/OFF)               |
+| **R**                | カメラ注視点自動再フォーカス                                |
+| **Esc**              | ビューアー終了                                              |
 
 ---
 

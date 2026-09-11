@@ -541,6 +541,57 @@ impl GpuMesh {
             num_elements: indices.len() as u32,
         })
     }
+
+    /// CPU スキニング結果で頂点バッファを差し替える。
+    ///
+    /// 毎フレームのアニメーション更新時に呼び出し、新しいスキン済み頂点データで
+    /// 既存の頂点バッファを新規バッファに置き換える（GPU バッファは不変長のため再作成）。
+    ///
+    /// 参照元: Gamebryo 2.6 `NiSkinInstance::Update`（毎フレームの変形計算と GPU 書き込み）
+    pub fn update_skinned_vertices(
+        &mut self,
+        device: &wgpu::Device,
+        data: &NiTriShapeData,
+        skinned_positions: &[[f32; 3]],
+        skinned_normals: &[[f32; 3]],
+    ) {
+        let n = data.common.num_vertices as usize;
+        if n == 0 { return; }
+        let common = &data.common;
+        let has_uv       = !common.uv_sets.is_empty() && !common.uv_sets[0].is_empty();
+        let has_colors   = !common.vertex_colors.is_empty();
+        let has_tangents = !common.tangents.is_empty();
+        let has_bitangs  = !common.bitangents.is_empty();
+
+        let mut vertices = Vec::with_capacity(n);
+        for i in 0..n {
+            let pos = if i < skinned_positions.len() { skinned_positions[i] }
+                else if i < common.vertices.len() { let v = &common.vertices[i]; [v.x, v.y, v.z] }
+                else { [0.0, 0.0, 0.0] };
+            let normal = if i < skinned_normals.len() { skinned_normals[i] }
+                else if i < common.normals.len() { let nm = &common.normals[i]; [nm.x, nm.y, nm.z] }
+                else { [0.0, 0.0, 1.0] };
+            let uv = if has_uv && i < common.uv_sets[0].len() { [common.uv_sets[0][i].u, common.uv_sets[0][i].v] }
+                else { [0.0, 0.0] };
+            let color = if has_colors && i < common.vertex_colors.len() {
+                let c = &common.vertex_colors[i]; [c.r, c.g, c.b, c.a]
+            } else { [1.0, 1.0, 1.0, 1.0] };
+            let tangent = if has_tangents && i < common.tangents.len() {
+                let t = &common.tangents[i]; [t.x, t.y, t.z]
+            } else { [0.0, 0.0, 0.0] };
+            let bitangent = if has_bitangs && i < common.bitangents.len() {
+                let b = &common.bitangents[i]; [b.x, b.y, b.z]
+            } else { [0.0, 0.0, 0.0] };
+            vertices.push(crate::vertex::Vertex { position: pos, normal, uv, color, tangent, bitangent });
+        }
+
+        // 新バッファを作成してスワップ（サイズが同一のため実質インプレース相当）
+        self.vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Skinned Mesh Vertex Buffer"),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+    }
 }
 
 #[cfg(test)]
