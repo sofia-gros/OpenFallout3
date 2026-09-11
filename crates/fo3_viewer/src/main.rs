@@ -7,6 +7,7 @@
 //!   - セル一括表示: `cargo run -p fo3_viewer -- cell <data_dir> <cell_edid>`
 //!   - ワールド表示: `cargo run -p fo3_viewer -- world <data_dir> <world_edid> [grid_x] [grid_y]`
 //!   - アニメーション: `cargo run -p fo3_viewer -- anim <data_dir> <nif_relative_path> <kf_relative_path>`
+//!   - アクター全身合成: `cargo run -p fo3_viewer -- actor <data_dir> [naked | outfit_relative_path] <kf_relative_path>`
 //!
 //! 例:
 //!   `cargo run -p fo3_viewer -- "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "meshes\weapons\1handpistol\10mmpistol.nif"`
@@ -16,6 +17,8 @@
 //!   `cargo run -p fo3_viewer -- world "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "DCWorld01"`
 //!   `cargo run -p fo3_viewer -- world "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "Wasteland" -1 2`
 //!   `cargo run -p fo3_viewer -- anim "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "meshes\characters\_male\upperbody.nif" "meshes\characters\_male\idleanims\ttnpchappysubtlelistena.kf"`
+//!   `cargo run -p fo3_viewer -- actor "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" naked "meshes\characters\_male\idleanims\ttnpchappysubtlelistena.kf"`
+//!   `cargo run -p fo3_viewer -- actor "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "meshes\armor\wastelandclothing01\outfitm.nif" "meshes\characters\_male\idleanims\ttnpchappysubtlelistena.kf"`
 
 use std::collections::HashMap;
 use std::env;
@@ -60,9 +63,14 @@ enum ViewerTarget {
     Mesh(String),
     Cell(String),
     World(String, Option<(i32, i32)>),
-    /// スキンメッシュ + KF アニメーション再生モード
+    /// 単一スキンメッシュ + KF アニメーション再生モード
     Anim {
         nif_path: String,
+        kf_path: String,
+    },
+    /// 人型アクター（全身パーツ合成: 頭部、胴体/衣装、右手、左手）+ KF アニメーション再生モード
+    Actor {
+        outfit_or_naked: String,
         kf_path: String,
     },
 }
@@ -104,12 +112,12 @@ struct ViewerState {
     left_mouse_down: bool,
     right_mouse_down: bool,
     last_mouse_pos: Option<(f64, f64)>,
-    // アニメーション再生状態 (Anim モード時のみ Some)
+    // アニメーション再生状態 (Anim / Actor モード時のみ Some)
     anim_player: Option<AnimationPlayer>,
     /// KF ファイルの NifFile（アニメーションデータ）
     anim_kf_nif: Option<NifFile>,
-    /// パーツメッシュ NIF（スキニング変形対象）
-    anim_mesh_nif: Option<NifFile>,
+    /// パーツメッシュ NIF 群（スキニング変形対象）
+    anim_parts: Vec<NifFile>,
     /// スケルトン NIF（真のボーン階層ツリー走査用）
     anim_skeleton_nif: Option<NifFile>,
     /// 現在の骨格姿勢（KF → SkeletonPose のオーバーライド）
@@ -221,6 +229,88 @@ impl ViewerState {
                         println!(
                             "物理ワールド登録: 単体メッシュ コリジョン剛体数 {}",
                             col_data.bodies.len()
+                        );
+                    }
+
+                    (
+                        scene,
+                        None,
+                        Vec::new(),
+                        wgpu::Color {
+                            r: 0.1,
+                            g: 0.12,
+                            b: 0.15,
+                            a: 1.0,
+                        },
+                        physics_world,
+                        None,
+                    )
+                }
+                ViewerTarget::Actor {
+                    outfit_or_naked,
+                    kf_path,
+                } => {
+                    println!(
+                        "人型アクター全身パーツ合成モード (outfit: {}, anim: {})",
+                        outfit_or_naked, kf_path
+                    );
+                    let body_path = if outfit_or_naked.eq_ignore_ascii_case("naked") {
+                        "meshes\\characters\\_male\\upperbody.nif".to_string()
+                    } else {
+                        outfit_or_naked.clone()
+                    };
+
+                    let part_paths = [
+                        "meshes\\characters\\head\\headhuman.nif",
+                        body_path.as_str(),
+                        "meshes\\characters\\_male\\righthand.nif",
+                        "meshes\\characters\\_male\\lefthand.nif",
+                    ];
+
+                    let mut parts = Vec::new();
+                    for path in &part_paths {
+                        println!("VFS からアクターパーツ NIF を取得中: {}", path);
+                        match vfs.read(path) {
+                            Ok(bytes) => {
+                                let mut cursor = Cursor::new(bytes);
+                                match NifFile::read(&mut cursor) {
+                                    Ok(nif) => {
+                                        println!(
+                                            "  パーツロード成功: {} (ブロック数: {})",
+                                            path,
+                                            nif.blocks.len()
+                                        );
+                                        parts.push(nif);
+                                    }
+                                    Err(e) => eprintln!("  パーツパースエラー {}: {}", path, e),
+                                }
+                            }
+                            Err(e) => eprintln!("  パーツ読み込みエラー {}: {}", path, e),
+                        }
+                    }
+
+                    // スケルトン NIF の読み込み
+                    let skel_path = "meshes\\characters\\_male\\skeleton.nif";
+                    println!("スケルトン NIF をロード中: {}", skel_path);
+                    let skel_bytes = vfs
+                        .read(skel_path)
+                        .expect("スケルトン NIF の読み込みに失敗しました");
+                    let mut skel_cursor = Cursor::new(skel_bytes);
+                    let skel_nif =
+                        NifFile::read(&mut skel_cursor).expect("スケルトン NIF のパースに失敗しました");
+
+                    let part_refs: Vec<&NifFile> = parts.iter().collect();
+                    let scene = RenderScene::from_actor_parts(
+                        &device, &queue, &context, &skel_nif, &part_refs, &mut vfs,
+                    );
+
+                    let mut physics_world = RapierPhysicsWorld::new();
+                    let col_data = extract_collision_data(&skel_nif);
+                    if !col_data.bodies.is_empty() {
+                        physics_world.add_nif_collision(
+                            &col_data,
+                            glam::Vec3::ZERO,
+                            glam::Quat::IDENTITY,
                         );
                     }
 
@@ -602,6 +692,12 @@ impl ViewerState {
             ViewerTarget::Anim { nif_path, kf_path } => {
                 format!("OpenFallout3 - Anim: {} + {}", nif_path, kf_path)
             }
+            ViewerTarget::Actor {
+                outfit_or_naked,
+                kf_path,
+            } => {
+                format!("OpenFallout3 - Actor: {} + {}", outfit_or_naked, kf_path)
+            }
         };
         window.set_title(&title);
 
@@ -724,17 +820,89 @@ impl ViewerState {
 
         let character_controller = RapierCharacterController::new(spawn_pos);
 
-        // アニメーションモード時: KF + メッシュ NIF + スケルトン NIF をロードして AnimationPlayer を構築
+        // アニメーションモードまたはアクターモード時: KF + スケルトン + パーツ群をロードして AnimationPlayer を構築
         let (
             anim_player,
             anim_kf_nif,
-            anim_mesh_nif,
+            anim_parts,
             anim_skeleton_nif,
             anim_pose,
             anim_bone_world_map,
             anim_bone_name_world_map,
         ) = {
-            if let ViewerTarget::Anim { nif_path, kf_path } = target {
+            if let ViewerTarget::Actor { outfit_or_naked, kf_path } = target {
+                use fo3_render::{recompute_bone_world_maps_with_pose, AnimationClip};
+
+                // 1. KF ファイル読み込み
+                let kf_bytes = vfs
+                    .read(kf_path)
+                    .expect("KF ファイルの読み込みに失敗しました");
+                let mut kf_cursor = Cursor::new(kf_bytes);
+                let kf_nif =
+                    NifFile::read(&mut kf_cursor).expect("KF ファイルのパースに失敗しました");
+                println!("KF パース成功 (ブロック数: {})", kf_nif.blocks.len());
+
+                // 2. スケルトン NIF 読み込み
+                let skel_path = "meshes\\characters\\_male\\skeleton.nif";
+                let skel_bytes = vfs
+                    .read(skel_path)
+                    .expect("スケルトン NIF の読み込みに失敗しました");
+                let mut skel_cursor = Cursor::new(skel_bytes);
+                let skel_nif =
+                    NifFile::read(&mut skel_cursor).expect("スケルトン NIF のパースに失敗しました");
+
+                // 3. 全パーツ NIF 群の読み込み
+                let body_path = if outfit_or_naked.eq_ignore_ascii_case("naked") {
+                    "meshes\\characters\\_male\\upperbody.nif".to_string()
+                } else {
+                    outfit_or_naked.clone()
+                };
+                let part_paths = [
+                    "meshes\\characters\\head\\headhuman.nif",
+                    body_path.as_str(),
+                    "meshes\\characters\\_male\\righthand.nif",
+                    "meshes\\characters\\_male\\lefthand.nif",
+                ];
+                let mut anim_parts = Vec::new();
+                for path in &part_paths {
+                    if let Ok(bytes) = vfs.read(path) {
+                        let mut cursor = Cursor::new(bytes);
+                        if let Ok(nif) = NifFile::read(&mut cursor) {
+                            anim_parts.push(nif);
+                        }
+                    }
+                }
+
+                // 4. 初期ポーズでボーンワールド行列およびボーン名マップを計算
+                let mut bone_world_map = HashMap::new();
+                let mut bone_name_world_map = HashMap::new();
+                let initial_pose = SkeletonPose::default();
+                recompute_bone_world_maps_with_pose(
+                    &skel_nif,
+                    &initial_pose,
+                    &mut bone_world_map,
+                    &mut bone_name_world_map,
+                );
+
+                // AnimationClip を構築して AnimationPlayer を作成
+                let player = AnimationClip::from_kf(&kf_nif).map(|clip| {
+                    println!(
+                        "アクターアニメーションクリップ \"{}\" ロード完了: {:.2}s〜{:.2}s, チャンネル数: {}",
+                        clip.name, clip.start_time, clip.stop_time, clip.channels.len()
+                    );
+                    AnimationPlayer::new(clip)
+                });
+
+                (
+                    player,
+                    Some(kf_nif),
+                    anim_parts,
+                    Some(skel_nif),
+                    initial_pose,
+                    bone_world_map,
+                    bone_name_world_map,
+                )
+            } else if let ViewerTarget::Anim { nif_path, kf_path } = target {
                 use fo3_render::{recompute_bone_world_maps_with_pose, AnimationClip};
 
                 // 1. KF ファイル読み込み
@@ -808,7 +976,7 @@ impl ViewerState {
                 (
                     player,
                     Some(kf_nif),
-                    Some(mesh_nif),
+                    vec![mesh_nif],
                     Some(skel_nif),
                     initial_pose,
                     bone_world_map,
@@ -818,7 +986,7 @@ impl ViewerState {
                 (
                     None,
                     None,
-                    None,
+                    Vec::new(),
                     None,
                     SkeletonPose::default(),
                     HashMap::new(),
@@ -863,7 +1031,7 @@ impl ViewerState {
             last_mouse_pos: None,
             anim_player,
             anim_kf_nif,
-            anim_mesh_nif,
+            anim_parts,
             anim_skeleton_nif,
             anim_pose,
             anim_bone_world_map,
@@ -982,14 +1150,13 @@ impl ViewerState {
             bytemuck::cast_slice(&[light_uniform]),
         );
 
-        // アニメーション更新ループ (Anim モード時)
+        // アニメーション更新ループ (Anim / Actor モード時)
         // 参照元: Gamebryo 2.6 `NiControllerSequence::Update` → `NiSkinInstance::Update`
         // 参照元: `knowledge/actor_and_skin_mesh.md` (セクション 4.4: スケルトン分離とボーン名マッピング)
-        if let (Some(player), Some(kf_nif), Some(skel_nif), Some(mesh_nif)) = (
+        if let (Some(player), Some(kf_nif), Some(skel_nif)) = (
             self.anim_player.as_mut(),
             self.anim_kf_nif.as_ref(),
             self.anim_skeleton_nif.as_ref(),
-            self.anim_mesh_nif.as_ref(),
         ) {
             // 1. アニメーション時刻を進めてボーン姿勢を更新
             player.update(kf_nif, dt, &mut self.anim_pose);
@@ -1002,9 +1169,10 @@ impl ViewerState {
                 &mut self.anim_bone_name_world_map,
             );
 
-            // 3. スキンメッシュの頂点バッファをスケルトンのボーン名ワールド行列で更新
+            // 3. 全パーツスキンメッシュの頂点バッファをスケルトンのボーン名ワールド行列で更新
+            let part_refs: Vec<&NifFile> = self.anim_parts.iter().collect();
             self.scene
-                .update_animated_skins_with_skeleton(&self.device, mesh_nif, &self.anim_bone_name_world_map);
+                .update_animated_skins_multi_parts(&self.device, &part_refs, &self.anim_bone_name_world_map);
         }
     }
 
@@ -1287,6 +1455,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             args[2].clone(),
             ViewerTarget::Anim {
                 nif_path: args[3].clone(),
+                kf_path: args[4].clone(),
+            },
+        )
+    } else if args[1] == "actor" {
+        // actor <DataDir> [naked | outfit_path] <KfPath>
+        if args.len() < 5 {
+            eprintln!("エラー: アクターモードには <DataDir> [naked | outfit_path] <KfPath> が必要です。");
+            eprintln!("例 (素体): cargo run -p fo3_viewer -- actor \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" naked \"meshes\\characters\\_male\\idleanims\\ttnpchappysubtlelistena.kf\"");
+            eprintln!("例 (防具): cargo run -p fo3_viewer -- actor \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" \"meshes\\armor\\wastelandclothing01\\outfitm.nif\" \"meshes\\characters\\_male\\idleanims\\ttnpchappysubtlelistena.kf\"");
+            return Ok(());
+        }
+        (
+            args[2].clone(),
+            ViewerTarget::Actor {
+                outfit_or_naked: args[3].clone(),
                 kf_path: args[4].clone(),
             },
         )

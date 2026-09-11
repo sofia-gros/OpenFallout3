@@ -52,9 +52,11 @@ pub struct RenderMesh {
 pub struct AnimatedSkinMesh {
     /// `RenderScene::meshes` 中の対象 `RenderMesh` インデックス
     pub mesh_index: usize,
-    /// NiTriShapeData ブロックインデックス（NIF 内）
+    /// パーツ NIF のインデックス（単一 NIF 構築時は 0）
+    pub part_index: usize,
+    /// NiTriShapeData ブロックインデックス（該当 NIF 内）
     pub geo_data_block: i32,
-    /// NiSkinInstance ブロックインデックス（NIF 内）
+    /// NiSkinInstance ブロックインデックス（該当 NIF 内）
     pub skin_instance_block: i32,
 }
 
@@ -109,6 +111,7 @@ impl RenderScene {
                 &mut meshes,
                 &mut texture_cache,
                 &mut bone_world_map,
+                None,
                 &default_texture,
                 &default_normal_texture,
                 &default_glow_texture,
@@ -127,6 +130,100 @@ impl RenderScene {
 
         // アニメーション対応スキンメッシュ情報を収集
         let anim_skin_meshes = collect_anim_skin_meshes(nif, &meshes);
+
+        RenderScene {
+            meshes,
+            collision_meshes,
+            bounds_center,
+            bounds_radius,
+            anim_skin_meshes,
+        }
+    }
+
+    /// 複数パーツ NIF とスケルトン NIF からキャラクタ（人型アクター）用 RenderScene を構築する。
+    ///
+    /// Fallout 3 の人型キャラクタは、スケルトン (`skeleton.nif`) に
+    /// 複数のパーツ NIF（頭部 `headhuman.nif`、胴体 `upperbody.nif` / 衣装、右手 `righthand.nif`、左手 `lefthand.nif` 等）を
+    /// 結合（アセンブリ）して構成される。
+    /// 各パーツのスキンメッシュは、スケルトン側の同一ボーン名ノードのワールド変換によって変形される。
+    ///
+    /// 参照元:
+    /// - Gamebryo 2.6 キャラクタパーツ合成 (`NiActorManager` / シーングラフ結合)
+    /// - `knowledge/actor_and_skin_mesh.md` (セクション 4.4, 4.5)
+    pub fn from_actor_parts(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        context: &RenderContext,
+        skeleton_nif: &NifFile,
+        parts: &[&NifFile],
+        vfs: &mut VfsManager,
+    ) -> Self {
+        let mut meshes = Vec::new();
+        let mut texture_cache: HashMap<String, GpuTexture> = HashMap::new();
+        let default_texture = GpuTexture::create_default_white(device, queue);
+        let default_normal_texture = GpuTexture::create_default_normal(device, queue);
+        let default_glow_texture = GpuTexture::create_default_black(device, queue);
+
+        // 1. スケルトンの初期姿勢（T-Pose）におけるボーン名ワールド変換マップを構築
+        let mut skel_bone_world_map = HashMap::new();
+        let mut skel_bone_name_world_map = HashMap::new();
+        let initial_pose = crate::animation::SkeletonPose::default();
+        crate::recompute_bone_world_maps_with_pose(
+            skeleton_nif,
+            &initial_pose,
+            &mut skel_bone_world_map,
+            &mut skel_bone_name_world_map,
+        );
+
+        let mut anim_skin_meshes = Vec::new();
+
+        // 2. 各パーツ NIF のメッシュを走査・生成
+        for (part_idx, part_nif) in parts.iter().enumerate() {
+            if part_nif.blocks.is_empty() {
+                continue;
+            }
+            let mesh_offset = meshes.len();
+            let mut part_bone_world_map = HashMap::new();
+            let root_transform = NiTransform::default();
+
+            // パーツ自身のローカルボーンマップも収集（フォールバック用）
+            collect_bone_world_transforms(0, &root_transform, part_nif, &mut part_bone_world_map);
+
+            // スケルトンのボーン名マップを優先して初期スキニング
+            traverse_block(
+                0,
+                &root_transform,
+                None,
+                None,
+                part_nif,
+                vfs,
+                device,
+                queue,
+                context,
+                &mut meshes,
+                &mut texture_cache,
+                &mut part_bone_world_map,
+                Some(&skel_bone_name_world_map),
+                &default_texture,
+                &default_normal_texture,
+                &default_glow_texture,
+            );
+
+            // このパーツのスキンメッシュ情報を収集
+            let part_anim_skins = collect_anim_skin_meshes_for_part(part_idx, mesh_offset, part_nif, &meshes);
+            anim_skin_meshes.extend(part_anim_skins);
+        }
+
+        // コリジョンワイヤーフレームの抽出（スケルトンから）
+        let mut collision_meshes = Vec::new();
+        let col_lines = extract_collision_lines(skeleton_nif);
+        let root_transform = NiTransform::default();
+        if let Some(gpu_col) = GpuCollisionMesh::new(device, &context.model_bind_group_layout, &col_lines, &root_transform) {
+            collision_meshes.push(gpu_col);
+        }
+
+        // バウンディング計算（全パーツの AABB 包含）
+        let (bounds_center, bounds_radius) = calculate_scene_bounds_from_parts(parts);
 
         RenderScene {
             meshes,
@@ -421,6 +518,7 @@ impl RenderScene {
                         &mut meshes,
                         &mut texture_cache,
                         &mut bone_world_map,
+                        None,
                         &default_texture,
                         &default_normal_texture,
                         &default_glow_texture,
@@ -550,6 +648,7 @@ fn traverse_block(
     out_meshes: &mut Vec<RenderMesh>,
     texture_cache: &mut HashMap<String, GpuTexture>,
     bone_world_map: &mut HashMap<i32, Mat4>,
+    skeleton_bone_name_map: Option<&HashMap<String, Mat4>>,
     default_texture: &GpuTexture,
     default_normal_texture: &GpuTexture,
     default_glow_texture: &GpuTexture,
@@ -585,6 +684,7 @@ fn traverse_block(
                     out_meshes,
                     texture_cache,
                     bone_world_map,
+                    skeleton_bone_name_map,
                     default_texture,
                     default_normal_texture,
                     default_glow_texture,
@@ -615,6 +715,7 @@ fn traverse_block(
                     out_meshes,
                     texture_cache,
                     bone_world_map,
+                    skeleton_bone_name_map,
                     default_texture,
                     default_normal_texture,
                     default_glow_texture,
@@ -647,8 +748,12 @@ fn traverse_block(
                                 _ => None,
                             };
                             if let Some(inst) = skin_inst_ref {
-                                // NiSkinInstance.bones から各ボーンのワールド行列を解決
-                                let bone_transforms = resolve_bone_world_transforms(inst, bone_world_map);
+                                // スケルトンボーン名マップが指定されていれば優先引き当て、なければローカル block_index で解決
+                                let bone_transforms = if let Some(name_map) = skeleton_bone_name_map {
+                                    resolve_bone_world_transforms_by_name(inst, nif, name_map, Some(bone_world_map))
+                                } else {
+                                    resolve_bone_world_transforms(inst, bone_world_map)
+                                };
                                 let bone_refs = if bone_transforms.is_empty() {
                                     None
                                 } else {
@@ -963,7 +1068,37 @@ pub fn resolve_bone_world_transforms(
 ///
 /// 参照元: Gamebryo 2.6 `NiSkinInstance::Update`
 fn collect_anim_skin_meshes(nif: &NifFile, meshes: &[RenderMesh]) -> Vec<AnimatedSkinMesh> {
+    collect_anim_skin_meshes_for_part(0, 0, nif, meshes)
+}
+
+/// マルチパーツ構成向けに、特定パーツ NIF のスキンメッシュ情報を収集する。
+///
+/// `mesh_offset` 以降に追加された `RenderMesh` の中から該当 NIF のブロックに対応するものを検出し、
+/// パーツインデックス `part_index` を保持した `AnimatedSkinMesh` を構築する。
+fn collect_anim_skin_meshes_for_part(
+    part_index: usize,
+    mesh_offset: usize,
+    nif: &NifFile,
+    meshes: &[RenderMesh],
+) -> Vec<AnimatedSkinMesh> {
+    let mesh_names: Vec<&str> = meshes.iter().map(|m| m.name.as_str()).collect();
+    collect_anim_skin_meshes_for_names(part_index, mesh_offset, nif, &mesh_names)
+}
+
+/// メッシュ名リストから、該当 NIF に対応するスキンメッシュ情報を収集する。
+pub fn collect_anim_skin_meshes_for_names(
+    part_index: usize,
+    mesh_offset: usize,
+    nif: &NifFile,
+    mesh_names: &[&str],
+) -> Vec<AnimatedSkinMesh> {
     let mut result = Vec::new();
+    let relevant_names = if mesh_offset < mesh_names.len() {
+        &mesh_names[mesh_offset..]
+    } else {
+        &[]
+    };
+
     for (block_idx, block) in nif.blocks.iter().enumerate() {
         let NifBlock::NiTriShape(shape) = block else { continue };
         let skin_inst_block = shape.geom.skin_instance;
@@ -974,12 +1109,13 @@ fn collect_anim_skin_meshes(nif: &NifFile, meshes: &[RenderMesh]) -> Vec<Animate
         // NIF ブロック名でメッシュを検索
         let mesh_name = nif.get_string(shape.geom.av.net.name_index).unwrap_or("");
         let block_hint = block_idx.to_string();
-        // meshes 内で対応する RenderMesh を探す（名前一致 or ブロックインデックス含む）
-        if let Some(mesh_index) = meshes.iter().position(|m| {
-            m.name == mesh_name || m.name.contains(&block_hint)
+        // relevant_names 内で対応する RenderMesh 名を探す（名前一致 or ブロックインデックス含む）
+        if let Some(pos) = relevant_names.iter().position(|name| {
+            *name == mesh_name || name.contains(&block_hint)
         }) {
             result.push(AnimatedSkinMesh {
-                mesh_index,
+                mesh_index: mesh_offset + pos,
+                part_index,
                 geo_data_block,
                 skin_instance_block: skin_inst_block,
             });
@@ -1030,23 +1166,25 @@ impl RenderScene {
         }
     }
 
-    /// スケルトン側のボーン名ワールド行列を用いて、パーツメッシュ NIF の全スキンメッシュの頂点バッファを更新する。
+    /// マルチパーツ構成のアクターに対し、スケルトンのボーン名ワールド行列を用いて全スキンメッシュの頂点バッファを更新する。
     ///
-    /// キャラクタの衣装やボディパーツ（`upperbody.nif` 等）は、スケルトン NIF（`skeleton.nif`）で計算された
-    /// 各ボーンノードのワールド変換をボーン名で引き当てて変形する。
+    /// キャラクタ（NPC）を構成する各パーツ（頭部、胴体、防具、手など）のスキンメッシュは、
+    /// スケルトン NIF（`skeleton.nif`）で計算された各ボーンノードのワールド変換をボーン名で引き当てて変形する。
     ///
     /// 参照元:
-    /// - Gamebryo 2.6 `NiSkinInstance::Update`
+    /// - Gamebryo 2.6 `NiSkinInstance::Update`（毎フレームの変形計算）
     /// - `knowledge/actor_and_skin_mesh.md` (セクション 4.4: スケルトン分離とボーン名マッピング)
-    pub fn update_animated_skins_with_skeleton(
+    pub fn update_animated_skins_multi_parts(
         &mut self,
         device: &wgpu::Device,
-        mesh_nif: &NifFile,
+        parts: &[&NifFile],
         bone_name_world_map: &HashMap<String, Mat4>,
     ) {
         for anim in &self.anim_skin_meshes {
             let mesh_index = anim.mesh_index;
             if mesh_index >= self.meshes.len() { continue; }
+            if anim.part_index >= parts.len() { continue; }
+            let mesh_nif = parts[anim.part_index];
 
             // NiTriShapeData を解決
             let geo_data_block = anim.geo_data_block as usize;
@@ -1069,6 +1207,20 @@ impl RenderScene {
                 self.meshes[mesh_index].mesh.update_skinned_vertices(device, geo_data, &positions, &normals);
             }
         }
+    }
+
+    /// スケルトン側のボーン名ワールド行列を用いて、単一パーツメッシュ NIF の全スキンメッシュの頂点バッファを更新する。
+    ///
+    /// 参照元:
+    /// - Gamebryo 2.6 `NiSkinInstance::Update`
+    /// - `knowledge/actor_and_skin_mesh.md` (セクション 4.4: スケルトン分離とボーン名マッピング)
+    pub fn update_animated_skins_with_skeleton(
+        &mut self,
+        device: &wgpu::Device,
+        mesh_nif: &NifFile,
+        bone_name_world_map: &HashMap<String, Mat4>,
+    ) {
+        self.update_animated_skins_multi_parts(device, &[mesh_nif], bone_name_world_map);
     }
 }
 
@@ -1344,6 +1496,45 @@ fn calculate_scene_bounds(nif: &NifFile) -> (Vec3, f32) {
                 }
             }
             _ => {}
+        }
+    }
+
+    if !found {
+        return (Vec3::ZERO, 50.0);
+    }
+
+    let center = (min + max) * 0.5;
+    let radius = (max - min).length() * 0.5;
+    (center, radius.max(10.0))
+}
+
+/// 複数パーツ NIF のメッシュ頂点群を包含するバウンディング中心と半径を計算する。
+fn calculate_scene_bounds_from_parts(parts: &[&NifFile]) -> (Vec3, f32) {
+    let mut min = Vec3::splat(f32::MAX);
+    let mut max = Vec3::splat(f32::MIN);
+    let mut found = false;
+
+    for nif in parts {
+        for block in &nif.blocks {
+            match block {
+                NifBlock::NiTriShapeData(d) => {
+                    for v in &d.common.vertices {
+                        let p = Vec3::new(v.x, v.y, v.z);
+                        min = min.min(p);
+                        max = max.max(p);
+                        found = true;
+                    }
+                }
+                NifBlock::NiTriStripsData(d) => {
+                    for v in &d.common.vertices {
+                        let p = Vec3::new(v.x, v.y, v.z);
+                        min = min.min(p);
+                        max = max.max(p);
+                        found = true;
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -1887,6 +2078,107 @@ mod tests {
         assert_eq!(is_dismember_hidden(1, &nif), true);
         // スキンインスタンスなし（-1）は非表示にならない
         assert_eq!(is_dismember_hidden(-1, &nif), false);
+    }
+
+    /// `collect_anim_skin_meshes_for_part` が、マルチパーツ構成において各パーツのインデックスと
+    /// オフセットを正しく付与してスキンメッシュを収集することを検証する。
+    #[test]
+    fn test_collect_anim_skin_meshes_for_part() {
+        use fo3_nif::blocks::{BSDismemberSkinInstance, BodyPartList, NiAVObject, NiGeometry, NiObjectNET, NiTriShape, NiTriShapeData};
+        use fo3_nif::header::{BSStreamHeader, ExportString, NifHeader};
+        use fo3_nif::NiSkinInstance;
+        use fo3_nif::{Matrix33, Vector3};
+
+        let dummy_skin = NiSkinInstance {
+            data: 0,
+            skin_partition: 0,
+            skeleton_root: 0,
+            bones: vec![],
+        };
+
+        let normal_bdsi = BSDismemberSkinInstance {
+            skin_instance: dummy_skin,
+            partitions: vec![
+                BodyPartList { part_flag: 0x0101, body_part: 5 },
+            ],
+        };
+
+        let tri_shape = NiTriShape {
+            geom: NiGeometry {
+                av: NiAVObject {
+                    net: NiObjectNET { name_index: 1, extra_data_list: vec![], controller: -1 },
+                    flags: 0,
+                    translation: Vector3 { x: 0.0, y: 0.0, z: 0.0 },
+                    rotation: Matrix33 { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] },
+                    scale: 1.0,
+                    properties: vec![],
+                    collision_object: -1,
+                },
+                data: 1,
+                skin_instance: 2,
+                material_data: fo3_nif::blocks::geometry::MaterialData {
+                    material_names: vec![],
+                    material_extra_data: vec![],
+                    active_material: 0,
+                    material_needs_update: false,
+                },
+            },
+        };
+
+        let dummy_geo_data = NiTriShapeData {
+            common: fo3_nif::blocks::geometry::NiGeometryDataCommon {
+                num_vertices: 0,
+                vertices: vec![],
+                bs_data_flags: 0,
+                normals: vec![],
+                tangents: vec![],
+                bitangents: vec![],
+                bounding_sphere: fo3_nif::types::BoundingSphere {
+                    center: Vector3 { x: 0.0, y: 0.0, z: 0.0 },
+                    radius: 0.0,
+                },
+                vertex_colors: vec![],
+                uv_sets: vec![],
+            },
+            num_triangles: 0,
+            triangles: vec![],
+            match_groups: vec![],
+        };
+
+        let nif = NifFile {
+            header: NifHeader {
+                header_string: "Gamebryo File Format, Version 20.2.0.7\n".to_string(),
+                version: 0x14020007,
+                endian_type: 1,
+                user_version: 11,
+                num_blocks: 0,
+                bs_header: BSStreamHeader {
+                    bs_version: 34,
+                    author: ExportString { value: String::new() },
+                    process_script: None,
+                    export_script: ExportString { value: String::new() },
+                },
+                block_types: vec![],
+                block_type_indices: vec![],
+                block_sizes: vec![],
+                strings: vec![String::new(), "PartMesh".to_string()],
+            },
+            blocks: vec![
+                NifBlock::NiTriShape(tri_shape),
+                NifBlock::NiTriShapeData(dummy_geo_data),
+                NifBlock::BSDismemberSkinInstance(normal_bdsi),
+            ],
+        };
+
+        // メッシュ名配列（オフセット 2）
+        let mesh_names = ["OtherMesh0", "OtherMesh1", "PartMesh"];
+
+        let anims = collect_anim_skin_meshes_for_names(3, 2, &nif, &mesh_names);
+        assert_eq!(anims.len(), 1);
+        assert_eq!(anims[0].mesh_index, 2);
+        assert_eq!(anims[0].part_index, 3);
+        assert_eq!(anims[0].geo_data_block, 1);
+        assert_eq!(anims[0].skin_instance_block, 2);
     }
 }
 

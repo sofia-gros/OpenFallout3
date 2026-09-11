@@ -170,6 +170,28 @@ NiTriShape (メッシュ) ブロックがボーン NiNode ブロックよりフ�
 - **初期表示ルール**:
   - `BSDismemberSkinInstance` を持つメッシュにおいて、全パーティションが `editor_visible == false` であるメッシュノードは通常時非表示（Hidden）としてスキップする。
 
+### 4.6 人型アクターのマルチパーツ構成とアセンブリ (2026-09-11 確定)
+
+**仕様とパーツ構成**:
+Fallout 3 の人型アクター（プレイヤーおよび人型 NPC）は、単一の NIF ファイルではなく、共通スケルトン (`skeleton.nif`) に以下の部位別 NIF をアタッチして 1 体のアクターとして描画する:
+
+1. **頭部（首含む）**: `meshes\characters\head\headhuman.nif`
+   - メッシュ: `HeadMale` (首の付け根から顔・頭部シェル全体)
+   - ボーン: `Bip01 Spine2`, `Bip01 L Clavicle`, `Bip01 R Clavicle`, `Bip01 Neck1`, `Bip01 Head`
+2. **胴体・下半身・下着**:
+   - 素体（裸）: `meshes\characters\_male\upperbody.nif`
+     - メッシュ `Arms:0`: 下着パンツ (`textures\armor\underwear\UnderwearM.dds`)
+     - メッシュ `Arms:1`: 素肌胴体＋太もも・すね・足先 (`textures\characters\male\UpperBodyMale.dds`, Z=0.77〜102.12)
+   - 衣装/防具装備時: 各防具 NIF（例: `meshes\armor\wastelandclothing01\outfitm.nif`）
+3. **手（左右別）**:
+   - 右手: `meshes\characters\_male\righthand.nif` (`RightHand:0`)
+   - 左手: `meshes\characters\_male\lefthand.nif` (`LeftHand:0`)
+
+**アセンブリ・スキニングパイプライン (`RenderScene::from_actor_parts`)**:
+- 共通スケルトン `skeleton.nif` の全階層ボーンのワールド変換行列（`bone_name_world_map: HashMap<String, Mat4>`）を初期姿勢（T-Pose）または FK 更新時に算出。
+- 各パーツ NIF のスキンメッシュは、パーツ NIF 自身のボーンブロックインデックスではなく、スケルトンの `bone_name_world_map` から同名ボーンを引き当ててスキニング頂点変形を行う。
+- これにより、首元や手首の切れ目なくピッタリ結合し、KF アニメーション再生時にも全身が完全に連動して一体として動く。
+
 ---
 
 ## 5. 実装ステータス (2026-09-11 更新)
