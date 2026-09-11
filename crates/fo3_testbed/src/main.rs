@@ -261,6 +261,15 @@ fn dump_nif<R: std::io::BufRead>(reader: &mut R, title: &str) -> Result<(), Box<
                     bdsi.skin_instance.bones.len(),
                     bdsi.partitions.len()
                 );
+                for (pi, p) in bdsi.partitions.iter().enumerate() {
+                    println!(
+                        "          Part [{}]: flag=0x{:04X} (editor_visible={}), body_part={}",
+                        pi,
+                        p.part_flag,
+                        (p.part_flag & 0x0001) != 0,
+                        p.body_part
+                    );
+                }
             }
             NifBlock::NiSkinData(sd) => {
 

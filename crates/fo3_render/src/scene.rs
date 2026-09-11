@@ -625,6 +625,11 @@ fn traverse_block(
             if is_node_hidden(&shape.geom.av, nif) {
                 return;
             }
+            // 四肢切断ゴアメッシュ（全パーティションが editor_visible=false の切断キャップ）は初期状態で非表示
+            // 参照元: references/nifskope/build/nif.xml:L2530, knowledge/actor_and_skin_mesh.md (セクション 4.5)
+            if is_dismember_hidden(shape.geom.skin_instance, nif) {
+                return;
+            }
             let local_transform = to_core_transform(&shape.geom.av);
             let world_transform = parent_world.compose(&local_transform);
             let name = nif.get_string(shape.geom.av.net.name_index).unwrap_or("").to_string();
@@ -963,6 +968,7 @@ fn collect_anim_skin_meshes(nif: &NifFile, meshes: &[RenderMesh]) -> Vec<Animate
         let NifBlock::NiTriShape(shape) = block else { continue };
         let skin_inst_block = shape.geom.skin_instance;
         if skin_inst_block < 0 { continue; }
+        if is_dismember_hidden(skin_inst_block, nif) { continue; }
         let geo_data_block = shape.geom.data;
         if geo_data_block < 0 { continue; }
         // NIF ブロック名でメッシュを検索
@@ -1087,6 +1093,33 @@ fn is_node_hidden(av: &fo3_nif::NiAVObject, nif: &NifFile) -> bool {
         }
     }
 
+    false
+}
+
+/// BSDismemberSkinInstance を持つメッシュが、初期状態（非切断・intact 状態）において非表示であるかを判定する。
+///
+/// Fallout 3 / Gamebryo 2.6 では、手足や首の切断面（ゴア・肉片キャップ）は
+/// `BSDismemberSkinInstance` 内のパーティションフラグ `part_flag` で管理される。
+/// `part_flag & 0x0001 != 0` (`PF_EDITOR_VISIBLE`) を持つパーティションのみが通常時に表示され、
+/// すべてのパーティションで `editor_visible == false` であるメッシュノード（例: `bodycaps`, `limbcaps`, `meatneck01`）は
+/// 肢体切断イベント発生まで非表示（Hidden）として扱われる。
+///
+/// 参照元:
+/// - `references/nifskope/build/nif.xml:L2530-2541` (`BSPartFlag::PF_EDITOR_VISIBLE`, `BodyPartList`)
+/// - `references/bevyout/src/vsa/assets/blender_script.py:L1760-1779` (`prune_hidden_actor_partitions`)
+/// - `knowledge/actor_and_skin_mesh.md` (セクション 4.5)
+fn is_dismember_hidden(skin_instance_block: i32, nif: &NifFile) -> bool {
+    if skin_instance_block < 0 || (skin_instance_block as usize) >= nif.blocks.len() {
+        return false;
+    }
+    if let NifBlock::BSDismemberSkinInstance(ref bdsi) = nif.blocks[skin_instance_block as usize] {
+        if bdsi.partitions.is_empty() {
+            return false;
+        }
+        // 全パーティションが editor_visible == false (切断面ゴアキャップ) であれば通常時は非表示
+        let any_visible = bdsi.partitions.iter().any(|p| (p.part_flag & 0x0001) != 0);
+        return !any_visible;
+    }
     false
 }
 
@@ -1787,6 +1820,73 @@ mod tests {
             resolved[0].transform_point3(Vec3::ZERO),
             Vec3::new(100.0, 200.0, 300.0)
         );
+    }
+
+    /// `is_dismember_hidden` が、全パーティションで `editor_visible == false` (切断面ゴアキャップ) のメッシュを
+    /// 非表示と判定し、`editor_visible == true` を持つ通常メッシュを表示と判定することを検証する。
+    ///
+    /// 参照元: `references/nifskope/build/nif.xml:L2530`, `knowledge/actor_and_skin_mesh.md` (セクション 4.5)
+    #[test]
+    fn test_is_dismember_hidden() {
+        use fo3_nif::blocks::{BSDismemberSkinInstance, BodyPartList};
+        use fo3_nif::NiSkinInstance;
+        use fo3_nif::header::{BSStreamHeader, ExportString, NifHeader};
+
+        let dummy_skin = NiSkinInstance {
+            data: 0,
+            skin_partition: 0,
+            skeleton_root: 0,
+            bones: vec![],
+        };
+
+        // 通常メッシュ: パーティション [0] の flag = 0x0101 (editor_visible = true)
+        let normal_bdsi = BSDismemberSkinInstance {
+            skin_instance: dummy_skin.clone(),
+            partitions: vec![
+                BodyPartList { part_flag: 0x0101, body_part: 5 },
+                BodyPartList { part_flag: 0x0001, body_part: 3 },
+            ],
+        };
+
+        // 切断面ゴアキャップメッシュ: 全パーティションの flag = 0x0100 / 0x0000 (editor_visible = false)
+        let gore_cap_bdsi = BSDismemberSkinInstance {
+            skin_instance: dummy_skin,
+            partitions: vec![
+                BodyPartList { part_flag: 0x0100, body_part: 105 }, // BP_SECTIONCAP_RIGHTARM
+                BodyPartList { part_flag: 0x0000, body_part: 103 }, // BP_SECTIONCAP_LEFTARM
+            ],
+        };
+
+        let nif = NifFile {
+            header: NifHeader {
+                header_string: "Gamebryo File Format, Version 20.2.0.7\n".to_string(),
+                version: 0x14020007,
+                endian_type: 1,
+                user_version: 11,
+                num_blocks: 0,
+                bs_header: BSStreamHeader {
+                    bs_version: 34,
+                    author: ExportString { value: String::new() },
+                    process_script: None,
+                    export_script: ExportString { value: String::new() },
+                },
+                block_types: vec![],
+                block_type_indices: vec![],
+                block_sizes: vec![],
+                strings: vec![],
+            },
+            blocks: vec![
+                NifBlock::BSDismemberSkinInstance(normal_bdsi),
+                NifBlock::BSDismemberSkinInstance(gore_cap_bdsi),
+            ],
+        };
+
+        // 通常メッシュ（ブロック 0）は非表示にならない
+        assert_eq!(is_dismember_hidden(0, &nif), false);
+        // 切断面ゴアキャップ（ブロック 1）は通常時非表示になる
+        assert_eq!(is_dismember_hidden(1, &nif), true);
+        // スキンインスタンスなし（-1）は非表示にならない
+        assert_eq!(is_dismember_hidden(-1, &nif), false);
     }
 }
 

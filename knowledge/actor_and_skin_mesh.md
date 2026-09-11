@@ -156,6 +156,20 @@ NiTriShape (メッシュ) ブロックがボーン NiNode ブロックよりフ�
 
 参照元: Gamebryo 2.6 `NiSkinInstance::Update`, `NiAVObject::UpdateDownwardPass`
 
+### 4.5 四肢切断ゴアメッシュと通常表示判定 (2026-09-11 確定)
+
+**問題**: `upperbody.nif` や各種アクターパーツには、V.A.T.S. や爆発による四肢切断イベント（Dismemberment）発生時にのみ表示される切断面の肉片・骨キャップメッシュ（`bodycaps`, `limbcaps`, `meatneck01`, `meathead01` 等、テクスチャ: `textures\gore\MeatCapGore01.dds`）が同一 NIF 内に同居している。これらを無条件に描画すると、首元や肩・腰・手足の切断面が赤い血肉の塊として露出してしまう。
+
+**仕様と判定基準**:
+- 参照元: `references/nifskope/build/nif.xml:L2530-2541` (`BSPartFlag`, `BodyPartList`), `L1262-1326` (`BSDismemberBodyPartType`)
+- 参照元: `references/bevyout/src/vsa/assets/blender_script.py:L1760-1779` (`partition_is_editor_visible`)
+- `BSDismemberSkinInstance.partitions[i].part_flag`:
+  - ビット 0 (`part_flag & 0x0001 != 0`): `PF_EDITOR_VISIBLE` (通常・エディタ表示フラグ)
+  - `editor_visible == true`: 通常状態（非切断）で表示される正規パーツ（例: `Arms:1` の各パーティションは `0x0101` または `0x0001`）
+  - `editor_visible == false`: 四肢切断時にのみ表示されるゴア・切断面キャップ（例: `bodycaps`, `limbcaps`, `meatneck01`, `meathead01` のパーティションは `0x0100` または `0x0000`、body_part=101, 103, 105 等の `BP_SECTIONCAP_*`）
+- **初期表示ルール**:
+  - `BSDismemberSkinInstance` を持つメッシュにおいて、全パーティションが `editor_visible == false` であるメッシュノードは通常時非表示（Hidden）としてスキップする。
+
 ---
 
 ## 5. 実装ステータス (2026-09-11 更新)
