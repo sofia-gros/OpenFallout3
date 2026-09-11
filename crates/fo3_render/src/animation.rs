@@ -217,13 +217,63 @@ fn evaluate_bspline_channel(
 ///
 /// 参照元:
 /// - `references/nifskope/src/gl/glcontroller.cpp:L789` (`updateTransform`)
+/// 各ボーンのアニメーション上書きトランスフォーム（移動・回転・スケールの独立チャンネル）。
+///
+/// Gamebryo 2.6 では、アニメーションで指定されたチャンネルのみが上書きされ、
+/// 未指定（キーなし、または無効値）のチャンネルは元のバインドポーズの値がそのまま保持される。
+/// 参照元: Gamebryo 2.6 `NiTransformInterpolator::Update`, `NiBSplineCompTransformInterpolator::Update`
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BoneTransformOverride {
+    /// ローカル並進移動（キーが存在する場合のみ）
+    pub translation: Option<Vec3>,
+    /// ローカル回転四元数（キーが存在する場合のみ）
+    pub rotation: Option<Quat>,
+    /// ローカルスケール（キーが存在する場合のみ）
+    pub scale: Option<f32>,
+}
+
+impl BoneTransformOverride {
+    /// バインドポーズの `base` に対して、指定されているチャンネルのみを上書き適用する。
+    pub fn apply_to(&self, mut base: NiTransform) -> NiTransform {
+        if let Some(t) = self.translation {
+            base.translation = t;
+        }
+        if let Some(r) = self.rotation {
+            base.rotation = Mat3::from_quat(r);
+        }
+        if let Some(s) = self.scale {
+            base.scale = s;
+        }
+        base
+    }
+
+    /// 完全な `NiTransform` から `BoneTransformOverride` を構築する。
+    pub fn from_transform(t: NiTransform) -> Self {
+        Self {
+            translation: Some(t.translation),
+            rotation: Some(Quat::from_mat3(&t.rotation)),
+            scale: Some(t.scale),
+        }
+    }
+}
+
+impl From<NiTransform> for BoneTransformOverride {
+    fn from(t: NiTransform) -> Self {
+        Self::from_transform(t)
+    }
+}
+
+/// B-Spline 圧縮トランスフォーム補間子 (`NiBSplineCompTransformInterpolator`) をサンプリングする。
+///
+/// 参照元:
+/// - Gamebryo 2.6 `NiBSplineCompTransformInterpolator::Update`
 /// - `references/nifskope/src/gl/glcontroller.cpp:L676` (`bsplineinterpolate`)
 /// - `references/nifxml/nif.xml:L4141` (`NiBSplineCompTransformInterpolator`)
 fn sample_bspline_transform_interpolator(
     bsp: &NiBSplineCompTransformInterpolator,
     time: f32,
     kf: &NifFile,
-) -> Option<NiTransform> {
+) -> Option<BoneTransformOverride> {
     // スプライン・基底データを解決
     let (spline_idx, basis_idx) = (bsp.spline_data, bsp.basis_data);
     if spline_idx < 0 || basis_idx < 0
@@ -246,19 +296,6 @@ fn sample_bspline_transform_interpolator(
         return None;
     }
 
-    // 基礎姿勢 (NiQuatTransform)
-    let base_trans = if is_valid_float(bsp.transform.translation.x) {
-        bsp.transform.translation.x
-    } else {
-        0.0
-    };
-    let base_rot = bsp.transform.rotation.to_glam();
-    let base_scale = if is_valid_float(bsp.transform.scale) && bsp.transform.scale > 0.001 {
-        bsp.transform.scale
-    } else {
-        1.0
-    };
-
     let degree = 3;
     let span = bsp.stop_time - bsp.start_time;
     let interval = if span > 1e-6 {
@@ -267,9 +304,8 @@ fn sample_bspline_transform_interpolator(
         0.0
     };
 
-    // 各チャンネルを B-Spline 評価 (ハンドル有効時のみ、無効なら基礎値を使用)
-    let mut trans = Vec3::new(base_trans, base_trans, base_trans);
-    if let Some(v) = evaluate_bspline_channel(
+    // 並進移動チャンネル評価 (ハンドル有効時のみ B-Spline 評価、無効なら基礎姿勢から取得、いずれも無効なら None)
+    let trans = if let Some(v) = evaluate_bspline_channel(
         &spline.compact_control_points,
         bsp.translation_handle,
         degree,
@@ -279,21 +315,22 @@ fn sample_bspline_transform_interpolator(
         bsp.translation_half_range,
         bsp.translation_offset,
     ) {
-        trans = Vec3::new(v[0], v[1], v[2]);
+        Some(Vec3::new(v[0], v[1], v[2]))
     } else if is_valid_float(bsp.transform.translation.x)
         && is_valid_float(bsp.transform.translation.y)
         && is_valid_float(bsp.transform.translation.z)
     {
-        // ハンドル無効時は NiQuatTransform の translation を使用
-        trans = Vec3::new(
+        Some(Vec3::new(
             bsp.transform.translation.x,
             bsp.transform.translation.y,
             bsp.transform.translation.z,
-        );
-    }
+        ))
+    } else {
+        None
+    };
 
-    let mut rot = base_rot;
-    if let Some(q) = evaluate_bspline_channel(
+    // 回転チャンネル評価
+    let rot = if let Some(q) = evaluate_bspline_channel(
         &spline.compact_control_points,
         bsp.rotation_handle,
         degree,
@@ -303,11 +340,15 @@ fn sample_bspline_transform_interpolator(
         bsp.rotation_half_range,
         bsp.rotation_offset,
     ) {
-        rot = Quat::from_xyzw(q[1], q[2], q[3], q[0]); // 制御点は (w,x,y,z) 順
-    }
+        Some(Quat::from_xyzw(q[1], q[2], q[3], q[0])) // 制御点は (w,x,y,z) 順
+    } else if is_valid_float(bsp.transform.rotation.w) {
+        Some(bsp.transform.rotation.to_glam())
+    } else {
+        None
+    };
 
-    let mut scale = base_scale;
-    if let Some(s) = evaluate_bspline_channel(
+    // スケールチャンネル評価
+    let scale = if let Some(s) = evaluate_bspline_channel(
         &spline.compact_control_points,
         bsp.scale_handle,
         degree,
@@ -317,14 +358,22 @@ fn sample_bspline_transform_interpolator(
         bsp.scale_half_range,
         bsp.scale_offset,
     ) {
-        scale = s[0];
-    }
+        Some(s[0])
+    } else if is_valid_float(bsp.transform.scale) && bsp.transform.scale > 0.001 {
+        Some(bsp.transform.scale)
+    } else {
+        None
+    };
 
-    Some(NiTransform {
-        rotation: Mat3::from_quat(rot),
-        translation: trans,
-        scale,
-    })
+    if trans.is_none() && rot.is_none() && scale.is_none() {
+        None
+    } else {
+        Some(BoneTransformOverride {
+            translation: trans,
+            rotation: rot,
+            scale,
+        })
+    }
 }
 
 /// 有効な浮動小数点値であるか判定する（#INV_FLT# や 極大値でないか）。
@@ -441,13 +490,13 @@ impl AnimationClip {
         }
     }
 
-    /// 指定ボーンの時刻 `time` におけるローカルトランスフォームを評価する。
+    /// 指定ボーンの時刻 `time` におけるローカルトランスフォーム上書きを評価する。
     pub fn sample_bone_transform(
         &self,
         bone_name: &str,
         time: f32,
         kf: &NifFile,
-    ) -> Option<NiTransform> {
+    ) -> Option<BoneTransformOverride> {
         let channel = self.channels.get(bone_name)?;
         if channel.interpolator_index < 0 || channel.interpolator_index as usize >= kf.blocks.len() {
             return None;
@@ -554,90 +603,103 @@ fn sample_transform_interpolator(
     interp: &NiTransformInterpolator,
     time: f32,
     kf: &NifFile,
-) -> Option<NiTransform> {
-    // 基礎トランスフォーム
-    let mut trans = if is_valid_float(interp.transform.translation.x) {
-        Vec3::new(
-            interp.transform.translation.x,
-            interp.transform.translation.y,
-            interp.transform.translation.z,
-        )
-    } else {
-        Vec3::ZERO
-    };
-
-    let mut rot = if is_valid_float(interp.transform.rotation.w) {
-        interp.transform.rotation.to_glam()
-    } else {
-        Quat::IDENTITY
-    };
-
-    let mut scale = if is_valid_float(interp.transform.scale) && interp.transform.scale > 0.001 {
-        interp.transform.scale
-    } else {
-        1.0
-    };
+) -> Option<BoneTransformOverride> {
+    let mut trans = None;
+    let mut rot = None;
+    let mut scale = None;
 
     // キーフレームデータがある場合は上書きサンプリング
     if interp.data >= 0 && (interp.data as usize) < kf.blocks.len() {
         if let NifBlock::NiTransformData(data) = &kf.blocks[interp.data as usize] {
             // 回転サンプリング
             if let Some(sampled_rot) = sample_quaternion(&data.quaternion_keys, time) {
-                rot = sampled_rot;
+                rot = Some(sampled_rot);
             }
             // 移動サンプリング
             if let Some(sampled_trans) = sample_vector3(&data.translations, time) {
-                trans = sampled_trans;
+                trans = Some(sampled_trans);
             }
             // スケールサンプリング
             if let Some(sampled_scale) = sample_float(&data.scales, time) {
-                scale = sampled_scale;
+                scale = Some(sampled_scale);
             }
         }
     }
 
-    Some(NiTransform {
-        rotation: Mat3::from_quat(rot),
-        translation: trans,
-        scale,
-    })
+    // キーフレームデータ未定義時は基礎姿勢からフォールバック
+    if trans.is_none()
+        && is_valid_float(interp.transform.translation.x)
+        && is_valid_float(interp.transform.translation.y)
+        && is_valid_float(interp.transform.translation.z)
+    {
+        trans = Some(Vec3::new(
+            interp.transform.translation.x,
+            interp.transform.translation.y,
+            interp.transform.translation.z,
+        ));
+    }
+
+    if rot.is_none() && is_valid_float(interp.transform.rotation.w) {
+        rot = Some(interp.transform.rotation.to_glam());
+    }
+
+    if scale.is_none() && is_valid_float(interp.transform.scale) && interp.transform.scale > 0.001 {
+        scale = Some(interp.transform.scale);
+    }
+
+    if trans.is_none() && rot.is_none() && scale.is_none() {
+        None
+    } else {
+        Some(BoneTransformOverride {
+            translation: trans,
+            rotation: rot,
+            scale,
+        })
+    }
 }
 
-/// `NiQuatTransform` から `NiTransform` を抽出する。
-fn sample_quat_transform(qt: &NiQuatTransform) -> Option<NiTransform> {
-    let trans = if is_valid_float(qt.translation.x) {
-        Vec3::new(qt.translation.x, qt.translation.y, qt.translation.z)
+/// `NiQuatTransform` から `BoneTransformOverride` を抽出する。
+fn sample_quat_transform(qt: &NiQuatTransform) -> Option<BoneTransformOverride> {
+    let trans = if is_valid_float(qt.translation.x)
+        && is_valid_float(qt.translation.y)
+        && is_valid_float(qt.translation.z)
+    {
+        Some(Vec3::new(qt.translation.x, qt.translation.y, qt.translation.z))
     } else {
-        Vec3::ZERO
+        None
     };
 
     let rot = if is_valid_float(qt.rotation.w) {
-        qt.rotation.to_glam()
+        Some(qt.rotation.to_glam())
     } else {
-        Quat::IDENTITY
+        None
     };
 
     let scale = if is_valid_float(qt.scale) && qt.scale > 0.001 {
-        qt.scale
+        Some(qt.scale)
     } else {
-        1.0
+        None
     };
 
-    Some(NiTransform {
-        rotation: Mat3::from_quat(rot),
-        translation: trans,
-        scale,
-    })
+    if trans.is_none() && rot.is_none() && scale.is_none() {
+        None
+    } else {
+        Some(BoneTransformOverride {
+            translation: trans,
+            rotation: rot,
+            scale,
+        })
+    }
 }
 
 /// 各ボーンのローカルトランスフォーム（バインドポーズからの偏差）を保持する姿勢。
 ///
 /// `NiAnimEvaluator` で各ボーンに設定された値を基準とし、アニメーションで
-/// 上書きされるボーンのみローカル変換を差し替える。
+/// 上書きされるチャンネル（並進・回転・スケール）のみローカル変換を差し替える。
 #[derive(Clone, Debug, Default)]
 pub struct SkeletonPose {
-    /// ノード名 → ローカルトランスフォーム（バインドポーズに対する上書き値）
-    pub overrides: HashMap<String, NiTransform>,
+    /// ノード名 → チャンネル別上書きトランスフォーム
+    pub overrides: HashMap<String, BoneTransformOverride>,
 }
 
 /// `NiControllerSequence` のボーン適用ループ。
@@ -777,8 +839,8 @@ mod tests {
 
         assert_eq!(updated, vec!["Bip01".to_string()]);
         let t = pose.overrides.get("Bip01").expect("Bip01 should be overridden");
-        assert_eq!(t.translation, Vec3::new(5.0, 6.0, 7.0));
-        assert_eq!(t.scale, 1.0);
+        assert_eq!(t.translation, Some(Vec3::new(5.0, 6.0, 7.0)));
+        assert_eq!(t.scale, Some(1.0));
     }
 
     /// `AnimationClip::evaluate_time` が CycleType に応じてシーケンス内時間を正しく

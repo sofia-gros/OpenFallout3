@@ -23,6 +23,7 @@ struct ModelUniform {
     world: mat4x4<f32>,
     specular_color: vec4<f32>,
     emissive_color: vec4<f32>,
+    tint_color: vec4<f32>,
     alpha_test: u32,
     alpha_test_func: u32,
     alpha_threshold: f32,
@@ -88,7 +89,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let tex_color = textureSample(t_diffuse, s_diffuse, in.uv);
-    let base_color = tex_color * in.color;
+    let base_color = tex_color * in.color * model.tint_color;
 
     // アルファテスト (NiAlphaProperty の動的カットアウト判定)
     // 参照元: references/nifskope/build/nif.xml:L1518, references/nifskope/src/gl/glproperty.cpp:L204-237

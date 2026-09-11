@@ -20,6 +20,9 @@ pub struct ModelUniform {
     pub specular_color: [f32; 4],
     /// 自己発光色 (RGB) および発光乗算係数 (W: emissive_mult, 16バイト)
     pub emissive_color: [f32; 4],
+    /// ティント色 (RGB) および乗算有効度 (W: 1.0=有効, 16バイト)
+    /// 髪色 (HCLR) や瞳色等の乗算カラー。デフォルトは [1.0, 1.0, 1.0, 1.0]
+    pub tint_color: [f32; 4],
     /// アルファテスト有効化フラグ (0: 無効, 1: 有効)
     pub alpha_test: u32,
     /// アルファテスト比較関数 (0..7: TestFunction)
@@ -31,12 +34,23 @@ pub struct ModelUniform {
 }
 
 impl ModelUniform {
-    /// ワールド変換行列、NiAlphaProperty、NiMaterialProperty から ModelUniform を構築する。
+    /// ワールド変換行列、NiAlphaProperty、NiMaterialProperty から ModelUniform を構築する（ティントなし）。
     pub fn new(
         world_mat: glam::Mat4,
         alpha_prop: Option<&fo3_nif::NiAlphaProperty>,
         material_prop: Option<&fo3_nif::NiMaterialProperty>,
         has_glow_map: bool,
+    ) -> Self {
+        Self::new_with_tint(world_mat, alpha_prop, material_prop, has_glow_map, [1.0, 1.0, 1.0, 1.0])
+    }
+
+    /// ワールド変換行列、NiAlphaProperty、NiMaterialProperty、およびティントカラーから ModelUniform を構築する。
+    pub fn new_with_tint(
+        world_mat: glam::Mat4,
+        alpha_prop: Option<&fo3_nif::NiAlphaProperty>,
+        material_prop: Option<&fo3_nif::NiMaterialProperty>,
+        has_glow_map: bool,
+        tint_color: [f32; 4],
     ) -> Self {
         let (alpha_test, alpha_test_func, alpha_threshold) = if let Some(alpha) = alpha_prop {
             if alpha.is_test_enabled() {
@@ -71,6 +85,7 @@ impl ModelUniform {
             world: world_mat.to_cols_array(),
             specular_color,
             emissive_color,
+            tint_color,
             alpha_test,
             alpha_test_func,
             alpha_threshold,

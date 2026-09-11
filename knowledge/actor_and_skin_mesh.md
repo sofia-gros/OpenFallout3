@@ -227,9 +227,67 @@ Fallout 3 の頭部（`headhuman.nif`）は外皮（顔・頭皮・耳・首）�
 4. **独立アイドルアニメーション再生**:
    - 各アクターインスタンスが独立した `AnimationPlayer` を保持し、セル内の複数 NPC が同時に自然なアイドル動作を継続。
 
+### 4.9 剛体ヘッドパーツ（髪・目・口）の 90度回転原因と補正トランスフォーム
+
+1. **現象と原因**:
+   - `Bip01 Head` ボーン（3ds Max Biped スケルトン）のローカル座標系は、長手方向（頭の垂直軸）が $X$ 軸、前面が $Y$ 軸、左右が $-Z$ 軸という 90度回転した軸配置になっている。
+   - 一方、剛体ヘッドパーツ（髪 `hair*.nif`、目 `eye*.nif`、歯 `teeth*.nif`、舌 `tongue*.nif`）のメッシュ頂点は、すべて頭部中心原点 $(0, 0, 0)$ に対し、$Z$ 軸が上、$Y$ 軸が前、$X$ 軸が右という正立頭部空間で定義されている。
+   - `eyelefthuman.nif` 等の NIF ルートノード（Block 0）には、この Biped Head 座標系から正立頭部空間へ変換する逆回転行列 $R_{\text{head\_to\_up}} = \begin{bmatrix} 0 & 0 & 1 \\ 0 & 1 & 0 \\ -1 & 0 & 0 \end{bmatrix}$ が記録されている。
+   - しかし、コード側で NIF ルートノードの階層トランスフォームを無視し、子シェイプのローカル行列のみを取得していたこと、および `Hair` NIF のようにルートが単位行列であるパーツに対して $R_{\text{head\_to\_up}}$ を適用していなかったことにより、ボーンの 90度回転が直接頂点に作用して横倒しになっていた。
+
+2. **Gamebryo 2.6 アタッチメント合成仕様**:
+   - `Bip01 Head` に剛体アタッチするパーツのワールド変換行列 $M_{\text{rigid}}$ は以下で計算される:
+     $$M_{\text{rigid}} = M_{\text{actor}} \cdot M_{\text{bone}} \cdot M_{\text{align}} \cdot M_{\text{nif\_local}}$$
+     ここで $M_{\text{align}}$ は、パーツのルートノードに $R_{\text{head\_to\_up}}$ が既に含まれている場合は単位行列、含まれていない場合（または頭部空間正立メッシュ）は $R_{\text{head\_to\_up}}$ を適用して姿勢を整合させる。
+     これにより、頭部の首振り・傾き・アイドルアニメーションに対して、髪・目・歯・舌が一切ずれずに完全に追従する。
+
+### 4.10 NPC のインベントリ (CNTO) による防具・衣装解決仕様
+
+1. **Fallout 3 ESM における NPC 装備の一次構造**:
+   - 参照元: `references/openmw/components/esm4/loadnpc.cpp:60`, `inventory.hpp:47`
+   - `NPC_` レコードにおいて、`DOFT`（Default Outfit）や `WNAM`（Default Armor）が指定されていない NPC（Colin Moriarty, Nova, Gob 等）は、インベントリ `CNTO`（Container Item）サブレコード群を所持している。
+   - `CNTO` サブレコードのバイナリレイアウト (8 bytes):
+     - `item`: `FormId` (4 bytes, little-endian)
+     - `count`: `u32` (4 bytes, little-endian)
+2. **装備防具の優先解決順序**:
+   1. `DOFT`（Default Outfit レコード → `INAM` アイテムリスト中の `ARMO`）
+   2. `WNAM`（直接指定の標準防具 `ARMO`）
+   3. `CNTO`（所持品リストの中で、`ARMO` レコードに該当するアイテムの先頭）
+   4. フォールバック: 素体（男性: `_male/upperbody.nif`, 女性: `_female/upperbody.nif`）
+
+### 4.11 Bip01 NonAccum ルートモーション蓄積と FK 高さ二重加算防止
+
+1. **バグの根本原因**:
+   - Fallout 3 のスケルトン（`skeleton.nif`）では、腰のバインドポーズの高さ $Z \approx 67.77$ が親ノード `Bip01` の translation に格納されており、その子である `Bip01 NonAccum` は単位変換 $(0, 0, 0)$ を持つ。
+   - 一方、アニメーションファイル（KF）では、腰のワールド/キャラクタールート空間からの絶対移動量（例: $Z \approx 66.33$）が直接 `Bip01 NonAccum` の translation トラックに記録されている。
+   - 通常の FK（順運動学）再帰計算で親のバインドポーズ translation（67.77）と子の KF translation（66.33）を加算すると、$Z = 134.10$ に跳ね上がり、腰・腕・頭部など上半身全体が空中に浮遊し、地面に残った下半身メッシュと引き裂かれる。
+2. **Gamebryo 2.6 ルートモーション蓄積仕様**:
+   - `Bip01` は蓄積ルート（Accumulation Root）であり、アニメーション再生中、`Bip01 NonAccum` が移動トラックを持つ場合は `Bip01` の translation は $(0, 0, 0)$（ゼロリセット）として処理される。
+   - これにより、腰（`Bip01 Pelvis`）の高さは KF の $Z = 66.33$ に正確に収まり、頭部（$Z \approx 111.4$）、手先（$Z \approx 64.7$）が地面基準の完璧な人間プロポーションで整合する。
+
+### 4.12 スキンメッシュと剛体パーツの正確な 1:1 マッピング（曖昧名前検索の廃止）
+
+1. **名前検索（`position`）の破綻原因**:
+   - `upperbody.nif` の `Arms:0` / `Arms:1` や、同一メッシュ名・空文字列 `""` を持つ複数のシェイプが存在する場合、`collect_anim_skin_meshes_for_names` での `position(|name| *name == mesh_name)` による名前逆引きは常に先頭のインデックスにマッチする。
+   - その結果、2つ目以降のシェイプが `AnimatedSkinMesh` に登録されず、初期の T ポーズのまま放置され、Tポーズの腕とアニメーション中の身体が二重描画・浮遊する。
+2. **シーングラフ走査（`traverse_block`）時のダイレクト登録**:
+   - メッシュ生成直後に、生成された `mesh_index` と NIF の `skin_instance` / `geo_data` を直接 1:1 で `AnimatedSkinMesh` / `AnimatedRigidMesh` へ登録し、名前による曖昧な検索を完全に廃止する。
+
+### 4.13 NPC の頭部・髪型・種族の多様化仕様
+
+1. **種族別頭部メッシュ解決**:
+   - `NPC_` の `RNAM`（Race FormID）を判定。
+   - グール（`GhoulRace`: `0x00003B3E` 等）の場合は `meshes\characters\head\headghoul.nif` を適用。
+   - 通常人間は `meshes\characters\head\headhuman.nif` を適用。
+2. **髪型モデル（HNAM）の解決**:
+   - 各 NPC の `HNAM` から対応する `HAIR` レコードのモデルパス（例: `HairMessy02`, `HairMessy03F`, `HairGhoul01` 等）をロード。
+3. **性別別手メッシュの適用**:
+   - 女性（`is_female == true`）: `femalerighthand.nif` / `femalelefthand.nif`
+   - 男性（`is_female == false`）: `righthand.nif` / `lefthand.nif`
+
 ---
 
-## 5. 実装ステータス (2026-09-11 更新)
+## 5. 実装ステータス (2026-09-12 更新)
 
 | 項目 | 状態 |
 |---|---|

@@ -6,11 +6,25 @@
 use std::io;
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
-use crate::types::{FormId, FourCC, ObjectBounds, SUB_DOFT, SUB_EDID, SUB_FULL, SUB_HNAM, SUB_OBND};
+use crate::types::{
+    FormId, FourCC, ObjectBounds, SUB_CNTO, SUB_DOFT, SUB_EDID, SUB_ENAM, SUB_FULL, SUB_HCLR,
+    SUB_HNAM, SUB_OBND,
+};
 
 pub const SUB_ACBS: FourCC = FourCC(*b"ACBS");
 pub const SUB_RNAM: FourCC = FourCC(*b"RNAM");
 pub const SUB_WNAM: FourCC = FourCC(*b"WNAM");
+
+/// NPC / コンテナ所持アイテムエントリ (CNTO)。
+///
+/// 参照元: `references/openmw/components/esm4/inventory.hpp:47`
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InventoryItem {
+    /// アイテムの FormID (ARMO, WEAP, MISC 等)
+    pub item: FormId,
+    /// 個数
+    pub count: u32,
+}
 
 /// NPC 定義レコード (NPC_)。
 #[derive(Clone, Debug, PartialEq)]
@@ -32,6 +46,14 @@ pub struct NpcRecord {
     pub default_outfit: Option<FormId>,
     /// 髪型 FormID (HNAM)
     pub hair: Option<FormId>,
+    /// 髪色 RGBA (HCLR: 先頭 3 バイトが RGB)
+    /// 参照元: `references/openmw/components/esm4/loadnpc.cpp:L180-188`
+    pub hair_color: Option<[u8; 3]>,
+    /// 目の FormID (ENAM)
+    /// 参照元: `references/openmw/components/esm4/loadnpc.cpp:L93-95`
+    pub eyes: Option<FormId>,
+    /// 所持品インベントリリスト (CNTO)
+    pub inventory: Vec<InventoryItem>,
 }
 
 impl NpcRecord {
@@ -44,6 +66,9 @@ impl NpcRecord {
         let mut default_armor = None;
         let mut default_outfit = None;
         let mut hair = None;
+        let mut hair_color = None;
+        let mut eyes = None;
+        let mut inventory = Vec::new();
 
         for sub in subrecords {
             match sub.type_id {
@@ -91,6 +116,37 @@ impl NpcRecord {
                         hair = Some(id);
                     }
                 }
+                SUB_ENAM => {
+                    if let Ok(id) = sub.as_form_id() {
+                        eyes = Some(id);
+                    }
+                }
+                SUB_HCLR => {
+                    // HCLR: RGB + custom (4 bytes)
+                    // 参照元: references/openmw/components/esm4/loadnpc.cpp:L180-188
+                    if sub.data.len() >= 3 {
+                        hair_color = Some([sub.data[0], sub.data[1], sub.data[2]]);
+                    }
+                }
+                SUB_CNTO => {
+                    // CNTO: item FormID (4 bytes) + count (4 bytes)
+                    // 参照元: references/openmw/components/esm4/loadnpc.cpp:60
+                    if sub.data.len() >= 8 {
+                        let item = FormId(u32::from_le_bytes([
+                            sub.data[0],
+                            sub.data[1],
+                            sub.data[2],
+                            sub.data[3],
+                        ]));
+                        let count = u32::from_le_bytes([
+                            sub.data[4],
+                            sub.data[5],
+                            sub.data[6],
+                            sub.data[7],
+                        ]);
+                        inventory.push(InventoryItem { item, count });
+                    }
+                }
                 _ => {}
             }
         }
@@ -105,6 +161,9 @@ impl NpcRecord {
             default_armor,
             default_outfit,
             hair,
+            hair_color,
+            eyes,
+            inventory,
         })
     }
 }
@@ -144,6 +203,10 @@ mod tests {
                 type_id: SUB_HNAM,
                 data: 0x00033333u32.to_le_bytes().to_vec(),
             },
+            Subrecord {
+                type_id: crate::types::SUB_CNTO,
+                data: [0x44, 0x44, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00].to_vec(),
+            },
         ];
 
         let npc = NpcRecord::from_record(&header, &subrecords).unwrap();
@@ -151,6 +214,9 @@ mod tests {
         assert!(npc.is_female);
         assert_eq!(npc.default_outfit, Some(FormId(0x00022222)));
         assert_eq!(npc.hair, Some(FormId(0x00033333)));
+        assert_eq!(npc.inventory.len(), 1);
+        assert_eq!(npc.inventory[0].item, FormId(0x00044444));
+        assert_eq!(npc.inventory[0].count, 1);
     }
 
     #[test]

@@ -12,13 +12,13 @@ use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::header::{GroupHeader, RecordHeader};
 use crate::records::{
-    ArmorRecord, CellRecord, HairRecord, LandRecord, LightRecord, LtexRecord, NpcRecord, OtftRecord,
+    ArmorRecord, CellRecord, HairRecord, LandRecord, LightRecord, LtexRecord, LvliRecord, NpcRecord, OtftRecord,
     RefrRecord, StatRecord, Tes4Header, TextureSetRecord, WorldRecord,
 };
 use crate::subrecord::{parse_subrecords, Subrecord};
 use crate::types::{
     FormId, FourCC, REC_ACHR, REC_ACRE, REC_ACTI, REC_ALCH, REC_AMMO, REC_ARMO, REC_BOOK, REC_CELL,
-    REC_CONT, REC_DOOR, REC_FURN, REC_HAIR, REC_KEYM, REC_LAND, REC_LIGH, REC_LTEX, REC_MISC,
+    REC_CONT, REC_DOOR, REC_FURN, REC_HAIR, REC_KEYM, REC_LAND, REC_LIGH, REC_LTEX, REC_LVLI, REC_MISC,
     REC_MSTT, REC_NPC_, REC_OTFT, REC_REFR, REC_SCOL, REC_STAT, REC_TERM, REC_TES4, REC_TXST,
     REC_WEAP, REC_WRLD, SUB_EDID, SUB_MODL,
 };
@@ -464,11 +464,13 @@ impl<R: Read + Seek> EsmReader<R> {
         HashMap<FormId, ArmorRecord>,
         HashMap<FormId, OtftRecord>,
         HashMap<FormId, HairRecord>,
+        HashMap<FormId, LvliRecord>,
     )> {
         let mut npcs = HashMap::new();
         let mut armors = HashMap::new();
         let mut outfits = HashMap::new();
         let mut hairs = HashMap::new();
+        let mut lvlis = HashMap::new();
 
         let start_pos = 24 + self.header_record.data_size as u64;
         self.reader.seek(SeekFrom::Start(start_pos))?;
@@ -481,6 +483,7 @@ impl<R: Read + Seek> EsmReader<R> {
                         || rtype == Some(REC_ARMO)
                         || rtype == Some(REC_OTFT)
                         || rtype == Some(REC_HAIR)
+                        || rtype == Some(REC_LVLI)
                     {
                         let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
                         while self.reader.stream_position()? < group_end {
@@ -502,6 +505,10 @@ impl<R: Read + Seek> EsmReader<R> {
                                         } else if header.type_id == REC_HAIR {
                                             if let Ok(hair) = HairRecord::from_record(&header, &subs) {
                                                 hairs.insert(header.form_id, hair);
+                                            }
+                                        } else if header.type_id == REC_LVLI {
+                                            if let Ok(lvli) = LvliRecord::from_record(&header, &subs) {
+                                                lvlis.insert(header.form_id, lvli);
                                             }
                                         }
                                     }
@@ -525,7 +532,7 @@ impl<R: Read + Seek> EsmReader<R> {
             }
         }
 
-        Ok((npcs, armors, outfits, hairs))
+        Ok((npcs, armors, outfits, hairs, lvlis))
     }
 
     /// 指定された EDID を持つ CELL レコード、その子 REFR レコード群、および地形 LAND レコード（存在する場合）を検索・取得する。

@@ -262,7 +262,7 @@ impl ViewerState {
 
                     let is_female = outfit_or_naked.to_ascii_lowercase().contains("female")
                         || outfit_or_naked.to_ascii_lowercase().contains("outfitf");
-                    let part_paths = get_actor_part_paths(is_female, &body_path, None);
+                    let part_paths = get_actor_part_paths(is_female, fo3_esm::FormId(0), &body_path, None, None, None, None, false);
 
                     let mut parts = Vec::new();
                     for path in &part_paths {
@@ -396,14 +396,15 @@ impl ViewerState {
                         .read_all_models_map()
                         .expect("Failed to read models map");
                     println!("モデルマップ登録件数: {} 件", model_map.len());
-                    let (npc_map, armor_map, outfit_map, hair_map) =
+                    let (npc_map, armor_map, outfit_map, hair_map, lvli_map) =
                         esm_reader.read_npc_and_armor_map().unwrap_or_default();
                     println!(
-                        "アクター定義: {} 件, 防具定義: {} 件, 衣装定義: {} 件, 髪型定義: {} 件",
+                        "アクター定義: {} 件, 防具定義: {} 件, 衣装定義: {} 件, 髪型定義: {} 件, レベルドアイテム定義: {} 件",
                         npc_map.len(),
                         armor_map.len(),
                         outfit_map.len(),
-                        hair_map.len()
+                        hair_map.len(),
+                        lvli_map.len()
                     );
                     let light_map = esm_reader.read_light_map().unwrap_or_default();
                     println!("光源レコード (LIGHT) 登録件数: {} 件", light_map.len());
@@ -413,8 +414,15 @@ impl ViewerState {
                         name: String,
                         transform: NiTransform,
                         is_female: bool,
+                        race: fo3_esm::FormId,
                         outfit_model: Option<String>,
+                        head_gear_model: Option<String>,
+                        hand_gear_model: Option<String>,
+                        weapon_model: Option<String>,
                         hair_model: Option<String>,
+                        hair_color: Option<[u8; 3]>,
+                        has_hat: bool,
+                        hide_hair: bool,
                     }
                     let mut cell_npcs: Vec<CellNpcSpawn> = Vec::new();
 
@@ -504,37 +512,101 @@ impl ViewerState {
                                 let world_transform =
                                     NiTransform::from_euler_xyz(pos, rot, refr.scale);
 
-                                // 1. 衣装モデルの解決 (DOFT のインベントリ ARMO を最優先、次いで default_armor WNAM)
-                                let resolved_armor_id = npc.default_outfit
-                                    .and_then(|doft_id| outfit_map.get(&doft_id))
-                                    .and_then(|otft| otft.inventory.first().copied())
-                                    .or(npc.default_armor);
+                                // 1. 全防具・武器の装備スロット解決 (DOFT -> WNAM -> CNTO 所持品 -> LVLI 再帰展開)
+                                // 参照元: references/openmw/components/esm4/loadnpc.cpp:60, loadlvli.cpp:57, loadarmo.hpp:L65-85
+                                let mut raw_items = Vec::new();
+                                if let Some(doft_id) = npc.default_outfit {
+                                    if let Some(otft) = outfit_map.get(&doft_id) {
+                                        raw_items.extend(otft.inventory.iter().copied());
+                                    } else {
+                                        raw_items.push(doft_id);
+                                    }
+                                }
+                                if let Some(wnam) = npc.default_armor {
+                                    raw_items.push(wnam);
+                                }
+                                for inv in &npc.inventory {
+                                    raw_items.push(inv.item);
+                                }
+                                let candidate_items = resolve_candidate_items(&raw_items, &lvli_map);
 
-                                let outfit_model = resolved_armor_id
-                                    .and_then(|armo_id| armor_map.get(&armo_id))
-                                    .and_then(|armo| {
-                                        let m = if npc.is_female && !armo.female_model.is_empty() {
-                                            &armo.female_model
-                                        } else {
-                                            &armo.male_model
-                                        };
-                                        if !m.is_empty() {
-                                            Some(m.clone())
-                                        } else {
-                                            None
-                                        }
-                                    });
+                                let mut outfit_model = None;
+                                let mut head_gear_model = None;
+                                let mut hand_gear_model = None;
+                                let mut weapon_model = None;
+                                let mut has_hat = false;
+                                let mut hide_hair = false;
 
-                                // 2. 髪型モデルの解決 (HNAM -> HAIR -> MODL)
-                                let hair_model = npc.hair
-                                    .and_then(|hair_id| hair_map.get(&hair_id))
-                                    .and_then(|hair| {
-                                        if !hair.model.is_empty() {
-                                            Some(hair.model.clone())
-                                        } else {
-                                            None
+                                for item_id in candidate_items {
+                                    if let Some(armo) = armor_map.get(&item_id) {
+                                        let model_path = armo.model_for_gender(npc.is_female);
+                                        if armo.is_head() && head_gear_model.is_none() {
+                                            if let Some(m) = model_path {
+                                                head_gear_model = Some(m.to_string());
+                                                if armo.shows_hat() {
+                                                    has_hat = true;
+                                                }
+                                                if armo.hides_hair() {
+                                                    hide_hair = true;
+                                                }
+                                            }
+                                        } else if armo.is_upper_body() && outfit_model.is_none() {
+                                            if let Some(m) = model_path {
+                                                outfit_model = Some(m.to_string());
+                                            }
+                                        } else if armo.is_hands() && hand_gear_model.is_none() {
+                                            if let Some(m) = model_path {
+                                                hand_gear_model = Some(m.to_string());
+                                            }
                                         }
-                                    });
+                                    } else if weapon_model.is_none() {
+                                        if let Some(base_info) = model_map.get(&item_id) {
+                                            let m_lower = base_info.model.to_ascii_lowercase();
+                                            if !base_info.model.is_empty()
+                                                && (base_info.record_type == fo3_esm::types::REC_WEAP
+                                                    || m_lower.contains("weapons")
+                                                    || m_lower.contains("weapon"))
+                                            {
+                                                weapon_model = Some(base_info.model.clone());
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 胴体衣装が未解決の場合のフォールバック
+                                let outfit_model = outfit_model.or_else(|| {
+                                    if npc.is_female {
+                                        Some("Armor\\WastelandClothing01\\OutfitF.NIF".to_string())
+                                    } else {
+                                        Some("Armor\\WastelandClothing01\\OutfitM.NIF".to_string())
+                                    }
+                                });
+
+                                // 2. 髪型モデルの解決 (HNAM -> HAIR -> MODL -> デフォルト髪型フォールバック)
+                                let hair_model = if hide_hair {
+                                    None
+                                } else {
+                                    npc.hair
+                                        .and_then(|hair_id| hair_map.get(&hair_id))
+                                        .and_then(|hair| {
+                                            if !hair.model.is_empty() {
+                                                Some(hair.model.clone())
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .or_else(|| {
+                                            // HNAM 未指定時の性別別デフォルト髪型フォールバック
+                                            if npc.is_female {
+                                                Some("Characters\\Hair\\HairBun.NIF".to_string())
+                                            } else {
+                                                Some("Characters\\Hair\\HairMessy03.NIF".to_string())
+                                            }
+                                        })
+                                };
+
+                                // 髪色フォールバック: HCLR が未定義の NPC は自然なダークブラウン系 [65, 45, 30] を適用
+                                let hair_color = npc.hair_color.or(Some([65, 45, 30]));
 
                                 let name = npc.full_name.clone().unwrap_or_else(|| npc.edid.clone());
                                 cell_npcs.push(CellNpcSpawn {
@@ -542,8 +614,15 @@ impl ViewerState {
                                     name,
                                     transform: world_transform,
                                     is_female: npc.is_female,
+                                    race: npc.race,
                                     outfit_model,
+                                    head_gear_model,
+                                    hand_gear_model,
+                                    weapon_model,
                                     hair_model,
+                                    hair_color,
+                                    has_hat,
+                                    hide_hair,
                                 });
                                 continue;
                             }
@@ -723,7 +802,16 @@ impl ViewerState {
                                 "meshes\\characters\\_male\\upperbody.nif".to_string()
                             };
 
-                            let part_paths = get_actor_part_paths(npc.is_female, &body_path, npc.hair_model.as_deref());
+                            let part_paths = get_actor_part_paths(
+                                npc.is_female,
+                                npc.race,
+                                &body_path,
+                                npc.head_gear_model.as_deref(),
+                                npc.hand_gear_model.as_deref(),
+                                npc.weapon_model.as_deref(),
+                                npc.hair_model.as_deref(),
+                                npc.hide_hair,
+                            );
                             let mut parts = Vec::new();
                             for path in &part_paths {
                                 let nif = if let Some(cached) = nif_cache.get(path) {
@@ -767,6 +855,8 @@ impl ViewerState {
                                 kf_nif.clone(),
                                 anim_clip.clone(),
                                 &mut actor_texture_cache,
+                                npc.hair_color,
+                                npc.has_hat,
                             );
                             println!(
                                 "  - アクター \"{}\" (FormID: 0x{:08X}, 性別: {}) を配置 (パーツ数: {})",
@@ -1027,7 +1117,7 @@ impl ViewerState {
                 };
                 let is_female = outfit_or_naked.to_ascii_lowercase().contains("female")
                     || outfit_or_naked.to_ascii_lowercase().contains("outfitf");
-                let part_paths = get_actor_part_paths(is_female, &body_path, None);
+                let part_paths = get_actor_part_paths(is_female, fo3_esm::FormId(0), &body_path, None, None, None, None, false);
                 let mut anim_parts = Vec::new();
                 for path in &part_paths {
                     if let Ok(bytes) = vfs.read(path) {
@@ -1683,31 +1773,112 @@ fn is_editor_marker_or_effect(edid: &str, model: &str) -> bool {
     false
 }
 
+/// グール種族 (GhoulRace / GhoulGlowingOneRace) であるかを判定する。
+/// 参照元: `references/openmw/components/esm4/loadrace.hpp`, Fallout 3 `Race` 定義
+fn is_ghoul_race(race: fo3_esm::FormId) -> bool {
+    race.0 == 0x00003B3E || race.0 == 0x000638EF
+}
+
 /// 人型アクターのパーツ NIF 相対パス一覧を取得する。
 ///
-/// 頭部、目 (左右)、歯 (上下)、舌、髪型 (指定時)、胴体/衣装、手 (左右) を過不足なく構成する。
-/// 参照元: Gamebryo 2.6 キャラクタパーツ合成, `knowledge/actor_and_skin_mesh.md` (セクション 4.6, 4.7)
-fn get_actor_part_paths(is_female: bool, body_path: &str, hair_path: Option<&str>) -> Vec<String> {
-    let (right_hand, left_hand) = if is_female {
+/// 頭部 (人間/グール別)、目 (左右)、歯 (上下)、舌、頭部装備 (帽子/ヘルメット等)、髪型 (指定時)、胴体/衣装、手 (手袋または男女別素手)、武器を過不足なく構成する。
+/// 参照元: Gamebryo 2.6 キャラクタパーツ合成, `knowledge/actor_and_skin_mesh.md` (セクション 4.6, 4.7, 4.13)
+fn get_actor_part_paths(
+    is_female: bool,
+    race: fo3_esm::FormId,
+    body_path: &str,
+    head_gear_path: Option<&str>,
+    hand_gear_path: Option<&str>,
+    weapon_path: Option<&str>,
+    hair_path: Option<&str>,
+    hide_hair: bool,
+) -> Vec<String> {
+    let (default_right_hand, default_left_hand) = if is_female {
         ("meshes\\characters\\_male\\femalerighthand.nif", "meshes\\characters\\_male\\femalelefthand.nif")
     } else {
         ("meshes\\characters\\_male\\righthand.nif", "meshes\\characters\\_male\\lefthand.nif")
     };
+    let head_nif = if is_ghoul_race(race) {
+        "meshes\\characters\\head\\headghoul.nif"
+    } else {
+        "meshes\\characters\\head\\headhuman.nif"
+    };
     let mut parts = vec![
-        "meshes\\characters\\head\\headhuman.nif".to_string(),
+        head_nif.to_string(),
         "meshes\\characters\\head\\eyelefthuman.nif".to_string(),
         "meshes\\characters\\head\\eyerighthuman.nif".to_string(),
         "meshes\\characters\\head\\teethupperhuman.nif".to_string(),
         "meshes\\characters\\head\\teethlowerhuman.nif".to_string(),
         "meshes\\characters\\head\\tonguehuman.nif".to_string(),
     ];
-    if let Some(hair) = hair_path {
-        if !hair.is_empty() {
-            parts.push(hair.to_string());
+
+    // 頭部防具（帽子・ヘルメット等）
+    if let Some(head_gear) = head_gear_path {
+        if !head_gear.is_empty() {
+            parts.push(head_gear.to_string());
         }
     }
+
+    // 頭髪（ヘルメット等で非表示指定されていない場合のみ）
+    if !hide_hair {
+        if let Some(hair) = hair_path {
+            if !hair.is_empty() {
+                parts.push(hair.to_string());
+            }
+        }
+    }
+
+    // 胴体衣装
     parts.push(body_path.to_string());
-    parts.push(right_hand.to_string());
-    parts.push(left_hand.to_string());
+
+    // 手部（手袋装備があれば手袋、なければ素手）
+    if let Some(hand_gear) = hand_gear_path {
+        if !hand_gear.is_empty() {
+            parts.push(hand_gear.to_string());
+        } else {
+            parts.push(default_right_hand.to_string());
+            parts.push(default_left_hand.to_string());
+        }
+    } else {
+        parts.push(default_right_hand.to_string());
+        parts.push(default_left_hand.to_string());
+    }
+
+    // 武器
+    if let Some(weapon) = weapon_path {
+        if !weapon.is_empty() {
+            parts.push(weapon.to_string());
+        }
+    }
+
     parts
+}
+
+/// レベルドアイテム (LVLI) を再帰的に展開し、含まれる具象アイテム FormID リストを収集する。
+///
+/// 循環参照を防ぐため訪問済みセット (visited) を使用し、キューによる幅優先探索 (BFS) で
+/// ネストされたすべてのレベルドリストを末端の具象アイテム（防具、武器、弾薬等）まで完全に展開する。
+/// 参照元: `references/openmw/components/esm4/loadlvli.cpp:57`, `inventory.hpp:38`
+fn resolve_candidate_items(
+    initial_items: &[fo3_esm::FormId],
+    lvli_map: &HashMap<fo3_esm::FormId, fo3_esm::LvliRecord>,
+) -> Vec<fo3_esm::FormId> {
+    let mut result = Vec::new();
+    let mut visited = std::collections::HashSet::new();
+    let mut queue: std::collections::VecDeque<fo3_esm::FormId> =
+        initial_items.iter().copied().collect();
+
+    while let Some(item_id) = queue.pop_front() {
+        if !visited.insert(item_id) {
+            continue;
+        }
+        if let Some(lvli) = lvli_map.get(&item_id) {
+            for entry in &lvli.entries {
+                queue.push_back(entry.item);
+            }
+        } else {
+            result.push(item_id);
+        }
+    }
+    result
 }
