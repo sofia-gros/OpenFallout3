@@ -1,5 +1,7 @@
 # Gemini Context & Rules for OpenFallout3
 
+- **【最優先命令】コードベースの探索・構造把握・コード調査には必ず CCE (`context_search` ツール等) を最優先で使用すること。ファイルを直接閲覧・全読込するのではなく、CCE のインテリジェント検索を活用して該当コードチャンクを取得すること。**
+- **質問への回答や方針決定の前には必ず `session_recall` を呼び出し、決定後は `record_decision` / `record_code_area` でクロスセッション記憶へ記録すること。**
 - DOC comment must be in Japanese.
 - Gamebryo 2.6 の設計・構造・シーングラフ挙動を愚直に再現すること。
 - オリジナル設計や推測によるコード生成は厳禁。
