@@ -192,6 +192,26 @@ Fallout 3 の人型アクター（プレイヤーおよび人型 NPC）は、単
 - 各パーツ NIF のスキンメッシュは、パーツ NIF 自身のボーンブロックインデックスではなく、スケルトンの `bone_name_world_map` から同名ボーンを引き当ててスキニング頂点変形を行う。
 - これにより、首元や手首の切れ目なくピッタリ結合し、KF アニメーション再生時にも全身が完全に連動して一体として動く。
 
+### 4.7 剛体アタッチメントパーツ（HeadParts: 目・歯・舌）の結合仕様
+
+Fallout 3 の頭部（`headhuman.nif`）は外皮（顔・頭皮・耳・首）のみで構成されており、眼球や口腔内は別 NIF の HeadPart として定義されている。
+
+1. **パーツ一覧**:
+   - 左眼球: `meshes\characters\head\eyelefthuman.nif`
+   - 右眼球: `meshes\characters\head\eyerighthuman.nif`
+   - 上歯: `meshes\characters\head\teethupperhuman.nif`
+   - 下歯: `meshes\characters\head\teethlowerhuman.nif`
+   - 舌: `meshes\characters\head\tonguehuman.nif`
+
+2. **バイナリ構造とアタッチメント仕様**:
+   - これらはスキンメッシュ（`NiSkinInstance`）を持たない**剛体ジオメトリ（`NiTriStrips`）**である。
+   - ルートノード `NiNode` の `extra_data_list` に `NiStringExtraData("Bip01 Head")`（またはターゲットボーン名）を保持している。
+   - 参照元: Gamebryo 2.6 `NiNode::AttachChild`（ボーンノードへの子オブジェクトアタッチ）
+   - 初期配置時:
+     - パーツのルート変換行列（`parent_world`）として、原点ではなくスケルトンのアタッチ対象ボーン（`Bip01 Head`）のワールド変換を適用する。
+   - アニメーション更新時:
+     - 対象ボーンの現在ワールド変換行列で各メッシュの GPU モデル行列バッファ（ModelUniform）を毎フレーム書き換え、頭部の動きに剛体追従させる。
+
 ---
 
 ## 5. 実装ステータス (2026-09-11 更新)

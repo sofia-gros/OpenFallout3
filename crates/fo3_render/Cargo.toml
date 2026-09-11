@@ -14,3 +14,6 @@ bytemuck = { workspace = true }
 ddsfile = { workspace = true }
 thiserror = { workspace = true }
 pollster = { workspace = true }
+
+[dev-dependencies]
+fo3_bsa = { path = "../fo3_bsa" }

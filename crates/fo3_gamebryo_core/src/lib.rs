@@ -96,6 +96,18 @@ impl NiTransform {
             * Mat4::from_mat3(self.rotation)
             * Mat4::from_scale(Vec3::splat(self.scale))
     }
+
+    /// 4x4 アフィン変換行列から NiTransform を復元する。
+    ///
+    /// 参照元: Gamebryo 2.6 `NiTransform`
+    pub fn from_mat4(m: Mat4) -> Self {
+        let (scale, rotation, translation) = m.to_scale_rotation_translation();
+        NiTransform {
+            rotation: Mat3::from_quat(rotation),
+            translation,
+            scale: scale.x,
+        }
+    }
 }
 
 /// Gamebryo 2.6 のバウンディングスフィア（包含球）。

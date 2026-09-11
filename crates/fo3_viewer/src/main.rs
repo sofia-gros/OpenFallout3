@@ -260,12 +260,7 @@ impl ViewerState {
                         outfit_or_naked.clone()
                     };
 
-                    let part_paths = [
-                        "meshes\\characters\\head\\headhuman.nif",
-                        body_path.as_str(),
-                        "meshes\\characters\\_male\\righthand.nif",
-                        "meshes\\characters\\_male\\lefthand.nif",
-                    ];
+                    let part_paths = get_actor_part_paths(&body_path);
 
                     let mut parts = Vec::new();
                     for path in &part_paths {
@@ -857,12 +852,7 @@ impl ViewerState {
                 } else {
                     outfit_or_naked.clone()
                 };
-                let part_paths = [
-                    "meshes\\characters\\head\\headhuman.nif",
-                    body_path.as_str(),
-                    "meshes\\characters\\_male\\righthand.nif",
-                    "meshes\\characters\\_male\\lefthand.nif",
-                ];
+                let part_paths = get_actor_part_paths(&body_path);
                 let mut anim_parts = Vec::new();
                 for path in &part_paths {
                     if let Ok(bytes) = vfs.read(path) {
@@ -1173,6 +1163,10 @@ impl ViewerState {
             let part_refs: Vec<&NifFile> = self.anim_parts.iter().collect();
             self.scene
                 .update_animated_skins_multi_parts(&self.device, &part_refs, &self.anim_bone_name_world_map);
+
+            // 4. 全剛体アタッチメントパーツ (目・歯・舌など) のモデル行列をボーン追従更新
+            self.scene
+                .update_animated_rigid_meshes(&self.queue, &self.anim_bone_name_world_map);
         }
     }
 
@@ -1509,4 +1503,22 @@ fn is_editor_marker_or_effect(edid: &str, model: &str) -> bool {
     }
 
     false
+}
+
+/// 人型アクターのパーツ NIF 相対パス一覧を取得する。
+///
+/// 頭部、目 (左右)、歯 (上下)、舌、胴体/衣装、手 (左右) を過不足なく構成する。
+/// 参照元: Gamebryo 2.6 キャラクタパーツ合成, `knowledge/actor_and_skin_mesh.md` (セクション 4.6, 4.7)
+fn get_actor_part_paths(body_path: &str) -> Vec<String> {
+    vec![
+        "meshes\\characters\\head\\headhuman.nif".to_string(),
+        "meshes\\characters\\head\\eyelefthuman.nif".to_string(),
+        "meshes\\characters\\head\\eyerighthuman.nif".to_string(),
+        "meshes\\characters\\head\\teethupperhuman.nif".to_string(),
+        "meshes\\characters\\head\\teethlowerhuman.nif".to_string(),
+        "meshes\\characters\\head\\tonguehuman.nif".to_string(),
+        body_path.to_string(),
+        "meshes\\characters\\_male\\righthand.nif".to_string(),
+        "meshes\\characters\\_male\\lefthand.nif".to_string(),
+    ]
 }

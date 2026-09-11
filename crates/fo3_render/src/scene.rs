@@ -34,6 +34,8 @@ pub struct RenderMesh {
     pub name: String,
     pub mesh: GpuMesh,
     pub model_bind_group: wgpu::BindGroup,
+    /// モデル・マテリアル用 Uniform バッファ (動的ワールド変換更新用)
+    pub model_uniform_buffer: wgpu::Buffer,
     pub texture_bind_group: wgpu::BindGroup,
     /// 半透明合成（Alpha Blending）を行うか
     pub is_transparent: bool,
@@ -49,6 +51,7 @@ pub struct RenderMesh {
 /// 毎フレームの姿勢更新時に `RenderScene::update_animated_skins` から参照される。
 ///
 /// 参照元: Gamebryo 2.6 `NiSkinInstance::Update`（毎フレームの変形計算）
+#[derive(Clone, Debug)]
 pub struct AnimatedSkinMesh {
     /// `RenderScene::meshes` 中の対象 `RenderMesh` インデックス
     pub mesh_index: usize,
@@ -58,6 +61,22 @@ pub struct AnimatedSkinMesh {
     pub geo_data_block: i32,
     /// NiSkinInstance ブロックインデックス（該当 NIF 内）
     pub skin_instance_block: i32,
+}
+
+/// アニメーションによるボーン追従を行う剛体アタッチメントメッシュ情報。
+///
+/// スキンメッシュを持たず、スケルトンの特定ボーンノード (例: "Bip01 Head") にアタッチされる
+/// 剛体パーツ (目、歯、舌など) のモデル変換行列を毎フレーム追従更新するために使用する。
+///
+/// 参照元: Gamebryo 2.6 `NiNode::AttachChild`, `knowledge/actor_and_skin_mesh.md` (セクション 4.7)
+#[derive(Clone, Debug)]
+pub struct AnimatedRigidMesh {
+    /// `RenderScene::meshes` 中の対象 `RenderMesh` インデックス
+    pub mesh_index: usize,
+    /// アタッチ先のスケルトンボーン名 (例: "Bip01 Head")
+    pub bone_name: String,
+    /// パーツルート基準のローカル変換行列
+    pub local_transform: Mat4,
 }
 
 /// NIF から構築された完全な描画シーン。
@@ -71,6 +90,8 @@ pub struct RenderScene {
     pub bounds_radius: f32,
     /// アニメーション対応スキンメッシュの更新情報リスト
     pub anim_skin_meshes: Vec<AnimatedSkinMesh>,
+    /// アニメーション対応剛体アタッチメントメッシュの更新情報リスト (目・歯・舌など)
+    pub anim_rigid_meshes: Vec<AnimatedRigidMesh>,
 }
 
 impl RenderScene {
@@ -137,6 +158,7 @@ impl RenderScene {
             bounds_center,
             bounds_radius,
             anim_skin_meshes,
+            anim_rigid_meshes: Vec::new(),
         }
     }
 
@@ -176,6 +198,7 @@ impl RenderScene {
         );
 
         let mut anim_skin_meshes = Vec::new();
+        let mut anim_rigid_meshes = Vec::new();
 
         // 2. 各パーツ NIF のメッシュを走査・生成
         for (part_idx, part_nif) in parts.iter().enumerate() {
@@ -184,7 +207,18 @@ impl RenderScene {
             }
             let mesh_offset = meshes.len();
             let mut part_bone_world_map = HashMap::new();
-            let root_transform = NiTransform::default();
+
+            // パーツが剛体アタッチメントボーン (例: "Bip01 Head") を指定しているか判定
+            let attach_bone_opt = find_attach_bone_name(part_nif);
+            let root_transform = if let Some(ref bone_name) = attach_bone_opt {
+                if let Some(skel_world) = skel_bone_name_world_map.get(bone_name) {
+                    NiTransform::from_mat4(*skel_world)
+                } else {
+                    NiTransform::default()
+                }
+            } else {
+                NiTransform::default()
+            };
 
             // パーツ自身のローカルボーンマップも収集（フォールバック用）
             collect_bone_world_transforms(0, &root_transform, part_nif, &mut part_bone_world_map);
@@ -211,7 +245,21 @@ impl RenderScene {
 
             // このパーツのスキンメッシュ情報を収集
             let part_anim_skins = collect_anim_skin_meshes_for_part(part_idx, mesh_offset, part_nif, &meshes);
+            let has_skin = !part_anim_skins.is_empty();
             anim_skin_meshes.extend(part_anim_skins);
+
+            // スキンを持たずアタッチボーンが指定されている剛体パーツの場合、全メッシュを AnimatedRigidMesh として登録
+            if !has_skin {
+                if let Some(bone_name) = attach_bone_opt {
+                    for mesh_idx in mesh_offset..meshes.len() {
+                        anim_rigid_meshes.push(AnimatedRigidMesh {
+                            mesh_index: mesh_idx,
+                            bone_name: bone_name.clone(),
+                            local_transform: Mat4::IDENTITY,
+                        });
+                    }
+                }
+            }
         }
 
         // コリジョンワイヤーフレームの抽出（スケルトンから）
@@ -231,6 +279,7 @@ impl RenderScene {
             bounds_center,
             bounds_radius,
             anim_skin_meshes,
+            anim_rigid_meshes,
         }
     }
 
@@ -385,6 +434,7 @@ impl RenderScene {
                             name: format!("Landscape_Q{}_Cell_{}_{}", q, grid_x, grid_y),
                             mesh: gpu_mesh,
                             model_bind_group,
+                            model_uniform_buffer,
                             texture_bind_group,
                             is_transparent: false,
                             alpha_sort: false,
@@ -470,6 +520,7 @@ impl RenderScene {
                             name: format!("Landscape_Q{}_Layer{}_Cell_{}_{}", layer.quadrant, l_idx, grid_x, grid_y),
                             mesh: gpu_mesh,
                             model_bind_group,
+                            model_uniform_buffer,
                             texture_bind_group,
                             is_transparent: true,
                             alpha_sort: false,
@@ -570,6 +621,7 @@ impl RenderScene {
             bounds_center,
             bounds_radius,
             anim_skin_meshes: Vec::new(),
+            anim_rigid_meshes: Vec::new(),
         }
     }
 
@@ -870,9 +922,6 @@ pub fn collect_bone_world_transforms(
     let block = &nif.blocks[block_index as usize];
     match block {
         NifBlock::NiNode(node) => {
-            if is_node_hidden(&node.av, nif) {
-                return;
-            }
             let local_transform = to_core_transform(&node.av);
             let world_transform = parent_world.compose(&local_transform);
             bone_world_map.insert(block_index, world_transform.to_mat4());
@@ -881,9 +930,6 @@ pub fn collect_bone_world_transforms(
             }
         }
         NifBlock::BSFadeNode(fade) => {
-            if is_node_hidden(&fade.node.av, nif) {
-                return;
-            }
             let local_transform = to_core_transform(&fade.node.av);
             let world_transform = parent_world.compose(&local_transform);
             bone_world_map.insert(block_index, world_transform.to_mat4());
@@ -947,9 +993,6 @@ fn recompute_fk_with_names(
     let block = &nif.blocks[block_index as usize];
     match block {
         NifBlock::NiNode(node) => {
-            if is_node_hidden(&node.av, nif) {
-                return;
-            }
             let base = to_core_transform(&node.av);
             let local = lookup_override(base, &node.av, nif, pose);
             let world = parent_world.compose(&local);
@@ -963,9 +1006,6 @@ fn recompute_fk_with_names(
             }
         }
         NifBlock::BSFadeNode(fade) => {
-            if is_node_hidden(&fade.node.av, nif) {
-                return;
-            }
             let base = to_core_transform(&fade.node.av);
             let local = lookup_override(base, &fade.node.av, nif, pose);
             let world = parent_world.compose(&local);
@@ -1222,6 +1262,29 @@ impl RenderScene {
     ) {
         self.update_animated_skins_multi_parts(device, &[mesh_nif], bone_name_world_map);
     }
+
+    /// アニメーション更新後のボーン行列で、全剛体アタッチメントメッシュ (目、歯、舌など) のモデル変換行列バッファを更新する。
+    ///
+    /// 参照元: Gamebryo 2.6 `NiNode::UpdateDownwardPass`, `knowledge/actor_and_skin_mesh.md` (セクション 4.7)
+    pub fn update_animated_rigid_meshes(
+        &mut self,
+        queue: &wgpu::Queue,
+        bone_name_world_map: &HashMap<String, Mat4>,
+    ) {
+        for rigid in &self.anim_rigid_meshes {
+            if rigid.mesh_index >= self.meshes.len() {
+                continue;
+            }
+            if let Some(bone_world) = bone_name_world_map.get(&rigid.bone_name) {
+                let current_world = *bone_world * rigid.local_transform;
+                queue.write_buffer(
+                    &self.meshes[rigid.mesh_index].model_uniform_buffer,
+                    0,
+                    bytemuck::cast_slice(&[current_world.to_cols_array_2d()]),
+                );
+            }
+        }
+    }
 }
 
 /// ノードが非表示（App Culled / エディタマーカー）であるかを判定する。
@@ -1275,6 +1338,43 @@ fn is_dismember_hidden(skin_instance_block: i32, nif: &NifFile) -> bool {
     false
 }
 
+/// NIF のルートブロックからアタッチメント対象ボーン名を検出する。
+///
+/// Fallout 3 の HeadParts (目、歯、舌など) は、ルートノードの `extra_data_list` に
+/// 対象ボーン名 (例: "Bip01 Head") を保持した `NiStringExtraData` を持つ。
+///
+/// 参照元:
+/// - `references/nifxml/nif.xml:L1340` (`NiStringExtraData`)
+/// - `references/nifskope/src/spells/mesh.cpp`
+/// - `knowledge/actor_and_skin_mesh.md` (セクション 4.7)
+pub fn find_attach_bone_name(nif: &NifFile) -> Option<String> {
+    if nif.blocks.is_empty() {
+        return None;
+    }
+    let root_block = &nif.blocks[0];
+    let extra_data_list = match root_block {
+        NifBlock::NiNode(node) => &node.av.net.extra_data_list,
+        NifBlock::BSFadeNode(fade) => &fade.node.av.net.extra_data_list,
+        _ => return None,
+    };
+
+    for &extra_idx in extra_data_list {
+        if extra_idx < 0 || extra_idx as usize >= nif.blocks.len() {
+            continue;
+        }
+        if let NifBlock::NiStringExtraData(ref extra) = nif.blocks[extra_idx as usize] {
+            if let Some(s) = nif.get_string(extra.string_data_index) {
+                let s_trim = s.trim();
+                // "BSBoneLOD#..." などの制御文字列は除外
+                if !s_trim.contains('#') && !s_trim.is_empty() {
+                    return Some(s_trim.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 fn to_core_transform(av: &fo3_nif::NiAVObject) -> NiTransform {
     let rot = glam::Mat3::from_cols_array_2d(&av.rotation.m).transpose();
     NiTransform {
@@ -1320,13 +1420,13 @@ fn create_render_mesh(
 
     let has_glow_map = glow_path.is_some() && glow_path.as_ref().map_or(false, |p| texture_cache.contains_key(p));
 
-    // Model Uniform バッファ作成
+    // Model Uniform バッファ作成 (動的書き換え対応のため COPY_DST を付与)
     let world_mat = world_transform.to_mat4();
     let model_uniform = ModelUniform::new(world_mat, effective_alpha, material_prop, has_glow_map);
     let model_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(&format!("Model Uniform Buffer: {}", name)),
         contents: bytemuck::bytes_of(&model_uniform),
-        usage: wgpu::BufferUsages::UNIFORM,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
     let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1378,6 +1478,7 @@ fn create_render_mesh(
         name: name.to_string(),
         mesh,
         model_bind_group,
+        model_uniform_buffer,
         texture_bind_group,
         is_transparent,
         alpha_sort,
@@ -2179,6 +2280,143 @@ mod tests {
         assert_eq!(anims[0].part_index, 3);
         assert_eq!(anims[0].geo_data_block, 1);
         assert_eq!(anims[0].skin_instance_block, 2);
+    }
+
+    /// 実アセットを用いたアクターパーツのボーン名解決検証テスト。
+    ///
+    /// スケルトン `skeleton.nif` から得られるボーン名マップに対し、
+    /// 全身パーツ (頭, 体, 両手, 両目, 歯, 舌) の全スキンメッシュが参照するボーン名が
+    /// すべて過不足なく解決できることを検証する。
+    #[test]
+    fn test_actor_parts_bone_resolution_real_assets() {
+        use fo3_vfs::VfsManager;
+        use fo3_bsa::BsaArchive;
+        use std::path::Path;
+        use std::io::Cursor;
+        use crate::recompute_bone_world_maps_with_pose;
+        use crate::animation::SkeletonPose;
+
+        let data_dir = Path::new(r"A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data");
+        if !data_dir.exists() {
+            return;
+        }
+
+        let mut vfs = VfsManager::new();
+        vfs.add_loose_root(data_dir);
+        let mesh_bsa = data_dir.join("Fallout - Meshes.bsa");
+        if let Ok(archive) = BsaArchive::open(&mesh_bsa) {
+            vfs.add_bsa(archive);
+        }
+
+        // スケルトン NIF のロード
+        let skel_bytes = match vfs.read("meshes\\characters\\_male\\skeleton.nif") {
+            Ok(b) => b,
+            Err(_) => return,
+        };
+        let mut cur = Cursor::new(skel_bytes);
+        let skel_nif = NifFile::read(&mut cur).expect("Failed to parse skeleton.nif");
+
+        let mut bone_world_map = HashMap::new();
+        let mut bone_name_world_map = HashMap::new();
+        let initial_pose = SkeletonPose::default();
+        recompute_bone_world_maps_with_pose(
+            &skel_nif,
+            &initial_pose,
+            &mut bone_world_map,
+            &mut bone_name_world_map,
+        );
+
+        println!("スケルトン解決ボーン名総数: {} 件", bone_name_world_map.len());
+
+        let part_paths = [
+            "meshes\\characters\\head\\headhuman.nif",
+            "meshes\\characters\\head\\eyelefthuman.nif",
+            "meshes\\characters\\head\\eyerighthuman.nif",
+            "meshes\\characters\\head\\teethupperhuman.nif",
+            "meshes\\characters\\head\\teethlowerhuman.nif",
+            "meshes\\characters\\head\\tonguehuman.nif",
+            "meshes\\characters\\_male\\upperbody.nif",
+            "meshes\\characters\\_male\\righthand.nif",
+            "meshes\\characters\\_male\\lefthand.nif",
+        ];
+
+        for path in &part_paths {
+            let bytes = vfs.read(path).unwrap_or_else(|_| panic!("Failed to read {}", path));
+            let mut c = Cursor::new(bytes);
+            let part_nif = NifFile::read(&mut c).unwrap_or_else(|_| panic!("Failed to parse {}", path));
+
+            // 全スキンインスタンスのボーンを検証
+            let mut missing_bones = Vec::new();
+            let mut total_bones = 0;
+            for block in &part_nif.blocks {
+                let inst = match block {
+                    NifBlock::NiSkinInstance(i) => i,
+                    NifBlock::BSDismemberSkinInstance(d) => &d.skin_instance,
+                    _ => continue,
+                };
+                for &bone_idx in &inst.bones {
+                    if bone_idx < 0 || bone_idx as usize >= part_nif.blocks.len() {
+                        continue;
+                    }
+                    total_bones += 1;
+                    let bone_name = match &part_nif.blocks[bone_idx as usize] {
+                        NifBlock::NiNode(n) => part_nif.get_string(n.av.net.name_index),
+                        NifBlock::BSFadeNode(f) => part_nif.get_string(f.node.av.net.name_index),
+                        _ => None,
+                    };
+                    if let Some(name) = bone_name {
+                        if !bone_name_world_map.contains_key(name) {
+                            missing_bones.push(name.to_string());
+                        }
+                    } else {
+                        missing_bones.push(format!("(unnamed block {})", bone_idx));
+                    }
+                }
+            }
+            println!("パーツ {}: ボーン数 {}, 未解決数 {}", path, total_bones, missing_bones.len());
+            if !missing_bones.is_empty() {
+                println!("  未解決ボーン: {:?}", missing_bones);
+            }
+            assert!(missing_bones.is_empty(), "パーツ {} に未解決ボーンがあります: {:?}", path, missing_bones);
+
+            // righthand.nif の場合、各ボーンのワールド位置をスケルトンと比較
+            if path.contains("righthand.nif") {
+                let mut part_bone_map = HashMap::new();
+                crate::collect_bone_world_transforms(0, &fo3_gamebryo_core::NiTransform::default(), &part_nif, &mut part_bone_map);
+                for block in &part_nif.blocks {
+                    let inst = match block {
+                        NifBlock::NiSkinInstance(i) => i,
+                        NifBlock::BSDismemberSkinInstance(d) => &d.skin_instance,
+                        _ => continue,
+                    };
+                    for &bone_idx in &inst.bones {
+                        if bone_idx < 0 || bone_idx as usize >= part_nif.blocks.len() { continue; }
+                        let name = match &part_nif.blocks[bone_idx as usize] {
+                            NifBlock::NiNode(n) => part_nif.get_string(n.av.net.name_index),
+                            _ => None,
+                        };
+                        if let Some(name) = name {
+                            let skel_pos = bone_name_world_map[name].transform_point3(glam::Vec3::ZERO);
+                            let part_pos = part_bone_map[&bone_idx].transform_point3(glam::Vec3::ZERO);
+                            let diff = (skel_pos - part_pos).length();
+                            assert!(diff < 0.5, "ボーン {} の位置が不一致: diff = {}", name, diff);
+                        }
+                    }
+                }
+            }
+
+            // HeadParts のアタッチ先ボーン検出検証
+            let attach_bone = crate::find_attach_bone_name(&part_nif);
+            if path.contains("eye") || path.contains("teeth") || path.contains("tongue") {
+                assert_eq!(
+                    attach_bone.as_deref(),
+                    Some("Bip01 Head"),
+                    "HeadPart {} のアタッチボーンが Bip01 Head ではありません: {:?}",
+                    path,
+                    attach_bone
+                );
+            }
+        }
     }
 }
 

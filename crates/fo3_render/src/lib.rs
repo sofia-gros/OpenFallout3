@@ -28,8 +28,8 @@ pub use lighting::{GpuPointLight, LightingUniform, PlacedPointLight};
 pub use collision::{CollisionVertex, GpuCollisionMesh, extract_collision_lines, HAVOK_SCALE};
 pub use pipeline::RenderContext;
 pub use scene::{
-    AnimatedSkinMesh, RenderMesh, RenderScene, collect_bone_world_transforms,
-    recompute_bone_world_map_with_pose, recompute_bone_world_maps_with_pose,
+    AnimatedRigidMesh, AnimatedSkinMesh, RenderMesh, RenderScene, collect_bone_world_transforms,
+    find_attach_bone_name, recompute_bone_world_map_with_pose, recompute_bone_world_maps_with_pose,
     resolve_bone_world_transforms, resolve_bone_world_transforms_by_name,
 };
 pub use skinning::{apply_skinning_cpu, apply_skinning_cpu_with_bones};
