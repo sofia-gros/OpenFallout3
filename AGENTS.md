@@ -25,10 +25,11 @@
 
 ### Rule 3: トークン浪費防止と知識の永続化義務 (Knowledge-First Workflow)
 
-- **Web 検索の禁止（ローカル優先）**: 外部 Web 検索ではなく、ローカルの `references/` ディレクトリを `grep_search` や `view_file` で調査すること（トークン消費ゼロ・高速）。
+- **Web 検索の禁止（ローカル優先）**: 外部 Web 検索ではなく、ローカルの `references/` ディレクトリを `grep_search` や必要最小限のファイル参照で調査すること（トークン消費ゼロ・高速）。
 - **知識ベース (`knowledge/`) への記録**:
   新しく調査・判明したブロック仕様、トランスフォーム計算式、シェーダーパラメータ、Gamebryo のクラス関係は、コードを書く前に必ず `knowledge/*.md` に日本語で詳細に記録すること。
-  一度調べた知識を永続化することで、AI の忘却による再調査（トークンの無駄）を完全に防止する。
+- **メモリ（Memories / Knowledge Graph）の活用**:
+  セッションを跨ぐ仕様や構造体の関係性（どのモジュールがどの責務を持つか）は、ファイル全体を再読み込みせず、メモリ（Memories）を検索して最小限のスコープで把握すること。
 
 ### Rule 4: DOC コメントの日本語義務
 
@@ -42,49 +43,21 @@
 
 1. **Step 1: 仕様特定 (Spec Lookup)**
    - `references/nifxml/nif.xml` で該当ブロック名を検索し、Fallout 3 バージョン (`version == 20.2.0.7`, `user_version == 11`, `user_version2 == 34`) のフィールド定義を抽出。
-2. **Step 2: 知識の保存 (Knowledge Persistence)**
+2. **Step 2: 知識の保存/読み込み (Knowledge Persistence)**
    - `knowledge/` 配下にメモを作成または追記（ブロックのバイナリレイアウト、型の意味、フラグ値）。
 3. **Step 3: 忠実な構造体・パーサー実装 (Faithful Implementation)**
    - `fo3_nif` または `fo3_gamebryo_*` クレートに実装。参照元を日本語 doc コメントに明記。
 4. **Step 4: テスト駆動検証 (TDD Verification)**
    - 実アセットまたはダミーバイナリを用いてパースを検証し、余計なバイト残り（バッファ未読）やアライメントエラーがないことを確認。
 
-### Searching the codebase
+---
 
-**Use `context_search` instead of reading files directly** when exploring
-the codebase, answering questions about code, or understanding how things
-work. `context_search` returns the most relevant code chunks with
-confidence scores instead of whole files.
+## 3. 参照・メモリ原則（Codebase & Memory Access）
 
-When to use `context_search`:
+- **ピンポイント参照の徹底**: コードやドキュメントを確認する際は、ファイル全体を漫然とコンテキストに入れず、関数名やキーワードで検索し、必要な最小限のブロック・構造のみを対象とすること。
+- **構造と関係性の記憶**: 行数などの変動しやすい情報ではなく、どの構造体・関数がどの責務を持ち、どう結合しているかという「関係性（リレーション）」を中心にメモリ（Memories）に蓄積・活用すること。
 
-- Answering questions about the codebase ("how does X work?", "where is Y?")
-- Exploring structure or architecture
-- Finding related code, functions, or patterns
+### スキルを適切に使用すること
 
-Other tools:
-
-- `expand_chunk` for full source of a compressed result
-- `related_context` for what calls/imports a function
-- `session_recall` to recall past decisions
-
-### Cross-session memory
-
-Call `session_recall("topic phrase")` before answering non-trivial questions.
-Call `record_decision(decision="...", reason="...")` after making choices.
-Call `record_code_area(file_path="...", description="...")` after meaningful work.
-
-### Output style
-
-Respond in compressed style. Drop articles (a, an, the) in prose. Use
-sentence fragments over full sentences. Use short synonyms (fix not resolve,
-check not investigate). Pattern: [thing] [action] [reason]. [next step].
-No filler, hedging, pleasantries, trailing summaries, or restating what
-the user said. One sentence if one sentence is enough.
-
-When suggesting code changes, show only the changed lines with 3 lines of
-context. Never rewrite entire files. Multiple changes in one file: show each
-change separately. Never echo back unchanged code the user already has.
-
-Code blocks, file paths, commands, error messages: always written in full.
-Security warnings and destructive action confirmations: use full clarity.
+- lookup-nif-spec
+- verify-gamebryo-conformance
