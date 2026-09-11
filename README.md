@@ -38,6 +38,13 @@ Morrowind のオープンソース再実装プロジェクトである OpenMW �
 
 ![Exterior Exploration and Terrain Physics](docs/4.png)
 
+### 4. アクター・スキニング & キーフレームアニメーション (`fo3_render`, `fo3_nif`)
+
+- **NiSkinData / NiSkinPartition スキニング**: スケルトンボーン階層への頂点ウェイト変形とバインドポーズ逆行列計算。
+- **Gamebryo KF キーフレーム再生**: `NiTransformInterpolator`（線形/Slerp補間）および B-Spline 補間（Cox-de Boor基底）による骨格姿勢制御。
+- **マルチパーツアクター自動結合**: スケルトン、衣装/素体メッシュ、頭部、両手の一括バインドポーズ解決。
+- **剛体 HeadParts アタッチメント**: Fallout 3 仕様に準拠し、眼球（両目）や口内（上下歯・舌）の剛体メッシュを頭部ボーン（`Bip01 Head`）へリアルタイム追従結合。
+
 ---
 
 ## ワークスペース構成
@@ -140,10 +147,28 @@ cargo run --release -p fo3_viewer -- "<Fallout 3 Data ディレクトリのパ�
 cargo run --release -p fo3_viewer -- "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "meshes\weapons\1handpistol\10mmpistol.nif"
 ```
 
-### 4. KFM アニメーションの読み込み
+### 4. 単体メッシュアニメーションの読み込み (Anim)
 
 ```bash
 cargo run -p fo3_viewer -- anim "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "meshes\characters\_male\upperbody.nif" "meshes\characters\_male\idleanims\ttnpchappysubtlelistena.kf"
+```
+
+### 5. フルアクター結合 & アニメーション再生 (Actor)
+
+頭部、両眼球、上下歯、舌、素体/衣装、両手を一括結合し、ボーンおよび剛体アタッチメントを連動させてアニメーションを再生します。
+
+```bash
+cargo run -p fo3_viewer -- actor "<Fallout 3 Data ディレクトリのパス>" "<防具NIF相対パス または naked>" "<KF アニメーション相対パス>"
+```
+
+例:
+
+```bash
+# 裸体素体 + アイドルアニメーション（頭部・両目・口内・手先が完全結合）
+cargo run -p fo3_viewer -- actor "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" naked "meshes\characters\_male\idleanims\ttnpchappysubtlelistena.kf"
+
+# ウェイストランド防具 + アイドルアニメーション
+cargo run -p fo3_viewer -- actor "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "meshes\armor\wastelandclothing01\outfitm.nif" "meshes\characters\_male\idleanims\ttnpchappysubtlelistena.kf"
 ```
 
 ---
@@ -164,6 +189,26 @@ cargo run -p fo3_viewer -- anim "A:\SteamLibrary\steamapps\common\Fallout 3 goty
 | **L**                | ビューアー補助ヘッドライト切替 (Light ON/OFF)               |
 | **R**                | カメラ注視点自動再フォーカス                                |
 | **Esc**              | ビューアー終了                                              |
+
+---
+
+## 開発ロードマップと実装計画 (Roadmap)
+
+本プロジェクトは OpenMW のアーキテクチャ成熟プロセスと Gamebryo 2.6 の仕様に準拠した段階的マイルストーンに沿って開発を進めています。
+
+| フェーズ | 目標と概要 | 状態 |
+| :--- | :--- | :--- |
+| **Phase 1: ファイル基盤** | BSA v104 解凍、仮想ファイルシステム (VFS) | **完了** |
+| **Phase 2: 3Dメッシュパース** | Gamebryo 2.6 NIF コアノード、ジオメトリ、マテリアル完全解析 | **完了** |
+| **Phase 3: レンダリング** | wgpu、法線マップ、スペキュラ、半透明ソート、地形スプラット | **完了** |
+| **Phase 4: ESM セル配置** | CELL、REFR、STAT、LAND、LIGHT レコードによる空間配置再現 | **完了** |
+| **Phase 5: コリジョン・物理** | Havok コリジョン変換、Rapier3D 統合、リアルタイム KCC 移動 | **完了** |
+| **Phase 6-A/B: スキニング・アニメ** | NiSkinData スキニング、KF 補間、マルチパーツアクター結合 | **完了** |
+| **Phase 6-C: セル内アクター配置 (次期)** | 室内・屋外セル内での全 NPC (ACHR) 自動組み立てとアイドル動作 | **計画中** |
+| **Phase 6-D: GPU スキニング** | 頂点シェーダー内でのボーンパレット参照による描画最適化 | 予定 |
+| **Phase 7: インタラクション** | ドアテレポート (XTEL)、コンテナ、アクティベーター作動 | 予定 |
+| **Phase 8: キャラクター & カメラ** | プレイヤーアクター、三人称/一人称モデル統合、ステートマシン | 予定 |
+| **Phase 9: スクリプト VM & 会話** | SCPT バイトコード実行仮想マシン、ダイアログ (DIAL/INFO) UI | 予定 |
 
 ---
 
