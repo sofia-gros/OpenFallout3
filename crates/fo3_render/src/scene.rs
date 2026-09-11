@@ -16,6 +16,7 @@
 //! 参照元: `knowledge/actor_and_skin_mesh.md`, Gamebryo 2.6 `NiSkinInstance::Update`
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use fo3_gamebryo_core::NiTransform;
 use fo3_nif::{NifBlock, NifFile};
 use fo3_vfs::VfsManager;
@@ -79,6 +80,36 @@ pub struct AnimatedRigidMesh {
     pub local_transform: Mat4,
 }
 
+/// セルまたはワールド内に配置された独立アクターインスタンス。
+///
+/// 各アクターは自身のワールド配置変換、スケルトン、パーツ群、アニメーションプレイヤー、
+/// スキンメッシュおよび剛体パーツ（目・歯・舌）情報を保持し、独立してアニメーション更新される。
+///
+/// 参照元: Gamebryo 2.6 `NiNode` シーングラフ階層, Fallout 3 `ACHR` 配置アクター仕様
+#[derive(Clone, Debug)]
+pub struct RenderActorInstance {
+    /// アクターの FormID または一意の識別番号
+    pub form_id: u32,
+    /// アクター名 (エディタ ID または表示名)
+    pub name: String,
+    /// ワールド空間変換（セル内の配置位置・回転・スケール）
+    pub world_transform: NiTransform,
+    /// スケルトン NIF ファイル
+    pub skeleton_nif: Arc<NifFile>,
+    /// アクターを構成する全パーツ NIF ファイル群
+    pub parts: Vec<Arc<NifFile>>,
+    /// アニメーション再生用プレイヤー
+    pub anim_player: Option<crate::animation::AnimationPlayer>,
+    /// アニメーションキーフレーム NIF ファイル (KF)
+    pub kf_nif: Option<Arc<NifFile>>,
+    /// 現在のボーンアニメーション姿勢
+    pub anim_pose: crate::animation::SkeletonPose,
+    /// このアクターに属するスキンメッシュ更新情報リスト
+    pub anim_skin_meshes: Vec<AnimatedSkinMesh>,
+    /// このアクターに属する剛体アタッチメントメッシュ更新情報リスト (目・歯・舌など)
+    pub anim_rigid_meshes: Vec<AnimatedRigidMesh>,
+}
+
 /// NIF から構築された完全な描画シーン。
 pub struct RenderScene {
     pub meshes: Vec<RenderMesh>,
@@ -92,6 +123,8 @@ pub struct RenderScene {
     pub anim_skin_meshes: Vec<AnimatedSkinMesh>,
     /// アニメーション対応剛体アタッチメントメッシュの更新情報リスト (目・歯・舌など)
     pub anim_rigid_meshes: Vec<AnimatedRigidMesh>,
+    /// セルまたはワールド内に配置された独立アクター群
+    pub actors: Vec<RenderActorInstance>,
 }
 
 impl RenderScene {
@@ -159,6 +192,7 @@ impl RenderScene {
             bounds_radius,
             anim_skin_meshes,
             anim_rigid_meshes: Vec::new(),
+            actors: Vec::new(),
         }
     }
 
@@ -280,6 +314,7 @@ impl RenderScene {
             bounds_radius,
             anim_skin_meshes,
             anim_rigid_meshes,
+            actors: Vec::new(),
         }
     }
 
@@ -622,6 +657,7 @@ impl RenderScene {
             bounds_radius,
             anim_skin_meshes: Vec::new(),
             anim_rigid_meshes: Vec::new(),
+            actors: Vec::new(),
         }
     }
 
@@ -1282,6 +1318,231 @@ impl RenderScene {
                     0,
                     bytemuck::cast_slice(&[current_world.to_cols_array_2d()]),
                 );
+            }
+        }
+    }
+
+    /// セルまたはワールド内の全アクターのアニメーション・スキニング・剛体アタッチメントを更新する。
+    ///
+    /// 参照元: Gamebryo 2.6 `NiControllerSequence::Update` → `NiSkinInstance::Update`
+    pub fn update_actors(
+        &mut self,
+        dt: f32,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) {
+        for actor in &mut self.actors {
+            actor.update(dt, device, queue, &mut self.meshes);
+        }
+    }
+
+    /// セルまたはワールド描画シーンに独立したアクター（NPC）を追加インスタンス化する。
+    ///
+    /// 参照元: Gamebryo 2.6 `NiNode::AttachChild`, Fallout 3 `ACHR` 配置アクター仕様
+    pub fn add_actor(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        context: &RenderContext,
+        vfs: &mut VfsManager,
+        form_id: u32,
+        name: &str,
+        world_transform: &NiTransform,
+        skeleton_nif: Arc<NifFile>,
+        parts: Vec<Arc<NifFile>>,
+        kf_nif: Option<Arc<NifFile>>,
+        anim_clip: Option<Arc<crate::animation::AnimationClip>>,
+        texture_cache: &mut HashMap<String, GpuTexture>,
+    ) -> usize {
+        let default_texture = GpuTexture::create_default_white(device, queue);
+        let default_normal_texture = GpuTexture::create_default_normal(device, queue);
+        let default_glow_texture = GpuTexture::create_default_black(device, queue);
+
+        // 1. スケルトンの初期姿勢（T-Pose）におけるボーン名ワールド変換マップを構築
+        let mut skel_bone_world_map = HashMap::new();
+        let mut skel_bone_name_world_map = HashMap::new();
+        let initial_pose = crate::animation::SkeletonPose::default();
+        recompute_bone_world_maps_with_pose(
+            &skeleton_nif,
+            &initial_pose,
+            &mut skel_bone_world_map,
+            &mut skel_bone_name_world_map,
+        );
+
+        let actor_world_mat = world_transform.to_mat4();
+        let mut actor_anim_skins = Vec::new();
+        let mut actor_anim_rigids = Vec::new();
+
+        // 2. 各パーツ NIF のメッシュを走査・生成
+        for (part_idx, part_nif) in parts.iter().enumerate() {
+            if part_nif.blocks.is_empty() {
+                continue;
+            }
+            let mesh_offset = self.meshes.len();
+            let mut part_bone_world_map = HashMap::new();
+
+            // パーツが剛体アタッチメントボーン (例: "Bip01 Head") を指定しているか判定
+            let attach_bone_opt = find_attach_bone_name(part_nif);
+            let root_transform = if let Some(ref bone_name) = attach_bone_opt {
+                if let Some(skel_world) = skel_bone_name_world_map.get(bone_name) {
+                    NiTransform::from_mat4(actor_world_mat * (*skel_world))
+                } else {
+                    world_transform.clone()
+                }
+            } else {
+                world_transform.clone()
+            };
+
+            collect_bone_world_transforms(0, &root_transform, part_nif, &mut part_bone_world_map);
+
+            traverse_block(
+                0,
+                &root_transform,
+                None,
+                None,
+                part_nif,
+                vfs,
+                device,
+                queue,
+                context,
+                &mut self.meshes,
+                texture_cache,
+                &mut part_bone_world_map,
+                Some(&skel_bone_name_world_map),
+                &default_texture,
+                &default_normal_texture,
+                &default_glow_texture,
+            );
+
+            let part_anim_skins = collect_anim_skin_meshes_for_part(part_idx, mesh_offset, part_nif, &self.meshes);
+            let has_skin = !part_anim_skins.is_empty();
+            actor_anim_skins.extend(part_anim_skins);
+
+            if !has_skin {
+                if let Some(bone_name) = attach_bone_opt {
+                    for mesh_idx in mesh_offset..self.meshes.len() {
+                        actor_anim_rigids.push(AnimatedRigidMesh {
+                            mesh_index: mesh_idx,
+                            bone_name: bone_name.clone(),
+                            local_transform: Mat4::IDENTITY,
+                        });
+                    }
+                }
+            }
+        }
+
+        let anim_player = anim_clip.map(|clip| {
+            crate::animation::AnimationPlayer::new((*clip).clone())
+        });
+
+        let actor_idx = self.actors.len();
+        self.actors.push(RenderActorInstance {
+            form_id,
+            name: name.to_string(),
+            world_transform: world_transform.clone(),
+            skeleton_nif,
+            parts,
+            anim_player,
+            kf_nif,
+            anim_pose: initial_pose,
+            anim_skin_meshes: actor_anim_skins,
+            anim_rigid_meshes: actor_anim_rigids,
+        });
+
+        actor_idx
+    }
+}
+
+impl RenderActorInstance {
+    /// アニメーション時間を進め、ボーン FK、スキンメッシュ頂点、および剛体パーツ Uniform を更新する。
+    ///
+    /// 参照元:
+    /// - Gamebryo 2.6 `NiControllerSequence::Update` → `NiSkinInstance::Update`
+    /// - `knowledge/actor_and_skin_mesh.md` (セクション 4.4, 4.7)
+    pub fn update(
+        &mut self,
+        dt: f32,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        meshes: &mut [RenderMesh],
+    ) {
+        if let (Some(ref mut player), Some(ref kf_nif)) = (&mut self.anim_player, &self.kf_nif) {
+            player.update(kf_nif, dt, &mut self.anim_pose);
+
+            let mut skel_bone_world_map = HashMap::new();
+            let mut skel_bone_name_world_map = HashMap::new();
+            recompute_bone_world_maps_with_pose(
+                &self.skeleton_nif,
+                &self.anim_pose,
+                &mut skel_bone_world_map,
+                &mut skel_bone_name_world_map,
+            );
+
+            let actor_world_mat = self.world_transform.to_mat4();
+
+            // 1. スキンメッシュ更新 (CPU スキニング頂点更新)
+            let part_refs: Vec<&NifFile> = self.parts.iter().map(|p| p.as_ref()).collect();
+            for anim in &self.anim_skin_meshes {
+                let mesh_index = anim.mesh_index;
+                if mesh_index >= meshes.len() {
+                    continue;
+                }
+                if anim.part_index >= part_refs.len() {
+                    continue;
+                }
+                let mesh_nif = part_refs[anim.part_index];
+
+                let geo_data_block = anim.geo_data_block as usize;
+                if geo_data_block >= mesh_nif.blocks.len() {
+                    continue;
+                }
+                let NifBlock::NiTriShapeData(geo_data) = &mesh_nif.blocks[geo_data_block] else {
+                    continue;
+                };
+
+                let skin_inst_block = anim.skin_instance_block as usize;
+                if skin_inst_block >= mesh_nif.blocks.len() {
+                    continue;
+                }
+                let skin_inst = match &mesh_nif.blocks[skin_inst_block] {
+                    NifBlock::NiSkinInstance(inst) => inst,
+                    NifBlock::BSDismemberSkinInstance(bdsi) => &bdsi.skin_instance,
+                    _ => continue,
+                };
+
+                let bone_transforms = resolve_bone_world_transforms_by_name(
+                    skin_inst,
+                    mesh_nif,
+                    &skel_bone_name_world_map,
+                    None,
+                );
+                let bone_refs = if bone_transforms.is_empty() {
+                    None
+                } else {
+                    Some(bone_transforms.as_slice())
+                };
+                if let Some((positions, normals)) =
+                    apply_skinning_cpu_with_bones(geo_data, skin_inst, mesh_nif, bone_refs)
+                {
+                    meshes[mesh_index]
+                        .mesh
+                        .update_skinned_vertices(device, geo_data, &positions, &normals);
+                }
+            }
+
+            // 2. 剛体アタッチメントパーツ (目・歯・舌) のモデル Uniform 更新
+            for rigid in &self.anim_rigid_meshes {
+                if rigid.mesh_index >= meshes.len() {
+                    continue;
+                }
+                if let Some(bone_world) = skel_bone_name_world_map.get(&rigid.bone_name) {
+                    let current_world = actor_world_mat * (*bone_world * rigid.local_transform);
+                    queue.write_buffer(
+                        &meshes[rigid.mesh_index].model_uniform_buffer,
+                        0,
+                        bytemuck::cast_slice(&[current_world.to_cols_array_2d()]),
+                    );
+                }
             }
         }
     }
@@ -2417,6 +2678,70 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// `RenderActorInstance` のデータ構造整合性と、アニメーション更新時の剛体・スキン追従動作を検証する。
+    #[test]
+    fn test_render_actor_instance_hierarchy() {
+        use std::sync::Arc;
+        use fo3_gamebryo_core::NiTransform;
+        use fo3_nif::header::{BSStreamHeader, ExportString, NifHeader};
+
+        let dummy_nif = Arc::new(NifFile {
+            header: NifHeader {
+                header_string: "Gamebryo File Format, Version 20.2.0.7\n".to_string(),
+                version: 0x14020007,
+                endian_type: 1,
+                user_version: 11,
+                num_blocks: 0,
+                bs_header: BSStreamHeader {
+                    bs_version: 34,
+                    author: ExportString { value: String::new() },
+                    process_script: None,
+                    export_script: ExportString { value: String::new() },
+                },
+                block_types: vec![],
+                block_type_indices: vec![],
+                block_sizes: vec![],
+                strings: vec![],
+            },
+            blocks: vec![],
+        });
+
+        let mut scene = RenderScene {
+            meshes: Vec::new(),
+            collision_meshes: Vec::new(),
+            bounds_center: glam::Vec3::ZERO,
+            bounds_radius: 100.0,
+            anim_skin_meshes: Vec::new(),
+            anim_rigid_meshes: Vec::new(),
+            actors: Vec::new(),
+        };
+
+        let actor = RenderActorInstance {
+            form_id: 0x00012345,
+            name: "TestNPC".to_string(),
+            world_transform: NiTransform::from_euler_xyz(glam::Vec3::new(100.0, 200.0, 300.0), glam::Vec3::ZERO, 1.0),
+            skeleton_nif: dummy_nif.clone(),
+            parts: vec![dummy_nif.clone()],
+            anim_player: None,
+            kf_nif: None,
+            anim_pose: crate::animation::SkeletonPose::default(),
+            anim_skin_meshes: Vec::new(),
+            anim_rigid_meshes: vec![
+                AnimatedRigidMesh {
+                    mesh_index: 0,
+                    bone_name: "Bip01 Head".to_string(),
+                    local_transform: glam::Mat4::IDENTITY,
+                }
+            ],
+        };
+
+        scene.actors.push(actor);
+        assert_eq!(scene.actors.len(), 1);
+        assert_eq!(scene.actors[0].name, "TestNPC");
+        assert_eq!(scene.actors[0].world_transform.translation, glam::Vec3::new(100.0, 200.0, 300.0));
+        assert_eq!(scene.actors[0].anim_rigid_meshes[0].bone_name, "Bip01 Head");
     }
 }
 

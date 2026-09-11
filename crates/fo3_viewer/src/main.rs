@@ -260,7 +260,9 @@ impl ViewerState {
                         outfit_or_naked.clone()
                     };
 
-                    let part_paths = get_actor_part_paths(&body_path);
+                    let is_female = outfit_or_naked.to_ascii_lowercase().contains("female")
+                        || outfit_or_naked.to_ascii_lowercase().contains("outfitf");
+                    let part_paths = get_actor_part_paths(is_female, &body_path);
 
                     let mut parts = Vec::new();
                     for path in &part_paths {
@@ -404,6 +406,15 @@ impl ViewerState {
                     let light_map = esm_reader.read_light_map().unwrap_or_default();
                     println!("光源レコード (LIGHT) 登録件数: {} 件", light_map.len());
 
+                    struct CellNpcSpawn {
+                        form_id: u32,
+                        name: String,
+                        transform: NiTransform,
+                        is_female: bool,
+                        outfit_model: Option<String>,
+                    }
+                    let mut cell_npcs: Vec<CellNpcSpawn> = Vec::new();
+
                     let mut nif_cache: HashMap<String, Arc<NifFile>> = HashMap::new();
                     let mut all_cell_items: Vec<Vec<(Arc<NifFile>, NiTransform)>> = Vec::new();
                     let mut placed_lights: Vec<PlacedPointLight> = Vec::new();
@@ -475,7 +486,48 @@ impl ViewerState {
                                 });
                             }
 
-                            // 3D モデルパスの決定 (通常オブジェクトまたは ACHR アクター)
+                            // アクター (NPC_ / ACHR) の検出と収集
+                            if let Some(npc) = npc_map.get(&refr.base_object) {
+                                let pos = glam::Vec3::new(
+                                    refr.position[0],
+                                    refr.position[1],
+                                    refr.position[2],
+                                );
+                                let rot = glam::Vec3::new(
+                                    refr.rotation[0],
+                                    refr.rotation[1],
+                                    refr.rotation[2],
+                                );
+                                let world_transform =
+                                    NiTransform::from_euler_xyz(pos, rot, refr.scale);
+
+                                let outfit_model = npc.default_armor
+                                    .and_then(|armo_id| armor_map.get(&armo_id))
+                                    .and_then(|armo| {
+                                        let m = if npc.is_female && !armo.female_model.is_empty() {
+                                            &armo.female_model
+                                        } else {
+                                            &armo.male_model
+                                        };
+                                        if !m.is_empty() {
+                                            Some(m.clone())
+                                        } else {
+                                            None
+                                        }
+                                    });
+
+                                let name = npc.full_name.clone().unwrap_or_else(|| npc.edid.clone());
+                                cell_npcs.push(CellNpcSpawn {
+                                    form_id: refr.form_id.0,
+                                    name,
+                                    transform: world_transform,
+                                    is_female: npc.is_female,
+                                    outfit_model,
+                                });
+                                continue;
+                            }
+
+                            // 3D モデルパスの決定 (通常オブジェクト)
                             let mesh_file_path = if let Some(obj_info) =
                                 model_map.get(&refr.base_object)
                             {
@@ -490,22 +542,6 @@ impl ViewerState {
                                 } else {
                                     Some(obj_info.model.clone())
                                 }
-                            } else if let Some(npc) = npc_map.get(&refr.base_object) {
-                                // NPC_ のデフォルト装備防具から NIF パスを解決
-                                npc.default_armor
-                                    .and_then(|armo_id| armor_map.get(&armo_id))
-                                    .and_then(|armo| {
-                                        let m = if npc.is_female && !armo.female_model.is_empty() {
-                                            &armo.female_model
-                                        } else {
-                                            &armo.male_model
-                                        };
-                                        if !m.is_empty() {
-                                            Some(m.clone())
-                                        } else {
-                                            None
-                                        }
-                                    })
                             } else {
                                 None
                             };
@@ -596,7 +632,7 @@ impl ViewerState {
                         println!("地形テクスチャセット解決: {} 件", tex_map.len());
                     }
 
-                    let scene = RenderScene::from_cells(
+                    let mut scene = RenderScene::from_cells(
                         &device,
                         &queue,
                         &context,
@@ -604,6 +640,122 @@ impl ViewerState {
                         landscape_texture_map.as_ref(),
                         &mut vfs,
                     );
+
+                    if !cell_npcs.is_empty() {
+                        println!(
+                            "セル内配置アクター (ACHR / NPC_) を生成中: {} 体...",
+                            cell_npcs.len()
+                        );
+                        let mut actor_texture_cache = HashMap::new();
+
+                        // スケルトン NIF のキャッシュ
+                        let skel_male_path = "meshes\\characters\\_male\\skeleton.nif";
+                        let skel_female_path = "meshes\\characters\\_female\\skeleton.nif";
+                        let skel_male = if let Ok(bytes) = vfs.read(skel_male_path) {
+                            let mut cursor = Cursor::new(bytes);
+                            NifFile::read(&mut cursor).ok().map(Arc::new)
+                        } else {
+                            None
+                        };
+                        let skel_female = if let Ok(bytes) = vfs.read(skel_female_path) {
+                            let mut cursor = Cursor::new(bytes);
+                            NifFile::read(&mut cursor).ok().map(Arc::new)
+                        } else {
+                            None
+                        };
+
+                        // アイドルアニメーション KF のキャッシュ
+                        let idle_kf_path =
+                            "meshes\\characters\\_male\\idleanims\\ttnpchappysubtlelistena.kf";
+                        let (kf_nif, anim_clip) = if let Ok(bytes) = vfs.read(idle_kf_path) {
+                            let mut cursor = Cursor::new(bytes);
+                            if let Ok(kf) = NifFile::read(&mut cursor) {
+                                let clip = fo3_render::AnimationClip::from_kf(&kf).map(Arc::new);
+                                (Some(Arc::new(kf)), clip)
+                            } else {
+                                (None, None)
+                            }
+                        } else {
+                            (None, None)
+                        };
+
+                        for npc in &cell_npcs {
+                            let skeleton = if npc.is_female {
+                                skel_female.clone().or_else(|| skel_male.clone())
+                            } else {
+                                skel_male.clone().or_else(|| skel_female.clone())
+                            };
+
+                            let Some(skel) = skeleton else {
+                                eprintln!(
+                                    "警告: スケルトン NIF が読み込めないためアクター \"{}\" をスキップします",
+                                    npc.name
+                                );
+                                continue;
+                            };
+
+                            let body_path = if let Some(ref model) = npc.outfit_model {
+                                model.clone()
+                            } else if npc.is_female {
+                                "meshes\\characters\\_female\\upperbody.nif".to_string()
+                            } else {
+                                "meshes\\characters\\_male\\upperbody.nif".to_string()
+                            };
+
+                            let part_paths = get_actor_part_paths(npc.is_female, &body_path);
+                            let mut parts = Vec::new();
+                            for path in &part_paths {
+                                let nif = if let Some(cached) = nif_cache.get(path) {
+                                    Some(cached.clone())
+                                } else {
+                                    let full_path = if path.starts_with("meshes\\")
+                                        || path.starts_with("meshes/")
+                                    {
+                                        path.clone()
+                                    } else {
+                                        format!("meshes\\{}", path)
+                                    };
+                                    if let Ok(bytes) = vfs.read(&full_path) {
+                                        let mut cursor = Cursor::new(bytes);
+                                        if let Ok(parsed) = NifFile::read(&mut cursor) {
+                                            let arc = Arc::new(parsed);
+                                            nif_cache.insert(path.clone(), arc.clone());
+                                            Some(arc)
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                };
+                                if let Some(p) = nif {
+                                    parts.push(p);
+                                }
+                            }
+
+                            scene.add_actor(
+                                &device,
+                                &queue,
+                                &context,
+                                &mut vfs,
+                                npc.form_id,
+                                &npc.name,
+                                &npc.transform,
+                                skel,
+                                parts,
+                                kf_nif.clone(),
+                                anim_clip.clone(),
+                                &mut actor_texture_cache,
+                            );
+                            println!(
+                                "  - アクター \"{}\" (FormID: 0x{:08X}, 性別: {}) を配置 (パーツ数: {})",
+                                npc.name,
+                                npc.form_id,
+                                if npc.is_female { "女" } else { "男" },
+                                part_paths.len()
+                            );
+                        }
+                    }
 
                     let clear_color = if let Some(ref cl) = primary_lighting {
                         if cl.fog_far > 0.0 {
@@ -852,7 +1004,9 @@ impl ViewerState {
                 } else {
                     outfit_or_naked.clone()
                 };
-                let part_paths = get_actor_part_paths(&body_path);
+                let is_female = outfit_or_naked.to_ascii_lowercase().contains("female")
+                    || outfit_or_naked.to_ascii_lowercase().contains("outfitf");
+                let part_paths = get_actor_part_paths(is_female, &body_path);
                 let mut anim_parts = Vec::new();
                 for path in &part_paths {
                     if let Ok(bytes) = vfs.read(path) {
@@ -1139,6 +1293,9 @@ impl ViewerState {
             0,
             bytemuck::cast_slice(&[light_uniform]),
         );
+
+        // セルまたはワールド内に配置された全アクターのアニメーション・スキニング更新
+        self.scene.update_actors(dt, &self.device, &self.queue);
 
         // アニメーション更新ループ (Anim / Actor モード時)
         // 参照元: Gamebryo 2.6 `NiControllerSequence::Update` → `NiSkinInstance::Update`
@@ -1509,7 +1666,12 @@ fn is_editor_marker_or_effect(edid: &str, model: &str) -> bool {
 ///
 /// 頭部、目 (左右)、歯 (上下)、舌、胴体/衣装、手 (左右) を過不足なく構成する。
 /// 参照元: Gamebryo 2.6 キャラクタパーツ合成, `knowledge/actor_and_skin_mesh.md` (セクション 4.6, 4.7)
-fn get_actor_part_paths(body_path: &str) -> Vec<String> {
+fn get_actor_part_paths(is_female: bool, body_path: &str) -> Vec<String> {
+    let (right_hand, left_hand) = if is_female {
+        ("meshes\\characters\\_female\\righthand.nif", "meshes\\characters\\_female\\lefthand.nif")
+    } else {
+        ("meshes\\characters\\_male\\righthand.nif", "meshes\\characters\\_male\\lefthand.nif")
+    };
     vec![
         "meshes\\characters\\head\\headhuman.nif".to_string(),
         "meshes\\characters\\head\\eyelefthuman.nif".to_string(),
@@ -1518,7 +1680,7 @@ fn get_actor_part_paths(body_path: &str) -> Vec<String> {
         "meshes\\characters\\head\\teethlowerhuman.nif".to_string(),
         "meshes\\characters\\head\\tonguehuman.nif".to_string(),
         body_path.to_string(),
-        "meshes\\characters\\_male\\righthand.nif".to_string(),
-        "meshes\\characters\\_male\\lefthand.nif".to_string(),
+        right_hand.to_string(),
+        left_hand.to_string(),
     ]
 }

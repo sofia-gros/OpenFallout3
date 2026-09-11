@@ -212,6 +212,21 @@ Fallout 3 の頭部（`headhuman.nif`）は外皮（顔・頭皮・耳・首）�
    - アニメーション更新時:
      - 対象ボーンの現在ワールド変換行列で各メッシュの GPU モデル行列バッファ（ModelUniform）を毎フレーム書き換え、頭部の動きに剛体追従させる。
 
+### 4.8 セル内アクター配置とマルチパーツ動的構築 (Phase 6-C)
+
+1. **ACHR / NPC_ レコードからの検出**:
+   - セル内の配置参照（REFR）のうち、ベースオブジェクトが `NPC_` であるもの、またはレコード種別が `ACHR` であるものを検出。
+   - 静的 3D メッシュ（STAT, FURN 等）のパイプラインから分離し、アクター生成キューへ登録。
+2. **マルチパーツ動的アセンブリ**:
+   - 性別（`is_female`）および防具（`default_armor` → `ARMO`）から、頭部、両眼球、上下歯、舌、素体/衣装、両手（男/女別）のパーツパスリストを構築。
+   - スケルトン（`skeleton.nif`）およびパーツ NIF を VFS からロード（キャッシュにより同一パーツは再利用）。
+3. **ワールド空間トランスフォーム配置 (`RenderActorInstance`)**:
+   - アクターのワールド位置（`position`）、回転（`rotation`）、スケール（`scale`）から `world_transform`（$T_{\text{actor}}$）を計算。
+   - スキンメッシュの頂点はスケルトン原点基準のローカル変形を行い、GPU 頂点シェーダーで $T_{\text{actor}}$ を乗算。
+   - 剛体パーツ（目・歯・舌）はボーンワールド行列 $M_{\text{bone}}(t)$ に $T_{\text{actor}}$ を合成（$T_{\text{actor}} \cdot M_{\text{bone}}(t)$）してモデル Uniform バッファへ毎フレーム書き込み。
+4. **独立アイドルアニメーション再生**:
+   - 各アクターインスタンスが独立した `AnimationPlayer` を保持し、セル内の複数 NPC が同時に自然なアイドル動作を継続。
+
 ---
 
 ## 5. 実装ステータス (2026-09-11 更新)
@@ -233,11 +248,14 @@ Fallout 3 の頭部（`headhuman.nif`）は外皮（顔・頭皮・耳・首）�
 | B-Spline 圧縮補間 (NiBSplineCompTransformInterpolator) | 完了（Cox-de Boor 基底評価） |
 | 実アセットでの T-Pose スキニング確認 | 完了（実測誤差 0.00001 未満・完全一致） |
 | 実アセットでのアニメーション再生確認 | 完了（fo3_viewer `-- anim` モード稼働） |
-| GPU シェーダースキニング（ボーン行列パレット） | 未実装 |
+| 全身マルチパーツ自動結合 (Actor モード) | 完了（頭部・両目・口内・手先・防具/素体の一括制御） |
+| セル内アクター自動配置 & アニメーション再生 (Phase 6-C) | **完了** (`RenderActorInstance`, `scene.add_actor`, `update_actors`) |
+| GPU シェーダースキニング（ボーン行列パレット） | 未実装 (Phase 6-D) |
 
-### CPU スキニング実装ファイル
+### アクター & スキニング実装ファイル
 - `crates/fo3_nif/src/blocks/skin.rs` - `NiSkinData` / `BoneData` / `BoneVertData`
 - `crates/fo3_render/src/skinning.rs` - `apply_skinning_cpu` / `apply_skinning_cpu_with_bones`
 - `crates/fo3_render/src/animation.rs` - `AnimationClip` / `AnimationPlayer` / `apply_pose` / B-Spline 評価
 - `crates/fo3_render/src/mesh.rs` - `GpuMesh::from_tri_shape_skinned`
-- `crates/fo3_render/src/scene.rs` - `NiTriShape` スキニング分岐 / FK 再計算
+- `crates/fo3_render/src/scene.rs` - `RenderActorInstance` / `add_actor` / `update_actors` / HeadParts 剛体追従
+- `crates/fo3_viewer/src/main.rs` - セル内 ACHR 自動検出・マルチパーツ動的構築・アニメーション更新ループ
