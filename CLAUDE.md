@@ -2,21 +2,22 @@
 
 ### Codebase & Memory Access
 
-- **CodeGraph MCP の活用**: コード構造、シンボル定義、関数呼び出し関係（`calls`, `uses` 等コードのピンポイント参照はgrep/ripgrep等の検索コマンドに任せ、Memory MCPは**進行中のタスク状態・未解決Issue・仕様の決定事項（コンテキスト復元用）**に特化させる形に更新します。
-
-### `CLAUDE.md`
-
-```markdown
-# CLAUDE Context & Rules for OpenFallout3
-
-### Codebase & Memory Access
-
-- **検索ファーストの原則**: コード調査時はファイル全体を直接開かず、関数名・構造体名・キーワードによる検索（grep/AST検索）を優先し、最小限のブロックのみを参照すること。
+- **検索ファーストの原則 (Tier 1優先)**: コード調査時はファイル全体を直接開かず、関数名・構造体名・キーワードによる検索（`grep_search` / CodeGraph MCP）を優先し、最小限のブロックのみを参照すること。
+- **Command Tier System の遵守**:
+  - `Tier 1`: `grep_search`, `find_by_name`, `CodeGraph MCP` (探索・特定)
+  - `Tier 2`: `cargo check`, `cargo test` (型検査・コンパイラ駆動検証)
+  - `Tier 3`: `replace_file_content` (差分編集)
+  - `Tier 4`: `view_file` (**最高警戒レベル**。最大50行、連続呼び出し絶対禁止)
 - **Memory MCP の運用（Task / Issue / Decision 特化）**:
   - ファイル内容や関数構造のキャッシュ目的では使用しない（検索コマンドで代替可能かつ陳腐化するため）。
   - **現在進行中のタスク状態**（作業中クレート、実装フェーズ、次の着手項目）を記録・同期すること。
   - **未解決の課題・既知のバグ・仕様の決定事項**（「なぜこの実装にしたか」のコンテキスト）を永続化し、コンテキスト喪失時の手戻りを防ぐこと。
   - セッション開始時および新タスク着手時は、まずメモリから未完了Issueや前提条件を確認すること。
+
+### 1,000行ファイル上限とリファクタリング義務
+
+- 単一の Rust ソースファイル (`.rs`) が **1,000行** を超えた場合、新機能追加よりも優先して機能別サブモジュールへの分割・リファクタリングを行うこと。
+- 専用スキル `refactor-large-file` を発動し、Gamebryo 2.6 の責務に準拠したモジュール構造に整理すること。
 
 ### 出力スタイル (Output Style)
 
@@ -29,4 +30,4 @@
 
 - verify-gamebryo-conformance
 - lookup-nif-spec
-```
+- refactor-large-file

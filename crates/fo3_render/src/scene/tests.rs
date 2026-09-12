@@ -855,6 +855,7 @@
             anim_skin_meshes: Vec::new(),
             anim_rigid_meshes: Vec::new(),
             actors: Vec::new(),
+            refr_mesh_ranges: Vec::new(),
         };
 
         let actor = RenderActorInstance {
@@ -865,6 +866,7 @@
             parts: vec![dummy_nif.clone()],
             anim_player: None,
             kf_nif: None,
+            sequence_manager: None,
             anim_pose: crate::animation::SkeletonPose::default(),
             anim_skin_meshes: Vec::new(),
             anim_rigid_meshes: vec![

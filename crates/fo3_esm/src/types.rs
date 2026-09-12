@@ -79,6 +79,8 @@ pub const REC_TXST: FourCC = FourCC(*b"TXST");
 pub const REC_OTFT: FourCC = FourCC(*b"OTFT");
 pub const REC_HAIR: FourCC = FourCC(*b"HAIR");
 pub const REC_LVLI: FourCC = FourCC(*b"LVLI");
+pub const REC_DIAL: FourCC = FourCC(*b"DIAL");
+pub const REC_INFO: FourCC = FourCC(*b"INFO");
 
 pub const SUB_EDID: FourCC = FourCC(*b"EDID");
 pub const SUB_LVLO: FourCC = FourCC(*b"LVLO");
@@ -130,6 +132,9 @@ pub const SUB_XCNT: FourCC = FourCC(*b"XCNT");
 pub const SUB_XEMI: FourCC = FourCC(*b"XEMI");
 pub const SUB_XLIG: FourCC = FourCC(*b"XLIG");
 pub const SUB_XRDS: FourCC = FourCC(*b"XRDS");
+pub const SUB_FGGS: FourCC = FourCC(*b"FGGS");
+pub const SUB_FGGA: FourCC = FourCC(*b"FGGA");
+pub const SUB_FGTS: FourCC = FourCC(*b"FGTS");
 
 /// 32-bit オブジェクト一意識別子 (FormID)。
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]

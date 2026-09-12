@@ -136,6 +136,73 @@ impl GpuTexture {
         })
     }
 
+    /// 生 RGBA8 ピクセルバッファから GPU テクスチャを生成する。
+    /// FaceGen EGT 動的合成テクスチャなどに使用。
+    pub fn from_rgba8(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+        label: Option<&str>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        if rgba.len() != (width * height * 4) as usize {
+            return Err("RGBA buffer size does not match dimensions".into());
+        }
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label,
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        Ok(GpuTexture {
+            texture,
+            view,
+            sampler,
+        })
+    }
+
     /// テクスチャ未設定または読み込み失敗時のフォールバック用 2x2 白色テクスチャを生成。
     pub fn create_default_white(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let size = 2;

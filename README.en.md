@@ -18,7 +18,7 @@
   <a href="https://wgpu.rs/"><img src="https://img.shields.io/badge/Graphics-wgpu%20(Vulkan%2FDX12%2FMetal)-blue.svg?logo=webgpu" alt="wgpu"></a>
   <a href="https://rapier.rs/"><img src="https://img.shields.io/badge/Physics-Rapier3D-red.svg" alt="Rapier3D"></a>
   <a href="AGENTS.md"><img src="https://img.shields.io/badge/Architecture-Gamebryo%202.6-success.svg" alt="Gamebryo 2.6"></a>
-  <img src="https://img.shields.io/badge/Tests-44%2F44%20Passing-brightgreen.svg" alt="Tests: 44/44 Passing">
+  <img src="https://img.shields.io/badge/Tests-58%2F58%20Passing-brightgreen.svg" alt="Tests: 58/58 Passing">
 </p>
 
 ---
@@ -86,6 +86,7 @@ Inspired by initiatives such as OpenMW for *Morrowind*, OpenFallout3 reads origi
 
 | Date | Milestone & Changes | Core Components |
 | :--- | :--- | :--- |
+| **2026-09-12** | **Phase 6-D: GPU Hardware Skinning (GPU Skinning Engine)**<br>・**Bone Palette Uniform Buffers (`GpuBonePalette`)**: Replaced per-frame CPU vertex skinning and vertex buffer re-uploads (`write_buffer`) with 4-bone Linear Blend Skinning (LBS) evaluated entirely in vertex shaders<br>・**Gamebryo 2.6 `NiSkinPartition` Pipeline**: Transferred partition bone palette indices and weights as GPU vertex attributes (`location 6, 7`) to evaluate composite matrices $P_k = M_{\text{bone}} \cdot B_{\text{bone}} \cdot S_{\text{root}}$ in parallel<br>・**Substantial Performance Optimization**: Minimized CPU overhead when rendering dozens of animated NPCs simultaneously | `fo3_render`<br>`fo3_viewer` |
 | **2026-09-12** | **Full Equipment Resolution Engine & Actor Visual Fixes**<br>・**Recursive Leveled Item (`LVLI`) Resolution**: Implemented nested BFS resolution, fixing all missing equipment (Vault 101 security armor/helmets/batons, Lucas Simms' hat/duster/Chinese Assault Rifle)<br>・**Havok Collision Filter**: Prevented `ColGroupInfo` strings from being mistaken as bone names, accurately mounting weapons to the right-hand `"Weapon"` bone<br>・**Rigid Uniform Initial Synchronization**: Corrected initial T-pose transform uniforms for hats, hair, and weapons<br>・**Finger Compression Fix (`BoneTransformOverride`)**: Preserved bind-pose translations for translation-free bones<br>・**Hair Color Fallback**: Natural palette fallback for NPCs without `HCLR` | `fo3_esm`<br>`fo3_render`<br>`fo3_viewer` |
 | **2026-09-11** | **Phase 6-C: In-Cell NPC Auto-Assembly & Animation**<br>・Auto-detection of `ACHR` / `NPC_` records in interior/exterior cells; batch assembly of gender skeletons, bodies, heads, eyes, teeth, and hands<br>・Synchronized playback of idle animations (`ttnpchappysubtlelistena.kf`)<br>・Initial state culling for dismemberment gore caps | `fo3_render`<br>`fo3_viewer` |
 | **2026-09-08** | **Phase 6-B: Keyframe Animation Player (`AnimationPlayer`)**<br>・`NiTransformInterpolator` (linear/Slerp) and B-Spline (Cox-de Boor basis) pose evaluation<br>・Hierarchical Forward Kinematics (FK) bone world recalculation pipeline | `fo3_render` |
@@ -212,8 +213,8 @@ cargo run --release -p fo3_viewer -- "A:\SteamLibrary\steamapps\common\Fallout 3
 | **Phase 5: Collision & Physics** | Havok collision conversion, Rapier3D integration, real-time KCC | **Complete** |
 | **Phase 6-A/B: Skinning & Animation** | NiSkinData skinning, KF interpolation, multi-part actor assembly | **Complete** |
 | **Phase 6-C: In-Cell NPC Assembly & Equipment** | In-cell NPC placement, recursive LVLI resolution, hats, weapons, and outfits | **Complete** |
-| **Phase 6-D: GPU Skinning** | Vertex shader bone palette skinning for performance optimization | Planned |
-| **Phase 7: Interaction** | Door teleportation (XTEL), containers, activators | Planned |
+| **Phase 6-D: GPU Skinning** | Vertex shader bone palette skinning for performance optimization | **Complete** |
+| **Phase 7: Interaction** | Crosshair physics raycast occlusion, NIF sequence door anims (Vault 101/sliding/regular doors), container lid pivot separation, item pickup & inventory | **Complete** |
 | **Phase 8: Character & Camera** | Player actor, first/third-person models, state machines | Planned |
 | **Phase 9: Script VM & Dialogue** | SCPT bytecode virtual machine, dialogue (DIAL/INFO) UI | Planned |
 

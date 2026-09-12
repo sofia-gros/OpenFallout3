@@ -30,6 +30,20 @@ pub struct RayIntersection {
     pub distance: f32,
 }
 
+/// インタラクション用レイキャスト交差結果（コライダーユーザーデータ含む）。
+/// 参照元: Gamebryo 2.6 `NiPick::PickObjects`, Fallout 3 実機クロスヘア判定
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InteractionRayHit {
+    /// ヒットしたワールド座標位置 [X, Y, Z]
+    pub point: Vec3,
+    /// ヒット面の法線ベクトル [Nx, Ny, Nz]
+    pub normal: Vec3,
+    /// レイの始点からの距離
+    pub distance: f32,
+    /// コライダーに紐づくユーザーデータ (REFR FormID など。0 は静的壁・地形)
+    pub user_data: u128,
+}
+
 /// キャラクタコントローラーのシミュレーション状態。
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CharacterState {

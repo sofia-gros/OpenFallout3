@@ -12,11 +12,12 @@ pub mod traits;
 pub mod rapier;
 
 pub use collision_layers::layer_to_interaction_groups;
-pub use traits::{CharacterState, PhysicsBackend, RayIntersection};
+pub use traits::{CharacterState, InteractionRayHit, PhysicsBackend, RayIntersection};
 pub use rapier::{
     collision_shape_to_rapier, rigid_body_data_to_rapier,
     RapierCharacterController, RapierPhysicsWorld,
 };
+pub use rapier3d::prelude::RigidBodyHandle;
 
 #[cfg(test)]
 mod tests {
@@ -113,5 +114,71 @@ mod tests {
         assert!(state.is_grounded, "床に到達したのに接地フラグが立っていません");
         // 底面が床 Z = 0.0 に接するため、中心 Z は 64.0 付近
         assert!((controller.position.z - 64.0).abs() < 1.0, "キャラクタの接地中心高度が不正です: {}", controller.position.z);
+    }
+
+    /// インタラクション用レイキャストのターゲット検出および遮蔽（オクルージョン）判定の検証。
+    #[test]
+    fn test_interaction_raycast_and_occlusion() {
+        let mut world = RapierPhysicsWorld::new();
+
+        // 1. 手前の遮蔽壁 (X = 50 に配置, user_data = 0)
+        let wall_shape = CollisionShape::Box {
+            half_extents: [5.0, 100.0, 100.0],
+            center: [0.0, 0.0, 0.0],
+            material: Fallout3HavokMaterial::Stone,
+        };
+        let wall_body = RigidBodyData {
+            shape: wall_shape,
+            mass: 0.0,
+            friction: 0.5,
+            restitution: 0.0,
+            linear_damping: 0.0,
+            angular_damping: 0.0,
+            layer: Fallout3Layer::Static,
+            translation: [0.0, 0.0, 0.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+        };
+        let wall_data = NifCollisionData { bodies: vec![wall_body] };
+        world.add_nif_collision_with_user_data(&wall_data, Vec3::new(50.0, 0.0, 0.0), Quat::IDENTITY, 0);
+
+        // 2. 奥のアイテム (X = 100 に配置, user_data = 0x00012345)
+        let item_shape = CollisionShape::Box {
+            half_extents: [10.0, 10.0, 10.0],
+            center: [0.0, 0.0, 0.0],
+            material: Fallout3HavokMaterial::Metal,
+        };
+        let item_body = RigidBodyData {
+            shape: item_shape,
+            mass: 0.0,
+            friction: 0.5,
+            restitution: 0.0,
+            linear_damping: 0.0,
+            angular_damping: 0.0,
+            layer: Fallout3Layer::Static,
+            translation: [0.0, 0.0, 0.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+        };
+        let item_data = NifCollisionData { bodies: vec![item_body] };
+        world.add_nif_collision_with_user_data(&item_data, Vec3::new(100.0, 0.0, 0.0), Quat::IDENTITY, 0x00012345);
+
+        // 始点 (0, 0, 0) から +X 方向へレイキャスト (距離 180.0)
+        let hit = world.cast_ray_interaction(Vec3::ZERO, Vec3::X, 180.0);
+        assert!(hit.is_some(), "レイがヒットしませんでした");
+        let hit_res = hit.unwrap();
+        // 手前の壁 (X=50, 半径5で表面 X=45) にヒットするため user_data は 0 (壁) であり、奥のアイテムは遮蔽される
+        assert_eq!(hit_res.user_data, 0, "手前の壁で遮蔽されず奥のアイテムにヒットしてしまいました");
+        assert!((hit_res.point.x - 45.0).abs() < 1e-3, "壁の手前表面にヒットしていません");
+
+        // 壁の無い方向 (+Y 方向) に別アイテム (Y = 100, user_data = 0x00054321) を配置
+        world.add_nif_collision_with_user_data(&item_data, Vec3::new(0.0, 100.0, 0.0), Quat::IDENTITY, 0x00054321);
+
+        // 始点 (0, 0, 0) から +Y 方向へレイキャスト
+        let hit_y = world.cast_ray_interaction(Vec3::ZERO, Vec3::Y, 180.0);
+        assert!(hit_y.is_some(), "+Y 方向のアイテムにヒットしませんでした");
+        assert_eq!(hit_y.unwrap().user_data, 0x00054321, "遮蔽物のないアイテムの FormID が取得できませんでした");
+
+        // 距離超過テスト: 最大距離 50.0 では Y=100 のアイテムに届かない
+        let hit_short = world.cast_ray_interaction(Vec3::ZERO, Vec3::Y, 50.0);
+        assert!(hit_short.is_none(), "最大距離を超過しているのにヒットしてしまいました");
     }
 }

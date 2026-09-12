@@ -15,6 +15,8 @@ pub mod npc;
 pub mod otft;
 pub mod hair;
 pub mod lvli;
+pub mod term;
+pub mod dial;
 
 pub use tes4::Tes4Header;
 pub use stat::StatRecord;
@@ -30,5 +32,8 @@ pub use npc::{InventoryItem, NpcRecord};
 pub use otft::OtftRecord;
 pub use hair::HairRecord;
 pub use lvli::{LvliRecord, LvloEntry};
+pub use term::{TermMenuItem, TermRecord};
+pub use dial::{info_flags, DialRecord, InfoRecord};
+
 
 

@@ -22,7 +22,7 @@ use crate::scene::bones::{
     resolve_bone_world_transforms, resolve_bone_world_transforms_by_name,
 };
 use crate::scene::mesh::{
-    create_render_mesh, find_alpha_property, find_material_property, to_core_transform, RenderMesh,
+    create_render_mesh, create_render_mesh_with_override, find_alpha_property, find_material_property, to_core_transform, RenderMesh,
 };
 
 /// アクターパーツのメッシュ走査時に、生成された RenderMesh と
@@ -36,6 +36,10 @@ pub struct ActorPartAnimCollector<'a> {
     pub is_hair: bool,
     pub has_hat: bool,
     pub tint_color: Option<[f32; 4]>,
+    pub head_diffuse_override: Option<&'a GpuTexture>,
+    pub head_geometry_morph: Option<&'a crate::facegen::GeometryMorph>,
+    pub head_fg_sym: Option<&'a [f32]>,
+    pub head_fg_asym: Option<&'a [f32]>,
     pub shape_transforms: HashMap<usize, Mat4>,
     pub anim_skins: &'a mut Vec<AnimatedSkinMesh>,
     pub anim_rigids: &'a mut Vec<AnimatedRigidMesh>,
@@ -48,6 +52,10 @@ impl<'a> ActorPartAnimCollector<'a> {
         is_hair: bool,
         has_hat: bool,
         tint_color: Option<[f32; 4]>,
+        head_diffuse_override: Option<&'a GpuTexture>,
+        head_geometry_morph: Option<&'a crate::facegen::GeometryMorph>,
+        head_fg_sym: Option<&'a [f32]>,
+        head_fg_asym: Option<&'a [f32]>,
         part_nif: &NifFile,
         anim_skins: &'a mut Vec<AnimatedSkinMesh>,
         anim_rigids: &'a mut Vec<AnimatedRigidMesh>,
@@ -62,6 +70,10 @@ impl<'a> ActorPartAnimCollector<'a> {
             is_hair,
             has_hat,
             tint_color,
+            head_diffuse_override,
+            head_geometry_morph,
+            head_fg_sym,
+            head_fg_asym,
             shape_transforms,
             anim_skins,
             anim_rigids,
@@ -195,9 +207,9 @@ pub fn traverse_block(
 
             if shape.geom.data >= 0 && (shape.geom.data as usize) < nif.blocks.len() {
                 if let NifBlock::NiTriShapeData(ref data) = nif.blocks[shape.geom.data as usize] {
-                    // NiSkinInstance / BSDismemberSkinInstance が存在する場合は CPU スキニングを適用する
+                    // NiSkinInstance / BSDismemberSkinInstance が存在する場合は GPU / CPU スキニングを適用する
                     // 参照元: knowledge/actor_and_skin_mesh.md, Gamebryo 2.6 NiSkinInstance::Update
-                    let gpu_mesh = if shape.geom.skin_instance >= 0 {
+                    let mesh_and_palette = if shape.geom.skin_instance >= 0 {
                         let inst_idx = shape.geom.skin_instance as usize;
                         if inst_idx < nif.blocks.len() {
                             let skin_inst_ref = match &nif.blocks[inst_idx] {
@@ -217,24 +229,117 @@ pub fn traverse_block(
                                 } else {
                                     Some(bone_transforms.as_slice())
                                 };
-                                if let Some((pos, nrm)) = apply_skinning_cpu_with_bones(data, inst, nif, bone_refs) {
-                                    GpuMesh::from_tri_shape_skinned(device, data, &pos, &nrm)
+                                let is_head_shape = name.to_ascii_lowercase().contains("head");
+                                let morphed_data = if is_head_shape {
+                                    if let Some(ref collector) = anim_collector {
+                                        if let (Some(morph), Some(sym), Some(asym)) = (
+                                            collector.head_geometry_morph,
+                                            collector.head_fg_sym,
+                                            collector.head_fg_asym,
+                                        ) {
+                                            let mut cloned_data = data.clone();
+                                            let mut pos_vec: Vec<[f32; 3]> = cloned_data
+                                                .common
+                                                .vertices
+                                                .iter()
+                                                .map(|v| [v.x, v.y, v.z])
+                                                .collect();
+                                            crate::facegen::apply_geometry_morph(
+                                                &mut pos_vec,
+                                                morph,
+                                                sym,
+                                                asym,
+                                            );
+                                            for (i, p) in pos_vec.iter().enumerate() {
+                                                cloned_data.common.vertices[i].x = p[0];
+                                                cloned_data.common.vertices[i].y = p[1];
+                                                cloned_data.common.vertices[i].z = p[2];
+                                            }
+                                            Some(cloned_data)
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
                                 } else {
-                                    GpuMesh::from_tri_shape(device, data)
+                                    None
+                                };
+                                let eval_data = morphed_data.as_ref().unwrap_or(data);
+
+                                // 参照元: Gamebryo 2.6 ハードウェアスキニング (NiSkinPartition)
+                                let skin_part_block = inst.skin_partition;
+                                let skin_data_block = inst.data;
+                                let gpu_skin_opt = if skin_part_block >= 0
+                                    && (skin_part_block as usize) < nif.blocks.len()
+                                    && skin_data_block >= 0
+                                    && (skin_data_block as usize) < nif.blocks.len()
+                                {
+                                    if let (NifBlock::NiSkinPartition(ref sp), NifBlock::NiSkinData(ref sd)) = (
+                                        &nif.blocks[skin_part_block as usize],
+                                        &nif.blocks[skin_data_block as usize],
+                                    ) {
+                                        if let Some(first_part) = sp.partitions.first() {
+                                            if let Some(mesh) = crate::gpu_skin::create_gpu_skin_mesh_from_partition(
+                                                device,
+                                                eval_data,
+                                                first_part,
+                                            ) {
+                                                let bp = crate::gpu_skin::GpuBonePalette::new(
+                                                    device,
+                                                    context,
+                                                    first_part,
+                                                    inst,
+                                                    sd,
+                                                    nif,
+                                                );
+                                                if let Some(name_map) = skeleton_bone_name_map {
+                                                    bp.update(queue, name_map);
+                                                } else {
+                                                    bp.update_with_blocks(queue, bone_world_map);
+                                                }
+                                                Some((mesh, bp))
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                };
+
+                                if let Some((mesh, bp)) = gpu_skin_opt {
+                                    (Some(mesh), Some(bp))
+                                } else if let Some((pos, nrm)) = apply_skinning_cpu_with_bones(eval_data, inst, nif, bone_refs) {
+                                    (GpuMesh::from_tri_shape_skinned(device, eval_data, &pos, &nrm), None)
+                                } else {
+                                    (GpuMesh::from_tri_shape(device, eval_data), None)
                                 }
                             } else {
-                                GpuMesh::from_tri_shape(device, data)
+                                (GpuMesh::from_tri_shape(device, data), None)
                             }
                         } else {
-                            GpuMesh::from_tri_shape(device, data)
+                            (GpuMesh::from_tri_shape(device, data), None)
                         }
                     } else {
-                        GpuMesh::from_tri_shape(device, data)
+                        (GpuMesh::from_tri_shape(device, data), None)
                     };
+
+                    let (gpu_mesh, bone_palette) = mesh_and_palette;
 
                     if let Some(gpu_mesh) = gpu_mesh {
                         let tint = anim_collector.as_ref().and_then(|c| c.tint_color);
-                        let render_mesh = create_render_mesh(
+                        let is_head_shape = name.to_ascii_lowercase().contains("head");
+                        let override_tex = if is_head_shape {
+                            anim_collector.as_ref().and_then(|c| c.head_diffuse_override)
+                        } else {
+                            None
+                        };
+                        let mut render_mesh = create_render_mesh_with_override(
                             device,
                             context,
                             &name,
@@ -251,7 +356,9 @@ pub fn traverse_block(
                             default_normal_texture,
                             default_glow_texture,
                             tint,
+                            override_tex,
                         );
+                        render_mesh.bone_palette = bone_palette;
                         out_meshes.push(render_mesh);
 
                         // アクターパーツ走査時: 生成されたメッシュとスキン/剛体情報を 1:1 でダイレクト登録

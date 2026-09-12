@@ -38,7 +38,7 @@ use fo3_nif::types::{Matrix33, Vector3};
 /// ※旧実装は `from_cols_array` で列 c に NIF の列 c を入れる非転置表現を使っていたため、
 ///   `bone_world`（転置）との回転向きが逆になり、スキン変形が大きく崩れるバグがあった
 ///   （2026-09-08 修正）。
-fn build_bone_matrix(translation: Vector3, rotation: Matrix33, scale: f32) -> Mat4 {
+pub fn build_bone_matrix(translation: Vector3, rotation: Matrix33, scale: f32) -> Mat4 {
     let r = &rotation.m;
     // NIF の Matrix33 は行優先 (row-major) 格納。glam は列優先なので転置して正しい数学行列を構築する。
     let rot_mat = Mat4::from_mat3(glam::Mat3::from_cols_array_2d(r).transpose() * scale);

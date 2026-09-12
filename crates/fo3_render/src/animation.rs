@@ -429,18 +429,38 @@ pub struct AnimationClip {
 impl AnimationClip {
     /// KF ファイルから最初のアニメーションシーケンスを取り出してクリップを構築する。
     pub fn from_kf(kf: &NifFile) -> Option<Self> {
-        // ルート（または最初）の NiControllerSequence を検索
         let seq = kf.blocks.iter().find_map(|b| match b {
             NifBlock::NiControllerSequence(s) => Some(s),
             _ => None,
         })?;
+        Self::from_controller_sequence(kf, seq)
+    }
 
-        let name = kf.get_string(seq.name_index as u32).unwrap_or("").to_string();
+    /// NIF 内の指定名（大文字小文字無視、例: "Open", "Close"）の NiControllerSequence を検索してクリップを構築する。
+    /// 参照元: Gamebryo 2.6 `NiControllerManager::GetSequenceByName`
+    pub fn from_nif_sequence(nif: &NifFile, target_name: &str) -> Option<Self> {
+        let seq = nif.blocks.iter().find_map(|b| match b {
+            NifBlock::NiControllerSequence(s) => {
+                let name = nif.get_string(s.name_index as u32).unwrap_or("");
+                if name.eq_ignore_ascii_case(target_name) {
+                    Some(s)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })?;
+        Self::from_controller_sequence(nif, seq)
+    }
+
+    /// `NiControllerSequence` ブロックから `AnimationClip` を構築する。
+    pub fn from_controller_sequence(nif: &NifFile, seq: &fo3_nif::NiControllerSequence) -> Option<Self> {
+        let name = nif.get_string(seq.name_index as u32).unwrap_or("").to_string();
         let duration = (seq.stop_time - seq.start_time).max(0.0);
 
         let mut channels = HashMap::new();
         for cb in &seq.controlled_blocks {
-            if let Some(bone_name) = kf.get_string(cb.node_name_index as u32) {
+            if let Some(bone_name) = nif.get_string(cb.node_name_index as u32) {
                 channels.insert(
                     bone_name.to_string(),
                     BoneChannel {

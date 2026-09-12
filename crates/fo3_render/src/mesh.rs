@@ -4,7 +4,9 @@
 //! GPU 用の頂点バッファ・インデックスバッファへの変換および保持を担当。
 //! 参照元: `references/openmw/components/nifosg/nifloader.cpp:L1600-1623`
 
+use fo3_gamebryo_core::NiBound;
 use fo3_nif::{NiGeometryDataCommon, NiTriShapeData, NiTriStripsData};
+use glam::Vec3;
 use wgpu::util::DeviceExt;
 use crate::vertex::Vertex;
 
@@ -99,11 +101,31 @@ pub fn build_vertices(common: &NiGeometryDataCommon) -> Vec<Vertex> {
     vertices
 }
 
+/// 頂点配列の AABB から Gamebryo 2.6 準拠のバウンディングスフィアを計算する。
+/// 参照元: Gamebryo 2.6 `NiBound::ComputeFromData`, references/nifxml/nif.xml:L173
+pub fn calculate_vertices_bound(vertices: &[Vertex]) -> NiBound {
+    if vertices.is_empty() {
+        return NiBound::default();
+    }
+    let mut min = Vec3::splat(f32::MAX);
+    let mut max = Vec3::splat(f32::MIN);
+    for v in vertices {
+        let p = Vec3::from_slice(&v.position);
+        min = min.min(p);
+        max = max.max(p);
+    }
+    let center = (min + max) * 0.5;
+    let radius = (max - min).length() * 0.5;
+    NiBound { center, radius }
+}
+
 /// GPU 上に確保されたメッシュリソース。
+/// 参照元: Gamebryo 2.6 `NiBound`, references/nifxml/nif.xml:L173
 pub struct GpuMesh {
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
     pub num_elements: u32,
+    pub bound: fo3_gamebryo_core::NiBound,
 }
 
 impl GpuMesh {
@@ -125,7 +147,13 @@ impl GpuMesh {
             return None;
         }
 
-        Self::create(device, &vertices, &indices)
+        let bs = &data.common.bounding_sphere;
+        let bound = fo3_gamebryo_core::NiBound {
+            center: Vec3::new(bs.center.x, bs.center.y, bs.center.z),
+            radius: bs.radius,
+        };
+
+        Self::create(device, &vertices, &indices, bound)
     }
 
     /// CPU スキニング後の頂点位置・法線で NiTriShapeData から GpuMesh を生成する。
@@ -198,7 +226,8 @@ impl GpuMesh {
         }
         if indices.is_empty() { return None; }
 
-        Self::create(device, &vertices, &indices)
+        let bound = calculate_vertices_bound(&vertices);
+        Self::create(device, &vertices, &indices, bound)
     }
 
     /// NiTriStripsData から GpuMesh を生成する。
@@ -213,7 +242,13 @@ impl GpuMesh {
             return None;
         }
 
-        Self::create(device, &vertices, &indices)
+        let bs = &data.common.bounding_sphere;
+        let bound = fo3_gamebryo_core::NiBound {
+            center: Vec3::new(bs.center.x, bs.center.y, bs.center.z),
+            radius: bs.radius,
+        };
+
+        Self::create(device, &vertices, &indices, bound)
     }
 
     /// 地形 (LAND) レコードとセルグリッド座標 (grid_x, grid_y) から GpuMesh を生成する。
@@ -300,7 +335,8 @@ impl GpuMesh {
             }
         }
 
-        Self::create(device, &vertices, &indices)
+        let bound = calculate_vertices_bound(&vertices);
+        Self::create(device, &vertices, &indices, bound)
     }
 
     /// 地形 (LAND) レコードの特定のクアドラント (0..3) から GpuMesh を生成する。
@@ -407,7 +443,8 @@ impl GpuMesh {
             }
         }
 
-        Self::create(device, &vertices, &indices)
+        let bound = calculate_vertices_bound(&vertices);
+        Self::create(device, &vertices, &indices, bound)
     }
 
     /// 地形 (LAND) の追加テクスチャレイヤー (ATXT/VTXT) 用 GpuMesh を生成する。
@@ -519,10 +556,11 @@ impl GpuMesh {
             }
         }
 
-        Self::create(device, &vertices, &indices)
+        let bound = calculate_vertices_bound(&vertices);
+        Self::create(device, &vertices, &indices, bound)
     }
 
-    fn create(device: &wgpu::Device, vertices: &[Vertex], indices: &[u16]) -> Option<Self> {
+    fn create(device: &wgpu::Device, vertices: &[Vertex], indices: &[u16], bound: fo3_gamebryo_core::NiBound) -> Option<Self> {
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Mesh Vertex Buffer"),
             contents: bytemuck::cast_slice(vertices),
@@ -539,6 +577,7 @@ impl GpuMesh {
             vertex_buffer,
             index_buffer,
             num_elements: indices.len() as u32,
+            bound,
         })
     }
 
@@ -591,6 +630,10 @@ impl GpuMesh {
             contents: bytemuck::cast_slice(&vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
+
+        // スキニング後の頂点座標に合わせてバウンディングスフィアを再計算・更新
+        // 参照元: Gamebryo 2.6 `NiSkinInstance::UpdateWorldBound`
+        self.bound = calculate_vertices_bound(&vertices);
     }
 }
 

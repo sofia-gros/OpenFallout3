@@ -71,10 +71,15 @@ pub struct PlacedPointLight {
 
 impl LightingUniform {
     /// セル環境光 (XCLL) および配置点光源群から LightingUniform を構築する。
-    pub fn from_cell_lighting(
+    ///
+    /// カメラ位置単体ではなく、カメラ注視点（focus_pos / アクター位置）の双方からの距離を考慮して
+    /// 室内サルーン等の局所点光源（電球照明）が確実に 16 灯の Uniform バッファに入るよう選定する。
+    /// 参照元: Gamebryo 2.6 `NiPointLight`, `references/openmw/files/shaders/lib/light/util.glsl:L45-97`
+    pub fn from_cell_lighting_with_focus(
         cell_lighting: Option<&CellLighting>,
         lights: &[PlacedPointLight],
         camera_pos: Vec3,
+        focus_pos: Option<Vec3>,
     ) -> Self {
         let mut uniform = Self::default();
 
@@ -116,12 +121,21 @@ impl LightingUniform {
             ];
         }
 
-        // カメラに近い順に最大 16 個の点光源を選択
+        // カメラおよび注視点（被写体）に近い順に最大 16 個の点光源を選択
+        // 注視点 (focus_pos) がある場合は注視点への近さを優先し、手前だけでなく被写体周辺の電球を確実に拾う
         let mut sorted_lights: Vec<&PlacedPointLight> = lights.iter().collect();
         sorted_lights.sort_by(|a, b| {
-            let dist_a = a.position.distance_squared(camera_pos);
-            let dist_b = b.position.distance_squared(camera_pos);
-            dist_a.partial_cmp(&dist_b).unwrap_or(std::cmp::Ordering::Equal)
+            let score_a = if let Some(focus) = focus_pos {
+                a.position.distance_squared(focus) * 0.7 + a.position.distance_squared(camera_pos) * 0.3
+            } else {
+                a.position.distance_squared(camera_pos)
+            };
+            let score_b = if let Some(focus) = focus_pos {
+                b.position.distance_squared(focus) * 0.7 + b.position.distance_squared(camera_pos) * 0.3
+            } else {
+                b.position.distance_squared(camera_pos)
+            };
+            score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
         });
 
         let num_lights = sorted_lights.len().min(16);
@@ -134,5 +148,14 @@ impl LightingUniform {
         uniform.fog_far_power[2] = num_lights as f32;
 
         uniform
+    }
+
+    /// カメラ位置基準で点光源を選択する従来のファクトリ関数（後方互換用）。
+    pub fn from_cell_lighting(
+        cell_lighting: Option<&CellLighting>,
+        lights: &[PlacedPointLight],
+        camera_pos: Vec3,
+    ) -> Self {
+        Self::from_cell_lighting_with_focus(cell_lighting, lights, camera_pos, None)
     }
 }

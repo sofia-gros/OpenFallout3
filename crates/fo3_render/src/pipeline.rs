@@ -3,7 +3,7 @@
 //! シェーダー、バインドグループレイアウト、ブレンド設定、深度テストの初期化および管理。
 
 use bytemuck::{Pod, Zeroable};
-use crate::vertex::Vertex;
+use crate::vertex::{SkinnedVertex, Vertex};
 
 /// モデル、マテリアル、発光およびアルファテスト用 Uniform バッファ構造体 (112 バイト)。
 ///
@@ -98,9 +98,12 @@ pub struct RenderContext {
     pub pipeline: wgpu::RenderPipeline,
     pub transparent_pipeline: wgpu::RenderPipeline,
     pub collision_pipeline: wgpu::RenderPipeline,
+    pub skinned_pipeline: wgpu::RenderPipeline,
+    pub transparent_skinned_pipeline: wgpu::RenderPipeline,
     pub camera_bind_group_layout: wgpu::BindGroupLayout,
     pub model_bind_group_layout: wgpu::BindGroupLayout,
     pub texture_bind_group_layout: wgpu::BindGroupLayout,
+    pub bone_bind_group_layout: wgpu::BindGroupLayout,
     pub depth_format: wgpu::TextureFormat,
 }
 
@@ -346,13 +349,130 @@ impl RenderContext {
             cache: None,
         });
 
+        // Group 3: Bone Palette Uniform (binding 0)
+        // 参照元: Gamebryo 2.6 ハードウェアスキニング (NiSkinPartition)
+        let bone_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Bone Palette Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let skinned_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Skinned Render Pipeline Layout"),
+            bind_group_layouts: &[
+                &camera_bind_group_layout,
+                &model_bind_group_layout,
+                &texture_bind_group_layout,
+                &bone_bind_group_layout,
+            ],
+            push_constant_ranges: &[],
+        });
+
+        let skinned_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Skinned Mesh Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("skinned_shader.wgsl").into()),
+        });
+
+        let skinned_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Skinned Mesh Render Pipeline"),
+            layout: Some(&skinned_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &skinned_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[SkinnedVertex::desc()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &skinned_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Self::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        let transparent_skinned_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Transparent Skinned Mesh Render Pipeline"),
+            layout: Some(&skinned_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &skinned_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[SkinnedVertex::desc()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &skinned_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Self::DEPTH_FORMAT,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
         RenderContext {
             pipeline,
             transparent_pipeline,
             collision_pipeline,
+            skinned_pipeline,
+            transparent_skinned_pipeline,
             camera_bind_group_layout,
             model_bind_group_layout,
             texture_bind_group_layout,
+            bone_bind_group_layout,
             depth_format: Self::DEPTH_FORMAT,
         }
     }
@@ -400,6 +520,18 @@ mod tests {
         assert!(
             parse_res.is_ok(),
             "collision_shader.wgsl の構文検証エラー: {:?}",
+            parse_res.err()
+        );
+    }
+
+    /// GPU スキニング用 WGSL シェーダーの構文バリデーションテスト。
+    #[test]
+    fn test_skinned_shader_wgsl_validity() {
+        let shader_src = include_str!("skinned_shader.wgsl");
+        let parse_res = wgpu::naga::front::wgsl::parse_str(shader_src);
+        assert!(
+            parse_res.is_ok(),
+            "skinned_shader.wgsl の構文検証エラー: {:?}",
             parse_res.err()
         );
     }

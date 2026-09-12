@@ -308,11 +308,13 @@ Fallout 3 の頭部（`headhuman.nif`）は外皮（顔・頭皮・耳・首）�
 | 実アセットでのアニメーション再生確認 | 完了（fo3_viewer `-- anim` モード稼働） |
 | 全身マルチパーツ自動結合 (Actor モード) | 完了（頭部・両目・口内・手先・防具/素体の一括制御） |
 | セル内アクター自動配置 & アニメーション再生 (Phase 6-C) | **完了** (`RenderActorInstance`, `scene.add_actor`, `update_actors`) |
-| GPU シェーダースキニング（ボーン行列パレット） | 未実装 (Phase 6-D) |
+| GPU シェーダースキニング（ボーン行列パレット） (Phase 6-D) | **完了** (`GpuBonePalette`, `skinned_shader.wgsl`, `create_gpu_skin_mesh_from_partition`) |
 
 ### アクター & スキニング実装ファイル
 - `crates/fo3_nif/src/blocks/skin.rs` - `NiSkinData` / `BoneData` / `BoneVertData`
-- `crates/fo3_render/src/skinning.rs` - `apply_skinning_cpu` / `apply_skinning_cpu_with_bones`
+- `crates/fo3_render/src/skinning.rs` - `apply_skinning_cpu` / `apply_skinning_cpu_with_bones` (CPU フォールバック)
+- `crates/fo3_render/src/gpu_skin.rs` - `GpuBonePalette` / `create_gpu_skin_mesh_from_partition` (Phase 6-D)
+- `crates/fo3_render/src/skinned_shader.wgsl` - 4ボーン LBS GPU 頂点シェーダー (Phase 6-D)
 - `crates/fo3_render/src/animation.rs` - `AnimationClip` / `AnimationPlayer` / `apply_pose` / B-Spline 評価
 - `crates/fo3_render/src/mesh.rs` - `GpuMesh::from_tri_shape_skinned`
 - `crates/fo3_render/src/scene.rs` - `RenderActorInstance` / `add_actor` / `update_actors` / HeadParts 剛体追従

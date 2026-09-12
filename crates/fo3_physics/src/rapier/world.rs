@@ -88,12 +88,25 @@ impl RapierPhysicsWorld {
         world_pos: Vec3,
         world_rot: Quat,
     ) -> Vec<(RigidBodyHandle, ColliderHandle)> {
+        self.add_nif_collision_with_user_data(nif_col, world_pos, world_rot, 0)
+    }
+
+    /// NIF コリジョンデータをユーザーデータ（REFR FormID など）付きで物理ワールドに登録する。
+    /// 参照元: Gamebryo 2.6 `NiPick::PickObjects`, Fallout 3 実機インタラクション
+    pub fn add_nif_collision_with_user_data(
+        &mut self,
+        nif_col: &NifCollisionData,
+        world_pos: Vec3,
+        world_rot: Quat,
+        user_data: u128,
+    ) -> Vec<(RigidBodyHandle, ColliderHandle)> {
         let mut handles = Vec::new();
 
         for body_data in &nif_col.bodies {
             if let Some((rb_builder, col_builder)) =
                 rigid_body_data_to_rapier(body_data, world_pos, world_rot)
             {
+                let col_builder = col_builder.user_data(user_data);
                 let rb_handle = self.rigid_body_set.insert(rb_builder);
                 let col_handle = self.collider_set.insert_with_parent(
                     col_builder,
@@ -197,5 +210,74 @@ impl RapierPhysicsWorld {
         } else {
             None
         }
+    }
+
+    /// インタラクション用レイキャストを実行し、最前面でヒットしたコライダーのユーザーデータ（REFR FormID 等）を取得する。
+    ///
+    /// 参照元: Gamebryo 2.6 `NiPick::PickObjects`, Fallout 3 GMST `fActivatePickLength`
+    pub fn cast_ray_interaction(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        max_toi: f32,
+    ) -> Option<crate::traits::InteractionRayHit> {
+        let ray_origin = Point3::new(origin.x, origin.y, origin.z);
+        let ray_dir = Vector3::new(dir.x, dir.y, dir.z);
+        let ray = Ray::new(ray_origin, ray_dir);
+
+        let filter = QueryFilter::default();
+
+        if let Some((col_handle, hit)) = self.query_pipeline.cast_ray_and_get_normal(
+            &self.rigid_body_set,
+            &self.collider_set,
+            &ray,
+            max_toi,
+            true,
+            filter,
+        ) {
+            let user_data = self
+                .collider_set
+                .get(col_handle)
+                .map(|c| c.user_data)
+                .unwrap_or(0);
+
+            let hit_point = origin + dir * hit.time_of_impact;
+            let normal = Vec3::new(hit.normal.x, hit.normal.y, hit.normal.z);
+            Some(crate::traits::InteractionRayHit {
+                point: hit_point,
+                normal,
+                distance: hit.time_of_impact,
+                user_data,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// 登録済み剛体のワールド位置・回転を更新し、コライダーの空間構造を再構築する（アニメーション追従用）。
+    /// 参照元: Gamebryo 2.6 `bhkRigidBody` (`MO_SYS_KEYFRAMED`) 位置同期
+    pub fn set_rigid_body_transform(&mut self, handle: RigidBodyHandle, pos: Vec3, rot: glam::Quat) {
+        if let Some(rb) = self.rigid_body_set.get_mut(handle) {
+            let nalgebra_rot = nalgebra::UnitQuaternion::new_normalize(nalgebra::Quaternion::new(rot.w, rot.x, rot.y, rot.z));
+            let nalgebra_pos = nalgebra::Isometry3::from_parts(
+                nalgebra::Translation3::new(pos.x, pos.y, pos.z),
+                nalgebra_rot,
+            );
+            rb.set_position(nalgebra_pos, true);
+        }
+        self.query_pipeline.update(&self.collider_set);
+    }
+
+    /// 登録済み剛体および紐付くコライダーを物理ワールドから完全に削除する（アイテム取得時用）。
+    pub fn remove_rigid_body(&mut self, handle: RigidBodyHandle) {
+        self.rigid_body_set.remove(
+            handle,
+            &mut self.island_manager,
+            &mut self.collider_set,
+            &mut self.impulse_joint_set,
+            &mut self.multibody_joint_set,
+            true,
+        );
+        self.query_pipeline.update(&self.collider_set);
     }
 }

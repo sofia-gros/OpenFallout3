@@ -18,7 +18,7 @@
   <a href="https://wgpu.rs/"><img src="https://img.shields.io/badge/Graphics-wgpu%20(Vulkan%2FDX12%2FMetal)-blue.svg?logo=webgpu" alt="wgpu"></a>
   <a href="https://rapier.rs/"><img src="https://img.shields.io/badge/Physics-Rapier3D-red.svg" alt="Rapier3D"></a>
   <a href="AGENTS.md"><img src="https://img.shields.io/badge/Architecture-Gamebryo%202.6-success.svg" alt="Gamebryo 2.6"></a>
-  <img src="https://img.shields.io/badge/Tests-44%2F44%20Passing-brightgreen.svg" alt="Tests: 44/44 Passing">
+  <img src="https://img.shields.io/badge/Tests-58%2F58%20Passing-brightgreen.svg" alt="Tests: 58/58 Passing">
 </p>
 
 ---
@@ -86,6 +86,7 @@ Morrowind の再実装プロジェクトである OpenMW などの先例に学�
 
 | 日付 | マイルストーン・実装内容 | 主な更新コンポーネント |
 | :--- | :--- | :--- |
+| **2026-09-12** | **Phase 6-D: GPU ハードウェアスキニング (GPU Skinning Engine)**<br>・**ボーンパレット Uniform バッファ (`GpuBonePalette`)**: 毎フレームの CPU 頂点スキニングおよび頂点バッファ再転送 (`write_buffer`) を撤廃し、シェーダー内での 4 ボーン LBS (Linear Blend Skinning) へ完全移行<br>・**Gamebryo 2.6 `NiSkinPartition` パイプライン**: NIF パーティションのボーンパレットインデックス・ウェイトを GPU 頂点属性 (`location 6, 7`) として転送し、80 ボーンの合成行列 $P_k = M_{\text{bone}} \cdot B_{\text{bone}} \cdot S_{\text{root}}$ を GPU 上で並列評価<br>・**アクターアニメーション描画の大幅な高速化**: 複数 NPC の同時描画時の CPU 負荷を最小化 | `fo3_render`<br>`fo3_viewer` |
 | **2026-09-12** | **装備品解決エンジンの完成 & アクタービジュアル完全修正**<br>・**レベルドアイテム (`LVLI`) 再帰展開**: ネストされた配給リストを BFS 走査し、Vault 101 警備員のヘルメット・服・武器や Lucas Simms の中国軍アサルトライフル等の装備欠損を完全解決<br>・**Havok コリジョン誤認識防止**: 武器 NIF の `ColGroupInfo` 誤認を排除し、右手の `"Weapon"` ボーンへ銃・近接武器を正確にマウント<br>・**剛体 Uniform 初期同期**: 帽子・ヘルメット・髪型・武器の初期姿勢バッファ同期<br>・**指先潰れ解消 (`BoneTransformOverride`)**: 移動キー非保持ボーンのバインドポーズ関節長を100%維持<br>・**髪色ティント補正**: `HCLR` 未定義アクターへの自然色フォールバック | `fo3_esm`<br>`fo3_render`<br>`fo3_viewer` |
 | **2026-09-11** | **Phase 6-C: セル内アクター配置 & 自動全身合成 (In-Cell NPC Assembly)**<br>・室内・屋外セル内の `ACHR` / `NPC_` レコードを自動検出し、男女別スケルトン・素体・頭部・目・口内・手先を一括アセンブリ<br>・アイドルアニメーション (`ttnpchappysubtlelistena.kf`) の自動同期再生<br>・四肢切断ゴアキャップの初期状態カリング | `fo3_render`<br>`fo3_viewer` |
 | **2026-09-08** | **Phase 6-B: キーフレームアニメーションプレイヤー (`AnimationPlayer`)**<br>・`NiTransformInterpolator`（線形・Slerp補間）および B-Spline（Cox-de Boor基底）姿勢補間<br>・スケルトンボーンの階層的 FK（順運動学）再計算パイプライン構築 | `fo3_render` |
@@ -197,6 +198,8 @@ cargo run --release -p fo3_viewer -- "A:\SteamLibrary\steamapps\common\Fallout 3
 | **F** | セル環境フォグ表示切替 (Fog ON/OFF) |
 | **L** | ビューアー補助ヘッドライト切替 (Light ON/OFF) |
 | **R** | カメラ注視点自動再フォーカス |
+| **E** | インタラクト（ドア遷移、ドア/箱の開閉、アイテム拾得、NPC会話、ターミナルアクセス） |
+| **T** | 会話終了 / ターミナル画面戻る・ログアウト |
 | **Esc** | ビューアー終了 |
 
 ---
@@ -212,10 +215,22 @@ cargo run --release -p fo3_viewer -- "A:\SteamLibrary\steamapps\common\Fallout 3
 | **Phase 5: コリジョン・物理** | Havok コリジョン変換、Rapier3D 統合、リアルタイム KCC 移動 | **完了** |
 | **Phase 6-A/B: スキニング・アニメ** | NiSkinData スキニング、KF 補間、マルチパーツアクター結合 | **完了** |
 | **Phase 6-C: セル内アクター配置 & 装備解決** | 室内・屋外セル内での全 NPC 自動組み立て、LVLI 再帰展開、帽子・武器・服スロット解決 | **完了** |
-| **Phase 6-D: GPU スキニング** | 頂点シェーダー内でのボーンパレット参照による描画負荷低減 | 予定 |
-| **Phase 7: インタラクション** | ドアテレポート (XTEL)、コンテナ、アクティベーター作動 | 予定 |
+| **Phase 6-D: GPU スキニング** | 頂点シェーダー内でのボーンパレット参照による描画負荷低減 | **完了** |
+| **Phase 7: インタラクション** | クロスヘア物理レイキャスト（壁遮蔽判定）、NIF シーケンスドア開閉（Vault101扉/スライド扉/通常扉）、コンテナ蓋分離、アイテム拾得 & インベントリ | **完了** |
 | **Phase 8: キャラクター & カメラ** | プレイヤーアクター、三人称/一人称モデル統合、ステートマシン | 予定 |
-| **Phase 9: スクリプト VM & 会話** | SCPT バイトコード実行仮想マシン、ダイアログ (DIAL/INFO) UI | 予定 |
+| **Phase 9: スクリプト VM & 会話・UI** | DIAL/INFO 会話トピック、TERM ターミナル画面、HUD レンダラー、SCPT 実行 | **対応中（基盤完了）** |
+
+---
+
+## 既知の課題・現在対応中の項目 (Known Issues / In Progress)
+
+1. **デバッグ用マーカーの除外**: Gamebryo エディタ・デバッグ用マーカー等に物理コリジョンが生成されてしまう不具合の是正。
+2. **アクター表示の整合性**:
+   - NPC の目（Eye）メッシュの再消失問題の調査・復旧。
+   - インベントリ内に複数装備を所持する NPC の装備選定ルール（Fallout 3 実機システム準拠）。
+   - NPC アクターに対する物理当たり判定（コリジョン）の付与。
+3. **会話・ターミナル画面のテキスト描画**: フォスファーグリーン枠のオーバーレイに加え、Fallout 3 実機 UI 準拠のフォントレンダリング・文字描画の実装。
+4. **Zファイティング干渉**: 同一座標・同一位置に重なる壁・床などのメッシュ同士が明滅する問題の解消。
 
 ---
 

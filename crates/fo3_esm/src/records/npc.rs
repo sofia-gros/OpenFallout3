@@ -7,8 +7,8 @@ use std::io;
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{
-    FormId, FourCC, ObjectBounds, SUB_CNTO, SUB_DOFT, SUB_EDID, SUB_ENAM, SUB_FULL, SUB_HCLR,
-    SUB_HNAM, SUB_OBND,
+    FormId, FourCC, ObjectBounds, SUB_CNTO, SUB_DOFT, SUB_EDID, SUB_ENAM, SUB_FGGA, SUB_FGGS,
+    SUB_FGTS, SUB_FULL, SUB_HCLR, SUB_HNAM, SUB_OBND,
 };
 
 pub const SUB_ACBS: FourCC = FourCC(*b"ACBS");
@@ -54,6 +54,15 @@ pub struct NpcRecord {
     pub eyes: Option<FormId>,
     /// 所持品インベントリリスト (CNTO)
     pub inventory: Vec<InventoryItem>,
+    /// FaceGen 対称幾何係数 (FGGS: 50 float = 200 bytes)
+    /// 参照元: `references/openmw/components/esm4/loadnpc.cpp:L195-199`, `references/bevyout/crates/bevyout-core/src/facegen.rs`
+    pub facegen_geometry_symmetric: Option<Vec<f32>>,
+    /// FaceGen 非対称幾何係数 (FGGA: 30 float = 120 bytes)
+    /// 参照元: `references/openmw/components/esm4/loadnpc.cpp:L200-207`, `references/bevyout/crates/bevyout-core/src/facegen.rs`
+    pub facegen_geometry_asymmetric: Option<Vec<f32>>,
+    /// FaceGen 対称テクスチャ係数 (FGTS: 50 float = 200 bytes, 化粧・肌色モーフィング用)
+    /// 参照元: `references/openmw/components/esm4/loadnpc.cpp:L208-215`, `references/bevyout/crates/bevyout-core/src/facegen.rs`
+    pub facegen_texture_symmetric: Option<Vec<f32>>,
 }
 
 impl NpcRecord {
@@ -69,6 +78,9 @@ impl NpcRecord {
         let mut hair_color = None;
         let mut eyes = None;
         let mut inventory = Vec::new();
+        let mut facegen_geometry_symmetric = None;
+        let mut facegen_geometry_asymmetric = None;
+        let mut facegen_texture_symmetric = None;
 
         for sub in subrecords {
             match sub.type_id {
@@ -147,6 +159,36 @@ impl NpcRecord {
                         inventory.push(InventoryItem { item, count });
                     }
                 }
+                SUB_FGGS => {
+                    // 対称幾何係数: 50 個の f32 (各 4 バイト、計 200 バイト)
+                    // 参照元: references/openmw/components/esm4/loadnpc.cpp:L195-199
+                    let count = sub.data.len() / 4;
+                    let mut coeffs = Vec::with_capacity(count);
+                    for chunk in sub.data.chunks_exact(4) {
+                        coeffs.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+                    }
+                    facegen_geometry_symmetric = Some(coeffs);
+                }
+                SUB_FGGA => {
+                    // 非対称幾何係数: 30 個の f32 (各 4 バイト、計 120 バイト)
+                    // 参照元: references/openmw/components/esm4/loadnpc.cpp:L200-207
+                    let count = sub.data.len() / 4;
+                    let mut coeffs = Vec::with_capacity(count);
+                    for chunk in sub.data.chunks_exact(4) {
+                        coeffs.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+                    }
+                    facegen_geometry_asymmetric = Some(coeffs);
+                }
+                SUB_FGTS => {
+                    // 対称テクスチャ係数: 50 個の f32 (各 4 バイト、計 200 バイト)
+                    // 参照元: references/openmw/components/esm4/loadnpc.cpp:L208-215
+                    let count = sub.data.len() / 4;
+                    let mut coeffs = Vec::with_capacity(count);
+                    for chunk in sub.data.chunks_exact(4) {
+                        coeffs.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+                    }
+                    facegen_texture_symmetric = Some(coeffs);
+                }
                 _ => {}
             }
         }
@@ -164,6 +206,9 @@ impl NpcRecord {
             hair_color,
             eyes,
             inventory,
+            facegen_geometry_symmetric,
+            facegen_geometry_asymmetric,
+            facegen_texture_symmetric,
         })
     }
 }
