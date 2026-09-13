@@ -136,8 +136,9 @@ impl GpuBonePalette {
 
             let b_bone = self.inv_bind_matrices.get(k).copied().unwrap_or(Mat4::IDENTITY);
 
-            // 合成行列: P_k = M_bone * B_bone * S_root
-            let p_k = m_bone * b_bone * self.skin_transform;
+            // 合成行列: P_k = M_bone * B_bone
+            // 参照元: NifSkope glmesh.cpp:L645, references/nifxml/nif.xml:L5094
+            let p_k = m_bone * b_bone;
             uniform.matrices[k] = p_k.to_cols_array_2d();
         }
 
@@ -161,7 +162,9 @@ impl GpuBonePalette {
 
             let b_bone = self.inv_bind_matrices.get(k).copied().unwrap_or(Mat4::IDENTITY);
 
-            let p_k = m_bone * b_bone * self.skin_transform;
+            // 合成行列: P_k = M_bone * B_bone
+            // 参照元: NifSkope glmesh.cpp:L645
+            let p_k = m_bone * b_bone;
             uniform.matrices[k] = p_k.to_cols_array_2d();
         }
 
@@ -344,20 +347,18 @@ mod tests {
         }
     }
 
-    /// Gamebryo 2.6 のスキニング合成行列 P_k = M_bone * B_bone * S_root の計算整合性を検証。
+    /// Gamebryo 2.6 / NifSkope のスキニング合成行列 P_k = M_bone * B_bone の計算整合性を検証。
     #[test]
     fn test_bone_skin_composite_matrix_calculation() {
-        let skin_transform = Mat4::from_translation(glam::Vec3::new(10.0, 0.0, 0.0));
-        let bone_world = Mat4::from_translation(glam::Vec3::new(0.0, 20.0, 0.0));
-        let inv_bind = Mat4::from_translation(glam::Vec3::new(-10.0, -20.0, 0.0));
+        let bone_world = Mat4::from_translation(glam::Vec3::new(0.0, 20.0, 100.0));
+        let inv_bind = Mat4::from_translation(glam::Vec3::new(0.0, -20.0, -100.0));
 
-        let p_k = bone_world * inv_bind * skin_transform;
-        // 点 (0, 0, 0) を変換した場合:
-        // (0,0,0) + (10, 0, 0) = (10, 0, 0)
-        // + (-10, -20, 0) = (0, -20, 0)
-        // + (0, 20, 0) = (0, 0, 0)
-        let transformed = p_k.transform_point3(glam::Vec3::ZERO);
-        assert!((transformed - glam::Vec3::ZERO).length() < 1e-4);
+        let p_k = bone_world * inv_bind;
+        // バインドポーズの点 (0, 20, 100) を変換した場合:
+        // (0, 20, 100) + (0, -20, -100) = (0, 0, 0)
+        // + (0, 20, 100) = (0, 20, 100)
+        let transformed = p_k.transform_point3(glam::Vec3::new(0.0, 20.0, 100.0));
+        assert!((transformed - glam::Vec3::new(0.0, 20.0, 100.0)).length() < 1e-4);
     }
 }
 

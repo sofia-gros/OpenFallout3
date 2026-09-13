@@ -56,6 +56,8 @@ pub const REC_FURN: FourCC = FourCC(*b"FURN");
 pub const REC_CONT: FourCC = FourCC(*b"CONT");
 pub const REC_MSTT: FourCC = FourCC(*b"MSTT");
 pub const REC_TERM: FourCC = FourCC(*b"TERM");
+pub const REC_SCPT: FourCC = FourCC(*b"SCPT");
+pub const REC_GLOB: FourCC = FourCC(*b"GLOB");
 pub const REC_LIGH: FourCC = FourCC(*b"LIGH");
 pub const REC_MISC: FourCC = FourCC(*b"MISC");
 pub const REC_BOOK: FourCC = FourCC(*b"BOOK");
@@ -81,6 +83,7 @@ pub const REC_HAIR: FourCC = FourCC(*b"HAIR");
 pub const REC_LVLI: FourCC = FourCC(*b"LVLI");
 pub const REC_DIAL: FourCC = FourCC(*b"DIAL");
 pub const REC_INFO: FourCC = FourCC(*b"INFO");
+pub const REC_QUST: FourCC = FourCC(*b"QUST");
 
 pub const SUB_EDID: FourCC = FourCC(*b"EDID");
 pub const SUB_LVLO: FourCC = FourCC(*b"LVLO");
@@ -121,6 +124,7 @@ pub const SUB_VTXT: FourCC = FourCC(*b"VTXT");
 pub const SUB_WNAM: FourCC = FourCC(*b"WNAM");
 pub const SUB_ENAM: FourCC = FourCC(*b"ENAM");
 pub const SUB_HCLR: FourCC = FourCC(*b"HCLR");
+pub const SUB_SCRI: FourCC = FourCC(*b"SCRI");
 pub const SUB_NAM2: FourCC = FourCC(*b"NAM2");
 pub const SUB_XTEL: FourCC = FourCC(*b"XTEL");
 pub const SUB_XLOC: FourCC = FourCC(*b"XLOC");
@@ -135,6 +139,14 @@ pub const SUB_XRDS: FourCC = FourCC(*b"XRDS");
 pub const SUB_FGGS: FourCC = FourCC(*b"FGGS");
 pub const SUB_FGGA: FourCC = FourCC(*b"FGGA");
 pub const SUB_FGTS: FourCC = FourCC(*b"FGTS");
+pub const SUB_INDX: FourCC = FourCC(*b"INDX");
+pub const SUB_QSDT: FourCC = FourCC(*b"QSDT");
+pub const SUB_QSTA: FourCC = FourCC(*b"QSTA");
+pub const SUB_NNAM: FourCC = FourCC(*b"NNAM");
+pub const SUB_QOBJ: FourCC = FourCC(*b"QOBJ");
+pub const SUB_NAM0: FourCC = FourCC(*b"NAM0");
+pub const SUB_CTDA: FourCC = FourCC(*b"CTDA");
+pub const SUB_SCTX: FourCC = FourCC(*b"SCTX");
 
 /// 32-bit オブジェクト一意識別子 (FormID)。
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]

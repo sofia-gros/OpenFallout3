@@ -126,13 +126,19 @@ impl RenderActorInstance {
 
             let actor_world_mat = self.world_transform.to_mat4();
 
-            // 1. スキンメッシュ更新 (CPU スキニング頂点更新)
+            // 1. スキンメッシュ更新 (GPU/CPU スキニングおよびアクター移動のワールド行列反映)
             let part_refs: Vec<&NifFile> = self.parts.iter().map(|p| p.as_ref()).collect();
             for anim in &self.anim_skin_meshes {
                 let mesh_index = anim.mesh_index;
                 if mesh_index >= meshes.len() {
                     continue;
                 }
+                // アクターの位置・回転変化を GPU モデル Uniform バッファへ書き込み追従させる
+                queue.write_buffer(
+                    &meshes[mesh_index].model_uniform_buffer,
+                    0,
+                    bytemuck::cast_slice(&[actor_world_mat.to_cols_array_2d()]),
+                );
                 if anim.part_index >= part_refs.len() {
                     continue;
                 }

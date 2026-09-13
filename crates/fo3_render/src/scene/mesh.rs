@@ -36,6 +36,8 @@ pub struct RenderMesh {
     /// GPU スキニング用ボーンパレット (Phase 6-D)
     /// None の場合は静的メッシュとして通常パイプラインで描画される。
     pub bone_palette: Option<crate::gpu_skin::GpuBonePalette>,
+    /// メッシュの可視性フラグ (一人称/三人称カリング、Gamebryo 2.6 AppCulled 準拠)
+    pub is_visible: bool,
 }
 
 /// NIF の `NiAVObject` からコアトランスフォームへの変換。
@@ -202,6 +204,7 @@ pub fn create_render_mesh_with_override(
         world_center: world_bound.center,
         world_bound,
         bone_palette: None,
+        is_visible: true,
     }
 }
 
@@ -277,7 +280,7 @@ pub fn ensure_texture_cached(
 }
 
 /// マテリアルプロパティからディフューズ (スロット 0)、法線マップ (スロット 1)、およびグローマップ (スロット 2) を取得。
-/// 参照元: `references/openmw/components/nifosg/nifloader.cpp:L2401-2426`, `references/nifxml/nif.xml:L6307`
+/// 参照元: `references/openmw/components/nifosg/nifloader.cpp:L2401-2426`, `references/nifxml/nif.xml:L6307`, `L6415` (SLSF2_Glow_Map = bit 6)
 pub fn find_texture_paths(properties: &[i32], nif: &NifFile) -> (Option<String>, Option<String>, Option<String>) {
     for &prop_idx in properties {
         if prop_idx >= 0 && (prop_idx as usize) < nif.blocks.len() {
@@ -294,7 +297,10 @@ pub fn find_texture_paths(properties: &[i32], nif: &NifFile) -> (Option<String>,
                         } else {
                             None
                         };
-                        let glow = if tex_set.textures.len() > 2 && !tex_set.textures[2].is_empty() {
+                        // スロット 2 は SLSF2_Glow_Map (bit 6) が立っている場合のみ Glow Map として扱う
+                        // Hair のハイライトマップ (_hl.dds) や肌のスキンマップ (_sk.dds) の誤サンプリングを防止
+                        let has_glow_flag = (shader_prop.shader_flags2 & (1 << 6)) != 0;
+                        let glow = if has_glow_flag && tex_set.textures.len() > 2 && !tex_set.textures[2].is_empty() {
                             Some(normalize_texture_path(&tex_set.textures[2]))
                         } else {
                             None
@@ -306,6 +312,19 @@ pub fn find_texture_paths(properties: &[i32], nif: &NifFile) -> (Option<String>,
         }
     }
     (None, None, None)
+}
+
+/// プロパティリストから BSShaderPPLightingProperty を検索し、頂点カラー有効フラグ (SLSF2_Vertex_Colors = bit 5) を取得する。
+/// 参照元: `references/nifxml/nif.xml:L6414` (`SLSF2_Vertex_Colors`), Fallout 3 髪の毛メッシュ
+pub fn has_vertex_colors_enabled(properties: &[i32], nif: &NifFile) -> bool {
+    for &prop_idx in properties {
+        if prop_idx >= 0 && (prop_idx as usize) < nif.blocks.len() {
+            if let NifBlock::BSShaderPPLightingProperty(ref shader_prop) = nif.blocks[prop_idx as usize] {
+                return (shader_prop.shader_flags2 & (1 << 5)) != 0;
+            }
+        }
+    }
+    true
 }
 
 /// プロパティリストから NiMaterialProperty を検索する。

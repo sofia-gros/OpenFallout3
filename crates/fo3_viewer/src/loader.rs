@@ -850,27 +850,12 @@ pub fn load_scene(
 
                     let clear_color = if let Some(ref cl) = primary_lighting {
                         if cl.fog_far > 0.0 {
-                            wgpu::Color {
-                                r: (cl.fog_color[0] as f64) / 255.0 * 0.25,
-                                g: (cl.fog_color[1] as f64) / 255.0 * 0.25,
-                                b: (cl.fog_color[2] as f64) / 255.0 * 0.25,
-                                a: 1.0,
-                            }
+                            wgpu::Color { r: (cl.fog_color[0] as f64) / 255.0 * 0.25, g: (cl.fog_color[1] as f64) / 255.0 * 0.25, b: (cl.fog_color[2] as f64) / 255.0 * 0.25, a: 1.0 }
                         } else {
-                            wgpu::Color {
-                                r: (cl.ambient[0] as f64) / 255.0 * 0.4,
-                                g: (cl.ambient[1] as f64) / 255.0 * 0.4,
-                                b: (cl.ambient[2] as f64) / 255.0 * 0.4,
-                                a: 1.0,
-                            }
+                            wgpu::Color { r: (cl.ambient[0] as f64) / 255.0 * 0.4, g: (cl.ambient[1] as f64) / 255.0 * 0.4, b: (cl.ambient[2] as f64) / 255.0 * 0.4, a: 1.0 }
                         }
                     } else {
-                        wgpu::Color {
-                            r: 0.12,
-                            g: 0.14,
-                            b: 0.18,
-                            a: 1.0,
-                        }
+                        wgpu::Color { r: 0.12, g: 0.14, b: 0.18, a: 1.0 }
                     };
 
                     println!("セル内の Havok コリジョン情報を物理ワールドに登録中...");

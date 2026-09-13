@@ -310,6 +310,31 @@ Fallout 3 の頭部（`headhuman.nif`）は外皮（顔・頭皮・耳・首）�
 | セル内アクター自動配置 & アニメーション再生 (Phase 6-C) | **完了** (`RenderActorInstance`, `scene.add_actor`, `update_actors`) |
 | GPU シェーダースキニング（ボーン行列パレット） (Phase 6-D) | **完了** (`GpuBonePalette`, `skinned_shader.wgsl`, `create_gpu_skin_mesh_from_partition`) |
 
+### 4.14 スキニング合成行列における NiSkinData.skin_transform の除外規則 (真因特定 & 再発防止)
+- **絶対規則**: SkinPartition を持つ FO3 メッシュにおいて、列ベクトル形式のスキニング合成行列 $P_k$ は必ず以下でなければならない:
+  $$P_k = M_{\text{bone}} \cdot B_{\text{bone}}$$
+  - **参照元**: NifSkope `glmesh.cpp:L645`
+    ```cpp
+    boneTrans[t] = boneTrans[t] * bone->localTrans(skeletonRoot) * weights.value(part.boneMap[t]).trans;
+    ```
+  - **頭部落下・身体変形の根本原因**:
+    - `headhuman.nif` や `outfitm.nif` の一部パーツでは、`NiSkinData.skin_transform` に $Z \approx -112.84$ の大きな並進が入っている。
+    - 一方、`Bip01 Head` ボーンの逆バインド行列 $B_{\text{bone}}$ の並進はほぼ $(0,0,0)$ であり、頭部頂点はすでに頭部ローカル原点付近でモデリングされている。
+    - $M_{\text{bone}} \cdot B_{\text{bone}} \cdot v$ によって頂点はスケルトンの頭部位置（$Z \approx 113$）に正しくスキニングされる。
+    - ここに `NiSkinData.skin_transform` ($Z = -112.84$) を掛けてしまうと、$113 - 112.84 \approx 0$ となり、**頭部メッシュ全体が足元（地面）に落ちる**。
+    - したがって、SkinPartition によるスキニングでは `NiSkinData.skin_transform` は**絶対に乗算してはならない**。
+
+### 4.15 アクター足元原点と物理 KCC カプセル中心の分離規則 (再発防止)
+- **絶対規則**: Gamebryo 2.6 の人型アクター (スケルトン) の原点は常に**「足元の地面 (Z = 0)」**である。
+- Rapier 物理エンジン (`KinematicCharacterController`) の `position` は**カプセル中心 (足元 + 64.0 単位: half_height 44 + radius 20)**である。
+- アクターの `world_transform.translation` に渡す際は、必ず `kcc.feet_position()` (`position - Vec3::new(0.0, 0.0, 64.0)`) を行い、足元に完全接地させること（中心座標を渡すと全身が 64 単位浮遊する）。
+- カメラ注視点 (`focal_point`) は足元接地面基準で計算し、Gamebryo GMST `f1stPersonCameraHeight` (124.0) を正しく加算すること。
+- 三人称カメラの壁クリッピング時には、プレイヤー身体内部へのめり込みを防ぐため最小追従距離ガード `F_CAMERA_MIN_THIRD_PERSON_DIST` (45.0) を下回らないようにすること。
+
+### 4.16 頂点カラー & グローマップのシェーダーフラグ厳格検査規則 (再発防止)
+- **頂点カラー**: `BSShaderPPLightingProperty.shader_flags2` の `SLSF2_Vertex_Colors` (bit 5) が有効でない限り、NIF に頂点カラー配列が存在してもライティングに乗算してはならない (白色 [1,1,1,1] として扱う)。髪の毛 NIF の青緑色内部データ乗算を防ぐため。
+- **グローマップ**: スロット 2 テクスチャは `SLSF2_Glow_Map` (bit 6) が有効な場合のみ自己発光として扱うこと。髪ハイライト (`_hl.dds`) や肌 (`_sk.dds`) を自発光と誤認してはならない。
+
 ### アクター & スキニング実装ファイル
 - `crates/fo3_nif/src/blocks/skin.rs` - `NiSkinData` / `BoneData` / `BoneVertData`
 - `crates/fo3_render/src/skinning.rs` - `apply_skinning_cpu` / `apply_skinning_cpu_with_bones` (CPU フォールバック)

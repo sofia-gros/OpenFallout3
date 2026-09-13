@@ -96,28 +96,16 @@ pub fn apply_skinning_cpu_with_bones(
     let mut out_normals:   Vec<Vec4> = vec![Vec4::ZERO; n_verts];
     let mut written: Vec<bool>       = vec![false; n_verts];
 
-    // ルートスキン変換行列（NiSkinData の skin_transform）
-    // 参照元: nif.xml:L5069 "Skin Transform"
-    //
-    // スキニング完全式（OpenMW riggeometry.cpp:L178,185,204 参照）:
-    //   boneMat_bone   = mInvBindMatrix * mMatrixInSkeletonSpace
-    //   resultMat      = [ Σ_bone weight * boneMat_bone ] * mData->mTransform
-    //   v'             = resultMat * v
+    // スキニング完全式（NifSkope glmesh.cpp:L645 参照）:
+    //   boneMat_bone = mMatrixInSkeletonSpace * mInvBindMatrix (列ベクトル形式 M * v)
+    //   resultMat    = Σ_bone weight * boneMat_bone
+    //   v'           = resultMat * v
     // ここで
-    //   - mInvBindMatrix      = NiSkinData.bone_list[i].skin_transform (nifloader.cpp:L1708)
-    //   - mMatrixInSkeletonSpace = 現在のボーンワールド行列 (skeleton.cpp:L169)
-    //   - mData->mTransform   = NiSkinData.skin_transform (ルート) (nifloader.cpp:L1715)
-    //
-    // つまり 1 ボーン行列は  invBind * boneWorld * root  の順で合成する。
-    // ※旧実装では  root_mat_inv * boneWorld * invBind  の順で合成しており、
-    //   root を逆変換・積の先頭に置くため、骨格ワールドの並進（例 outfitm.nif の
-    //   meatneck: root z=-112.843 と boneWorld z=+112.84）が加算で二重適用され、
-    //   出力頂点が z 方向に大規模シフトするバグがあった（2026-09-08 修正）。
-    let root_mat = build_bone_matrix(
-        skin_data.skin_transform_translation,
-        skin_data.skin_transform_rotation,
-        skin_data.skin_transform_scale,
-    );
+    //   - mInvBindMatrix         = NiSkinData.bone_list[i].skin_transform
+    //   - mMatrixInSkeletonSpace = スケルトンルート空間におけるボーンワールド行列
+    // ※ Skin Partition を持つメッシュでは、各ボーンの逆バインド行列によってメッシュ空間から
+    //   ボーン空間へ変換され、ボーンのワールド行列によって直接スケルトン空間へ変形される。
+    //   NiSkinData.skin_transform は乗算してはならない（乗算すると頭部や肉パーツが地面に落ちる）。
 
     for partition in &skin_partition.partitions {
         if partition.vertex_map.is_empty()
@@ -150,9 +138,9 @@ pub fn apply_skinning_cpu_with_bones(
                     Mat4::IDENTITY
                 };
 
-                // 合成変換行列: root * boneWorld * invBind (列ベクトル形式 M * v)
-                // 参照元: OpenMW riggeometry.cpp:L178,204 を列ベクトル形式に転置
-                bone_matrices.push(root_mat * m_bone * b_bone);
+                // 合成変換行列: boneWorld * invBind (列ベクトル形式 M * v)
+                // 参照元: NifSkope glmesh.cpp:L645
+                bone_matrices.push(m_bone * b_bone);
             } else {
                 bone_matrices.push(Mat4::IDENTITY);
             }

@@ -59,6 +59,21 @@ impl RapierCharacterController {
         }
     }
 
+    /// カプセルの幾何学的中心から足元底面までのオフセット距離を取得。
+    /// 半身高 (half_height) + カプセル球半径 (radius)
+    #[inline]
+    pub fn feet_offset(&self) -> f32 {
+        self.half_height + self.radius
+    }
+
+    /// キャラクタの足元（地面接地）ワールド座標を取得。
+    /// Gamebryo 2.6 のアクター原点は足元接地面 (Z = 0) であるため、
+    /// カプセル中心 position から half_height + radius を減算した座標を返す。
+    #[inline]
+    pub fn feet_position(&self) -> Vec3 {
+        self.position - Vec3::new(0.0, 0.0, self.feet_offset())
+    }
+
     /// カプセル形状を取得。
     pub fn shape(&self) -> SharedShape {
         let p1 = Point3::new(0.0, 0.0, -self.half_height);

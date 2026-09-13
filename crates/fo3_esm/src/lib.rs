@@ -17,17 +17,18 @@ pub mod query;
 pub mod master;
 
 pub use types::{
-    FormId, FourCC, ObjectBounds, REC_ACHR, REC_ACRE, REC_DIAL, REC_INFO, REC_LTEX, REC_LVLI,
-    REC_REFR, REC_TERM, REC_TXST,
+    FormId, FourCC, ObjectBounds, REC_ACHR, REC_ACRE, REC_DIAL, REC_GLOB, REC_INFO, REC_LTEX,
+    REC_LVLI, REC_REFR, REC_SCPT, REC_TERM, REC_TXST,
 };
 pub use header::{GroupHeader, RecordHeader, SubrecordHeader};
 pub use subrecord::Subrecord;
 pub use records::{
-    info_flags, ArmorRecord, CellLighting, CellRecord, DialRecord, EnableParent, HairRecord,
-    InfoRecord, InventoryItem, LandRecord, LandTextureLayer, LightRecord, LockData, LtexRecord,
-    LvliRecord, LvloEntry, NpcRecord, OtftRecord, RefrRecord, StatRecord, TeleportDoor,
-    TermMenuItem, TermRecord, Tes4Header, TextureSetRecord, WorldRecord, LAND_HEIGHT_SCALE,
-    LAND_NUM_VERTS, LAND_REAL_SIZE, LAND_VERTS_PER_SIDE,
+    info_flags, ArmorRecord, CellLighting, CellRecord, DialRecord, EnableParent, GlobRecord,
+    HairRecord, InfoRecord, InventoryItem, LandRecord, LandTextureLayer, LightRecord, LockData,
+    LtexRecord, LvliRecord, LvloEntry, NpcRecord, OtftRecord, QuestObjective, QuestRecord,
+    QuestStage, RefrRecord, ScptRecord, ScriptHeader, ScriptLocalVar, ScriptType, StatRecord,
+    TargetCondition, TeleportDoor, TermMenuItem, TermRecord, Tes4Header, TextureSetRecord,
+    WorldRecord, LAND_HEIGHT_SCALE, LAND_NUM_VERTS, LAND_REAL_SIZE, LAND_VERTS_PER_SIDE,
 };
 pub use reader::{BaseObjectInfo, EsmEntry, EsmReader};
 pub use master::EsmMasterContext;

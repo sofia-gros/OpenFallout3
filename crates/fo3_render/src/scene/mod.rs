@@ -268,7 +268,7 @@ impl RenderScene {
     ) {
         // 1. 不透明メッシュ群の描画 (深度書き込み有効)
         let mut current_skinned: Option<bool> = None;
-        for mesh_node in self.meshes.iter().filter(|m| !m.is_transparent) {
+        for mesh_node in self.meshes.iter().filter(|m| m.is_visible && !m.is_transparent) {
             let is_skinned = mesh_node.bone_palette.is_some();
             if current_skinned != Some(is_skinned) {
                 render_pass.set_pipeline(if is_skinned {
@@ -290,7 +290,7 @@ impl RenderScene {
         }
 
         // 2. 半透明メッシュ群の描画 (深度書き込み無効、アルファブレンド)
-        let mut transparent_meshes: Vec<&RenderMesh> = self.meshes.iter().filter(|m| m.is_transparent).collect();
+        let mut transparent_meshes: Vec<&RenderMesh> = self.meshes.iter().filter(|m| m.is_visible && m.is_transparent).collect();
 
         // ソートが要求されている（!is_no_sorter()）かつカメラ座標が与えられている場合、カメラから遠い順（降順）にソート
         // 参照元: references/nifskope/src/gl/glproperty.cpp:L230, Gamebryo 2.6 NiAlphaProperty

@@ -18,7 +18,7 @@
   <a href="https://wgpu.rs/"><img src="https://img.shields.io/badge/Graphics-wgpu%20(Vulkan%2FDX12%2FMetal)-blue.svg?logo=webgpu" alt="wgpu"></a>
   <a href="https://rapier.rs/"><img src="https://img.shields.io/badge/Physics-Rapier3D-red.svg" alt="Rapier3D"></a>
   <a href="AGENTS.md"><img src="https://img.shields.io/badge/Architecture-Gamebryo%202.6-success.svg" alt="Gamebryo 2.6"></a>
-  <img src="https://img.shields.io/badge/Tests-58%2F58%20Passing-brightgreen.svg" alt="Tests: 58/58 Passing">
+  <img src="https://img.shields.io/badge/Tests-67%2F67%20Passing-brightgreen.svg" alt="Tests: 67/67 Passing">
 </p>
 
 ---
@@ -86,6 +86,8 @@ Morrowind の再実装プロジェクトである OpenMW などの先例に学�
 
 | 日付 | マイルストーン・実装内容 | 主な更新コンポーネント |
 | :--- | :--- | :--- |
+| **2026-09-13** | **Phase 10: イベント駆動スクリプトシステム & クエスト進行 (Event-Driven Scripting & Quest Engine)**<br>・**オブジェクトスクリプト & イベントブロック結合**: `REFR` / `DOOR` / `CONT` / `ACTI` の `SCRI` サブレコード解決、`Begin OnActivate` / `OnAdd` / `OnEquip` / `GameMode` ブロック別ディスパッチ<br>・**イベントディスパッチャー & アクティベート抑制**: Eキー操作と連動した `OnActivate` 優先実行、スクリプト内 `Activate()` による遅延開閉<br>・**VM 命令セット & 制御構造拡張**: `If` / `ElseIf` / `Else` / `EndIf` 構文解析、変数代入、オブジェクト参照修飾命令 (`Ref.Command`)、`SetStage` / `GetStage`<br>・**実機クエスト垂直スライス**: メガトン「Moriarty's Saloon」におけるクエスト進行（コリン・モリアティとの会話・ターミナル・キャビネット解錠と連動したステージ進行） | `fo3_esm`<br>`fo3_script`<br>`fo3_viewer` |
+| **2026-09-13** | **Phase 9: スクリプト VM & 会話・2D UI レンダラー (Script VM & Dialogue UI)**<br>・**フォント & 2D UI レンダラー (`crates/fo3_render/ui`)**: 実機 `.fnt` (OpenMW `fontloader.cpp` 準拠) パース、フォールバックビットマップフォント、最前面 2D オーバーレイ描画パイプライン<br>・**ESM スクリプト・会話・ターミナル解析 (`crates/fo3_esm`)**: `SCPT` (バイトコード/ソース/ローカル変数)、`GLOB`、`DIAL` / `INFO` (24バイト `CTDA` 条件式 / Result Script)、`TERM` (メニュー項目・本文・Result Script)<br>・**スクリプト VM エンジン (`crates/fo3_script`)**: 条件式評価エンジン、ローカル/グローバル変数ストレージ、クエストステージ進行、所持品判定・付与、解錠状態管理、Result Script 実行<br>・**会話ダイアログ & ターミナル実機 UI (`crates/fo3_viewer/ui`)**: `dialog_menu.xml` / `terminal_menu.xml` 準拠レイアウト、リアルタイムフォントレンダリング、キーボード選択と Result Script 即時連動 | `fo3_esm`<br>`fo3_script`<br>`fo3_render`<br>`fo3_viewer` |
 | **2026-09-12** | **Phase 6-D: GPU ハードウェアスキニング (GPU Skinning Engine)**<br>・**ボーンパレット Uniform バッファ (`GpuBonePalette`)**: 毎フレームの CPU 頂点スキニングおよび頂点バッファ再転送 (`write_buffer`) を撤廃し、シェーダー内での 4 ボーン LBS (Linear Blend Skinning) へ完全移行<br>・**Gamebryo 2.6 `NiSkinPartition` パイプライン**: NIF パーティションのボーンパレットインデックス・ウェイトを GPU 頂点属性 (`location 6, 7`) として転送し、80 ボーンの合成行列 $P_k = M_{\text{bone}} \cdot B_{\text{bone}} \cdot S_{\text{root}}$ を GPU 上で並列評価<br>・**アクターアニメーション描画の大幅な高速化**: 複数 NPC の同時描画時の CPU 負荷を最小化 | `fo3_render`<br>`fo3_viewer` |
 | **2026-09-12** | **装備品解決エンジンの完成 & アクタービジュアル完全修正**<br>・**レベルドアイテム (`LVLI`) 再帰展開**: ネストされた配給リストを BFS 走査し、Vault 101 警備員のヘルメット・服・武器や Lucas Simms の中国軍アサルトライフル等の装備欠損を完全解決<br>・**Havok コリジョン誤認識防止**: 武器 NIF の `ColGroupInfo` 誤認を排除し、右手の `"Weapon"` ボーンへ銃・近接武器を正確にマウント<br>・**剛体 Uniform 初期同期**: 帽子・ヘルメット・髪型・武器の初期姿勢バッファ同期<br>・**指先潰れ解消 (`BoneTransformOverride`)**: 移動キー非保持ボーンのバインドポーズ関節長を100%維持<br>・**髪色ティント補正**: `HCLR` 未定義アクターへの自然色フォールバック | `fo3_esm`<br>`fo3_render`<br>`fo3_viewer` |
 | **2026-09-11** | **Phase 6-C: セル内アクター配置 & 自動全身合成 (In-Cell NPC Assembly)**<br>・室内・屋外セル内の `ACHR` / `NPC_` レコードを自動検出し、男女別スケルトン・素体・頭部・目・口内・手先を一括アセンブリ<br>・アイドルアニメーション (`ttnpchappysubtlelistena.kf`) の自動同期再生<br>・四肢切断ゴアキャップの初期状態カリング | `fo3_render`<br>`fo3_viewer` |
@@ -108,7 +110,8 @@ OpenFallout3/
 │   ├── fo3_vfs/            # 仮想ファイルシステム (Virtual File System)
 │   ├── fo3_nif/            # NIF ジオメトリ & コリジョンブロックパーサー
 │   ├── fo3_physics/        # 物理シミュレーション (Rapier3D / KCC キャラクタコントローラー)
-│   ├── fo3_render/         # wgpu レンダリングパイプライン、シーングラフ、スキニング、アニメ
+│   ├── fo3_script/         # スクリプト VM、条件式評価エンジン (CTDA)、変数量子化
+│   ├── fo3_render/         # wgpu レンダリングパイプライン、シーングラフ、スキニング、アニメ、2D UI
 │   └── fo3_viewer/         # インタラクティブ 3D セル / ワールド / アクタービューアー
 ├── docs/                   # スクリーンショット・技術仕様書
 ├── knowledge/              # バイナリ仕様書・Gamebryo 設計ドキュメント
@@ -188,12 +191,14 @@ cargo run --release -p fo3_viewer -- "A:\SteamLibrary\steamapps\common\Fallout 3
 | キー / マウス操作 | 機能 |
 | :--- | :--- |
 | **Tab / M** | カメラモード切替（オービット周回 ⇔ FPS 歩行モード） |
+| **V** | 一人称 ⇔ 三人称（肩越し追従）視点切替 |
 | **W / A / S / D** | 前進 / 左移動 / 後退 / 右移動（FPS 歩行モード時） |
+| **Shift** | 歩行 / 走行 切替（Walk ⇔ Run） |
 | **Space** | ジャンプ / 上昇（FPS 歩行モード時） |
 | **マウス移動** | 視線回転（Look） |
 | **マウス左ドラッグ** | カメラ回転（オービットモード時） |
 | **マウス右ドラッグ** | カメラ平行移動（Pan）（オービットモード時） |
-| **マウスホイール** | ズームイン / ズームアウト（オービットモード時） |
+| **マウスホイール** | ズームイン / ズームアウト（三人称時・一人称シームレス遷移、オービット時） |
 | **C** | Havok コリジョンワイヤーフレーム表示切替 (Collision ON/OFF) |
 | **F** | セル環境フォグ表示切替 (Fog ON/OFF) |
 | **L** | ビューアー補助ヘッドライト切替 (Light ON/OFF) |
@@ -217,8 +222,9 @@ cargo run --release -p fo3_viewer -- "A:\SteamLibrary\steamapps\common\Fallout 3
 | **Phase 6-C: セル内アクター配置 & 装備解決** | 室内・屋外セル内での全 NPC 自動組み立て、LVLI 再帰展開、帽子・武器・服スロット解決 | **完了** |
 | **Phase 6-D: GPU スキニング** | 頂点シェーダー内でのボーンパレット参照による描画負荷低減 | **完了** |
 | **Phase 7: インタラクション** | クロスヘア物理レイキャスト（壁遮蔽判定）、NIF シーケンスドア開閉（Vault101扉/スライド扉/通常扉）、コンテナ蓋分離、アイテム拾得 & インベントリ | **完了** |
-| **Phase 8: キャラクター & カメラ** | プレイヤーアクター、三人称/一人称モデル統合、ステートマシン | 予定 |
-| **Phase 9: スクリプト VM & 会話・UI** | DIAL/INFO 会話トピック、TERM ターミナル画面、HUD レンダラー、SCPT 実行 | **対応中（基盤完了）** |
+| **Phase 8: キャラクター & カメラ** | プレイヤーアクター組み立て、一人称腕/三人称全身シームレス切替、GMST実機カメラ（目線124/右肩越しX30/レイキャスト壁抜け防止）、KF駆動ロコモーションステートマシン（Walk/Run/Jump） | **完了** |
+| **Phase 9: スクリプト VM & 会話・UI** | DIAL/INFO 会話トピック、TERM ターミナル画面、フォント & 2D UI レンダラー、CTDA 条件式、Result Script VM 実行 | **完了** |
+| **Phase 10: イベント駆動スクリプト & クエスト進行** | オブジェクトスクリプト結合、イベントブロック別ディスパッチ (`OnActivate`)、制御構造 (`If/Else`)、QUST クエストステージ進行、メガトン実機垂直スライス | **進行中 (計画策定完了)** |
 
 ---
 

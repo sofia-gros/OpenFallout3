@@ -23,6 +23,10 @@ pub struct TermMenuItem {
     pub target_form_id: Option<FormId>,
     /// 選択時に表示される実行結果テキスト (`RNAM`)
     pub result_text: Option<String>,
+    /// 選択時 Result Script ソース文字列 (`SCTX`)
+    pub result_script_source: Option<String>,
+    /// 選択時 Result Script バイトコード (`SCDA`)
+    pub result_script_bytecode: Option<Vec<u8>>,
 }
 
 /// ターミナル (`TERM`) レコード。
@@ -38,6 +42,8 @@ pub struct TermRecord {
     pub description: Option<String>,
     /// パスワードノート FormID (`PNAM`)
     pub password_note: Option<FormId>,
+    /// アタッチされたスクリプト FormID (`SCRI`)
+    pub script_id: Option<FormId>,
     /// ハッキング難易度 (`DNAM`: 0=Very Easy, 1=Easy, 2=Average, 3=Hard, 4=Very Hard)
     pub difficulty: u8,
     /// メニュー項目一覧 (`ITXT`, `INAM`, `RNAM`)
@@ -60,12 +66,15 @@ impl TermRecord {
         let mut full_name = None;
         let mut description = None;
         let mut password_note = None;
+        let mut script_id = None;
         let mut difficulty = 0;
         let mut menu_items = Vec::new();
 
         let mut current_item_text = None;
         let mut current_target_id = None;
         let mut current_result_text = None;
+        let mut current_script_source = None;
+        let mut current_script_bytecode = None;
 
         for sub in subrecords {
             match &sub.type_id.0 {
@@ -90,6 +99,12 @@ impl TermRecord {
                         password_note = Some(FormId(id));
                     }
                 }
+                b"SCRI" => {
+                    if sub.data.len() >= 4 {
+                        let id = u32::from_le_bytes(sub.data[..4].try_into().unwrap());
+                        script_id = Some(FormId(id));
+                    }
+                }
                 b"DNAM" => {
                     if !sub.data.is_empty() {
                         difficulty = sub.data[0];
@@ -102,6 +117,8 @@ impl TermRecord {
                             item_text: text,
                             target_form_id: current_target_id.take(),
                             result_text: current_result_text.take(),
+                            result_script_source: current_script_source.take(),
+                            result_script_bytecode: current_script_bytecode.take(),
                         });
                     }
                     current_item_text = Some(sub.as_string());
@@ -118,6 +135,12 @@ impl TermRecord {
                         current_result_text = Some(s);
                     }
                 }
+                b"SCTX" => {
+                    current_script_source = Some(sub.as_string());
+                }
+                b"SCDA" => {
+                    current_script_bytecode = Some(sub.data.clone());
+                }
                 _ => {}
             }
         }
@@ -128,6 +151,8 @@ impl TermRecord {
                 item_text: text,
                 target_form_id: current_target_id,
                 result_text: current_result_text,
+                result_script_source: current_script_source,
+                result_script_bytecode: current_script_bytecode,
             });
         }
 
@@ -137,6 +162,7 @@ impl TermRecord {
             full_name,
             description,
             password_note,
+            script_id,
             difficulty,
             menu_items,
         })

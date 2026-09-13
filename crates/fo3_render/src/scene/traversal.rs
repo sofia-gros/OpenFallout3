@@ -22,7 +22,8 @@ use crate::scene::bones::{
     resolve_bone_world_transforms, resolve_bone_world_transforms_by_name,
 };
 use crate::scene::mesh::{
-    create_render_mesh, create_render_mesh_with_override, find_alpha_property, find_material_property, to_core_transform, RenderMesh,
+    create_render_mesh, create_render_mesh_with_override, find_alpha_property, find_material_property,
+    has_vertex_colors_enabled, to_core_transform, RenderMesh,
 };
 
 /// アクターパーツのメッシュ走査時に、生成された RenderMesh と
@@ -209,7 +210,9 @@ pub fn traverse_block(
                 if let NifBlock::NiTriShapeData(ref data) = nif.blocks[shape.geom.data as usize] {
                     // NiSkinInstance / BSDismemberSkinInstance が存在する場合は GPU / CPU スキニングを適用する
                     // 参照元: knowledge/actor_and_skin_mesh.md, Gamebryo 2.6 NiSkinInstance::Update
-                    let mesh_and_palette = if shape.geom.skin_instance >= 0 {
+                    let mut processed_skin = false;
+
+                    if shape.geom.skin_instance >= 0 {
                         let inst_idx = shape.geom.skin_instance as usize;
                         if inst_idx < nif.blocks.len() {
                             let skin_inst_ref = match &nif.blocks[inst_idx] {
@@ -218,6 +221,7 @@ pub fn traverse_block(
                                 _ => None,
                             };
                             if let Some(inst) = skin_inst_ref {
+                                processed_skin = true;
                                 // スケルトンボーン名マップが指定されていれば優先引き当て、なければローカル block_index で解決
                                 let bone_transforms = if let Some(name_map) = skeleton_bone_name_map {
                                     resolve_bone_world_transforms_by_name(inst, nif, name_map, Some(bone_world_map))
@@ -268,9 +272,10 @@ pub fn traverse_block(
                                 let eval_data = morphed_data.as_ref().unwrap_or(data);
 
                                 // 参照元: Gamebryo 2.6 ハードウェアスキニング (NiSkinPartition)
+                                // 1つの NiTriShape が複数のボーンセットパーティションを持つ場合、すべてのパーティションを描画メッシュとして生成する
                                 let skin_part_block = inst.skin_partition;
                                 let skin_data_block = inst.data;
-                                let gpu_skin_opt = if skin_part_block >= 0
+                                let gpu_skin_list = if skin_part_block >= 0
                                     && (skin_part_block as usize) < nif.blocks.len()
                                     && skin_data_block >= 0
                                     && (skin_data_block as usize) < nif.blocks.len()
@@ -279,16 +284,17 @@ pub fn traverse_block(
                                         &nif.blocks[skin_part_block as usize],
                                         &nif.blocks[skin_data_block as usize],
                                     ) {
-                                        if let Some(first_part) = sp.partitions.first() {
+                                        let mut meshes = Vec::new();
+                                        for partition in &sp.partitions {
                                             if let Some(mesh) = crate::gpu_skin::create_gpu_skin_mesh_from_partition(
                                                 device,
                                                 eval_data,
-                                                first_part,
+                                                partition,
                                             ) {
                                                 let bp = crate::gpu_skin::GpuBonePalette::new(
                                                     device,
                                                     context,
-                                                    first_part,
+                                                    partition,
                                                     inst,
                                                     sd,
                                                     nif,
@@ -298,10 +304,11 @@ pub fn traverse_block(
                                                 } else {
                                                     bp.update_with_blocks(queue, bone_world_map);
                                                 }
-                                                Some((mesh, bp))
-                                            } else {
-                                                None
+                                                meshes.push((mesh, Some(bp)));
                                             }
+                                        }
+                                        if !meshes.is_empty() {
+                                            Some(meshes)
                                         } else {
                                             None
                                         }
@@ -312,77 +319,117 @@ pub fn traverse_block(
                                     None
                                 };
 
-                                if let Some((mesh, bp)) = gpu_skin_opt {
-                                    (Some(mesh), Some(bp))
+                                let mesh_list: Vec<(Option<GpuMesh>, Option<crate::gpu_skin::GpuBonePalette>)> = if let Some(gpu_skins) = gpu_skin_list {
+                                    gpu_skins.into_iter().map(|(m, bp)| (Some(m), bp)).collect()
                                 } else if let Some((pos, nrm)) = apply_skinning_cpu_with_bones(eval_data, inst, nif, bone_refs) {
-                                    (GpuMesh::from_tri_shape_skinned(device, eval_data, &pos, &nrm), None)
+                                    vec![(GpuMesh::from_tri_shape_skinned(device, eval_data, &pos, &nrm), None)]
                                 } else {
-                                    (GpuMesh::from_tri_shape(device, eval_data), None)
+                                    let use_vc = has_vertex_colors_enabled(&shape.geom.av.properties, nif);
+                                    vec![(GpuMesh::from_tri_shape_with_vc(device, eval_data, use_vc), None)]
+                                };
+
+                                for (gpu_mesh, bone_palette) in mesh_list {
+                                    if let Some(gpu_mesh) = gpu_mesh {
+                                        let tint = anim_collector.as_ref().and_then(|c| c.tint_color);
+                                        let is_head_shape = name.to_ascii_lowercase().contains("head");
+                                        let override_tex = if is_head_shape {
+                                            anim_collector.as_ref().and_then(|c| c.head_diffuse_override)
+                                        } else {
+                                            None
+                                        };
+                                        let mut render_mesh = create_render_mesh_with_override(
+                                            device,
+                                            context,
+                                            &name,
+                                            gpu_mesh,
+                                            &world_transform,
+                                            &shape.geom.av.properties,
+                                            parent_alpha,
+                                            parent_material,
+                                            nif,
+                                            vfs,
+                                            queue,
+                                            texture_cache,
+                                            default_texture,
+                                            default_normal_texture,
+                                            default_glow_texture,
+                                            tint,
+                                            override_tex,
+                                        );
+                                        render_mesh.bone_palette = bone_palette;
+                                        out_meshes.push(render_mesh);
+
+                                        // アクターパーツ走査時: 生成されたメッシュとスキン/剛体情報を 1:1 でダイレクト登録
+                                        if let Some(ref mut collector) = anim_collector {
+                                            let mesh_index = out_meshes.len() - 1;
+                                            if shape.geom.skin_instance >= 0 {
+                                                collector.anim_skins.push(AnimatedSkinMesh {
+                                                    mesh_index,
+                                                    part_index: collector.part_index,
+                                                    geo_data_block: shape.geom.data,
+                                                    skin_instance_block: shape.geom.skin_instance,
+                                                });
+                                            } else if let Some(bone_name) = collector.attach_bone {
+                                                let local_transform = compute_rigid_part_local_transform(
+                                                    block_index as usize,
+                                                    bone_name,
+                                                    &collector.shape_transforms,
+                                                    &shape.geom.av,
+                                                );
+                                                collector.anim_rigids.push(AnimatedRigidMesh {
+                                                    mesh_index,
+                                                    bone_name: bone_name.to_string(),
+                                                    local_transform,
+                                                });
+                                            }
+                                        }
+                                    }
                                 }
-                            } else {
-                                (GpuMesh::from_tri_shape(device, data), None)
                             }
-                        } else {
-                            (GpuMesh::from_tri_shape(device, data), None)
                         }
-                    } else {
-                        (GpuMesh::from_tri_shape(device, data), None)
-                    };
+                    }
 
-                    let (gpu_mesh, bone_palette) = mesh_and_palette;
+                    if !processed_skin {
+                        let use_vc = has_vertex_colors_enabled(&shape.geom.av.properties, nif);
+                        if let Some(gpu_mesh) = GpuMesh::from_tri_shape_with_vc(device, data, use_vc) {
+                            let tint = anim_collector.as_ref().and_then(|c| c.tint_color);
+                            let render_mesh = create_render_mesh_with_override(
+                                device,
+                                context,
+                                &name,
+                                gpu_mesh,
+                                &world_transform,
+                                &shape.geom.av.properties,
+                                parent_alpha,
+                                parent_material,
+                                nif,
+                                vfs,
+                                queue,
+                                texture_cache,
+                                default_texture,
+                                default_normal_texture,
+                                default_glow_texture,
+                                tint,
+                                None,
+                            );
+                            out_meshes.push(render_mesh);
 
-                    if let Some(gpu_mesh) = gpu_mesh {
-                        let tint = anim_collector.as_ref().and_then(|c| c.tint_color);
-                        let is_head_shape = name.to_ascii_lowercase().contains("head");
-                        let override_tex = if is_head_shape {
-                            anim_collector.as_ref().and_then(|c| c.head_diffuse_override)
-                        } else {
-                            None
-                        };
-                        let mut render_mesh = create_render_mesh_with_override(
-                            device,
-                            context,
-                            &name,
-                            gpu_mesh,
-                            &world_transform,
-                            &shape.geom.av.properties,
-                            parent_alpha,
-                            parent_material,
-                            nif,
-                            vfs,
-                            queue,
-                            texture_cache,
-                            default_texture,
-                            default_normal_texture,
-                            default_glow_texture,
-                            tint,
-                            override_tex,
-                        );
-                        render_mesh.bone_palette = bone_palette;
-                        out_meshes.push(render_mesh);
-
-                        // アクターパーツ走査時: 生成されたメッシュとスキン/剛体情報を 1:1 でダイレクト登録
-                        if let Some(ref mut collector) = anim_collector {
-                            let mesh_index = out_meshes.len() - 1;
-                            if shape.geom.skin_instance >= 0 {
-                                collector.anim_skins.push(AnimatedSkinMesh {
-                                    mesh_index,
-                                    part_index: collector.part_index,
-                                    geo_data_block: shape.geom.data,
-                                    skin_instance_block: shape.geom.skin_instance,
-                                });
-                            } else if let Some(bone_name) = collector.attach_bone {
-                                let local_transform = compute_rigid_part_local_transform(
-                                    block_index as usize,
-                                    bone_name,
-                                    &collector.shape_transforms,
-                                    &shape.geom.av,
-                                );
-                                collector.anim_rigids.push(AnimatedRigidMesh {
-                                    mesh_index,
-                                    bone_name: bone_name.to_string(),
-                                    local_transform,
-                                });
+                            // 剛体パーツ (目・歯・舌・髪) のダイレクト登録
+                            if let Some(ref mut collector) = anim_collector {
+                                let mesh_index = out_meshes.len() - 1;
+                                if let Some(bone_name) = collector.attach_bone {
+                                    let local_transform = compute_rigid_part_local_transform(
+                                        block_index as usize,
+                                        bone_name,
+                                        &collector.shape_transforms,
+                                        &shape.geom.av,
+                                    );
+                                    collector.anim_rigids.push(AnimatedRigidMesh {
+                                        mesh_index,
+                                        bone_name: bone_name.to_string(),
+                                        local_transform,
+                                    });
+                                }
                             }
                         }
                     }
@@ -400,7 +447,8 @@ pub fn traverse_block(
 
             if strips.geom.data >= 0 && (strips.geom.data as usize) < nif.blocks.len() {
                 if let NifBlock::NiTriStripsData(ref data) = nif.blocks[strips.geom.data as usize] {
-                    if let Some(gpu_mesh) = GpuMesh::from_tri_strips(device, data) {
+                    let use_vc = has_vertex_colors_enabled(&strips.geom.av.properties, nif);
+                    if let Some(gpu_mesh) = GpuMesh::from_tri_strips_with_vc(device, data, use_vc) {
                         let tint = anim_collector.as_ref().and_then(|c| c.tint_color);
                         let render_mesh = create_render_mesh(
                             device,

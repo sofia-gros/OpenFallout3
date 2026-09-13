@@ -761,6 +761,53 @@
             if path.contains("upperbody") || path.contains("hand") || path.contains("outfit") {
                 assert!(total_bones > 0, "スキンパーツ {} のボーン数が 0 です", path);
             }
+            if path.contains("headhuman.nif") || path.contains("outfitm.nif") {
+                for block in &part_nif.blocks {
+                    let inst = match block {
+                        NifBlock::NiSkinInstance(i) => i,
+                        NifBlock::BSDismemberSkinInstance(d) => &d.skin_instance,
+                        _ => continue,
+                    };
+                    if inst.data >= 0 && (inst.data as usize) < part_nif.blocks.len() {
+                        if let NifBlock::NiSkinData(ref sd) = part_nif.blocks[inst.data as usize] {
+                            println!("\n=== {} SkinData ===", path);
+                            println!("  skin_transform: trans={:?}, scale={}", sd.skin_transform_translation, sd.skin_transform_scale);
+                            for (bi, bd) in sd.bone_list.iter().take(4).enumerate() {
+                                let bname = if bi < inst.bones.len() && inst.bones[bi] >= 0 {
+                                    match &part_nif.blocks[inst.bones[bi] as usize] {
+                                        NifBlock::NiNode(n) => part_nif.get_string(n.av.net.name_index),
+                                        _ => None,
+                                    }
+                                } else { None };
+                                println!("  bone[{}]: {:?} -> trans={:?}, scale={}", bi, bname, bd.skin_transform_translation, bd.skin_transform_scale);
+                            }
+                        }
+                    }
+                    let resolved = crate::scene::bones::resolve_bone_world_transforms_by_name(inst, &part_nif, &bone_name_world_map, None);
+                    if path.contains("headhuman.nif") {
+                        for b in &part_nif.blocks {
+                            if let NifBlock::NiTriShape(shape) = b {
+                                if shape.geom.data >= 0 && (shape.geom.data as usize) < part_nif.blocks.len() {
+                                    if let NifBlock::NiTriShapeData(d) = &part_nif.blocks[shape.geom.data as usize] {
+                                        if let Some((pos, _)) = crate::skinning::apply_skinning_cpu_with_bones(d, inst, &part_nif, Some(&resolved)) {
+                                            let mut min = glam::Vec3::splat(f32::MAX);
+                                            let mut max = glam::Vec3::splat(f32::MIN);
+                                            for p in &pos {
+                                                let v = glam::Vec3::from_array(*p);
+                                                min = min.min(v);
+                                                max = max.max(v);
+                                            }
+                                            let center = (min + max) * 0.5;
+                                            // 頭部メッシュが足元 (Z ≈ 0) ではなく、スケルトンの頭部位置 (Z > 100) に正しくスキニングされていることを検証
+                                            assert!(center.z > 100.0, "頭部メッシュの中心 Z ({}) が 100 未満（地面落ち）になっています", center.z);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // righthand.nif の場合、各ボーンのワールド位置をスケルトンと比較
             if path.contains("righthand.nif") {
@@ -903,8 +950,19 @@
 
         let hair_paths = [
             "meshes\\characters\\hair\\hairbun.nif",
+            "meshes\\characters\\hair\\hairwastelandm.nif",
             "meshes\\characters\\hair\\hairmessy02.nif",
             "meshes\\characters\\hair\\hairmessy03.nif",
+            "meshes\\armor\\wastelandclothing06\\outfitm.nif",
+            "meshes\\armor\\vault101\\vault101suitm.nif",
+            "meshes\\armor\\vault101suit\\outfitm.nif",
+            "meshes\\characters\\head\\headhuman.nif",
+            "meshes\\characters\\_male\\righthand.nif",
+            "meshes\\characters\\_male\\lefthand.nif",
+            "meshes\\characters\\head\\eyelright.nif",
+            "meshes\\characters\\head\\eyelleft.nif",
+            "meshes\\characters\\_1stperson\\skeleton.nif",
+            "meshes\\characters\\_1stperson\\1stpersonarms.nif",
         ];
 
         for path in &hair_paths {
@@ -917,6 +975,14 @@
                             NifBlock::NiTriShape(shape) => {
                                 let name = nif.get_string(shape.geom.av.net.name_index).unwrap_or("");
                                 println!("  Block {}: NiTriShape '{}', skin_inst={}, props={:?}", i, name, shape.geom.skin_instance, shape.geom.av.properties);
+                                if shape.geom.skin_instance >= 0 && (shape.geom.skin_instance as usize) < nif.blocks.len() {
+                                    if let NifBlock::BSDismemberSkinInstance(ref bdsi) = nif.blocks[shape.geom.skin_instance as usize] {
+                                        println!("    BSDismemberSkinInstance: skin_partition={}, parts={:?}, bones_count={}", bdsi.skin_instance.skin_partition, bdsi.partitions, bdsi.skin_instance.bones.len());
+                                        if bdsi.skin_instance.skin_partition >= 0 && (bdsi.skin_instance.skin_partition as usize) < nif.blocks.len() {
+                                            println!("      SkinPartition block type: {:?}", std::mem::discriminant(&nif.blocks[bdsi.skin_instance.skin_partition as usize]));
+                                        }
+                                    }
+                                }
                                 for &p in &shape.geom.av.properties {
                                     if p >= 0 && (p as usize) < nif.blocks.len() {
                                         match &nif.blocks[p as usize] {
@@ -924,10 +990,18 @@
                                                 println!("    AlphaProp: flags=0x{:04X}, blend={}, test={}, test_func={}, thresh={}",
                                                     a.flags, a.is_blend_enabled(), a.is_test_enabled(), a.test_func(), a.threshold_normalized());
                                             }
-                                            NifBlock::NiMaterialProperty(m) => {
-                                                println!("    MaterialProp: specular={:?}, gloss={}", m.specular_color, m.glossiness);
+
+                                            NifBlock::BSShaderPPLightingProperty(s) => {
+                                                println!("    BSShaderPPLightingProp: texture_set={:?}, shader_type={:?}", s.texture_set, s.shader_type);
+                                                if s.texture_set >= 0 && (s.texture_set as usize) < nif.blocks.len() {
+                                                    if let NifBlock::BSShaderTextureSet(ref ts) = nif.blocks[s.texture_set as usize] {
+                                                        println!("      Textures: {:?}", ts.textures);
+                                                    }
+                                                }
                                             }
-                                            _ => {}
+                                            other => {
+                                                println!("    Prop {}: {:?}", p, std::mem::discriminant(other));
+                                            }
                                         }
                                     }
                                 }

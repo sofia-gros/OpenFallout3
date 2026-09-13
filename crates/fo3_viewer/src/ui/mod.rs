@@ -37,7 +37,14 @@ impl ViewerMode {
 
     /// UI 表示中のキー入力を処理する。UI によって消費された場合は true を返す。
     /// 参照元: Fallout 3 操作系 (会話終了・ターミナル退出は T キーまたは Escape)
+    #[allow(dead_code)]
     pub fn handle_key(&mut self, key: winit::keyboard::KeyCode) -> bool {
+        let mut dummy_vm = fo3_script::ScriptVm::new();
+        self.handle_key_with_vm(key, &mut dummy_vm)
+    }
+
+    /// スクリプト VM と連携して UI 入力を処理する。
+    pub fn handle_key_with_vm(&mut self, key: winit::keyboard::KeyCode, vm: &mut fo3_script::ScriptVm) -> bool {
         match self {
             ViewerMode::Exploring => false,
             ViewerMode::Dialog(ref mut state) => {
@@ -52,7 +59,7 @@ impl ViewerMode {
                         true
                     }
                     KeyCode::KeyE | KeyCode::Enter => {
-                        if state.confirm_selection() {
+                        if state.confirm_selection_with_vm(vm) {
                             *self = ViewerMode::Exploring;
                         }
                         true
@@ -77,7 +84,7 @@ impl ViewerMode {
                         true
                     }
                     KeyCode::KeyE | KeyCode::Enter => {
-                        state.confirm_selection();
+                        state.confirm_selection_with_vm(vm);
                         if state.is_closed {
                             *self = ViewerMode::Exploring;
                             println!("[ターミナルUI] ログアウトしました。");
@@ -88,12 +95,25 @@ impl ViewerMode {
                         state.back();
                         if state.is_closed {
                             *self = ViewerMode::Exploring;
-                            println!("[ターミナルUI] ターミナルを終了しました。");
+                            println!("[ターミナルUI] ログアウトしました。");
                         }
                         true
                     }
                     _ => true, // UI 開いている間は他の操作を吸収
                 }
+            }
+        }
+    }
+
+    /// 現在のアクティブな UI (会話またはターミナル) を描画バッチへ記録。
+    pub fn populate_batch(&self, batch: &mut fo3_render::TextBatch, font: &fo3_render::BitmapFont, width: f32, height: f32) {
+        match self {
+            ViewerMode::Exploring => {}
+            ViewerMode::Dialog(ref state) => {
+                state.render_to_batch(batch, font, width, height);
+            }
+            ViewerMode::Terminal(ref state) => {
+                state.render_to_batch(batch, font, width, height);
             }
         }
     }

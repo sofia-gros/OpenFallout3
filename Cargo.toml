@@ -10,6 +10,7 @@ members = [
     "crates/fo3_viewer",
     "crates/fo3_esm",
     "crates/fo3_physics",
+    "crates/fo3_script",
 ]
 
 [workspace.dependencies]

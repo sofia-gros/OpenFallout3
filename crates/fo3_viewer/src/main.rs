@@ -2,14 +2,17 @@
 //!
 //! Fallout 3 メッシュ & セルシーンビューアー (winit + wgpu)。
 
+mod action;
 mod anim;
 mod app;
+mod camera;
 mod controller;
 mod hud;
 mod interact;
 mod interactive_anim;
 mod inventory;
 mod loader;
+mod player;
 mod types;
 mod ui;
 

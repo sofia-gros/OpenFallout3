@@ -110,7 +110,7 @@ fn test_real_megaton_saloon_npcs() {
     for refr in &refrs {
         if let Some(npc) = npc_map.get(&refr.base_object) {
             println!("--- NPC発見: EDID: {}, Name: {:?}, Female: {}, Pos: {:?}", npc.edid, npc.full_name, npc.is_female, refr.position);
-            println!("    Race: 0x{:08X}, WNAM: {:?}, DOFT: {:?}, HNAM: {:?}", npc.race.0, npc.default_armor, npc.default_outfit, npc.hair);
+            println!("    Race: 0x{:08X}, WNAM: {:?}, DOFT: {:?}, HNAM: {:?}, HairColor: {:?}", npc.race.0, npc.default_armor, npc.default_outfit, npc.hair, npc.hair_color);
             if let Some(doft_id) = npc.default_outfit {
                 if let Some(otft) = outfit_map.get(&doft_id) {
                     println!("    DOFT Outfit: EDID: {}, Inventory: {:?}", otft.edid, otft.inventory);
@@ -224,5 +224,50 @@ fn test_real_lvli_resolution() {
     assert!(simms_has_duster, "Lucas Simms がダスターコートを解決できること");
     assert!(simms_has_rifle, "Lucas Simms が中国軍アサルトライフル (武器) を解決できること");
 }
+
+#[test]
+fn test_real_qust_inspection() {
+    let esm_path = "A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\\Fallout3.esm";
+    if !std::path::Path::new(esm_path).exists() {
+        eprintln!("Fallout3.esm が見つからないためテストをスキップします");
+        return;
+    }
+
+    let mut reader = EsmReader::open(esm_path).expect("Failed to open Fallout3.esm");
+    let mut qust_count = 0;
+    while let Some(entry) = reader.read_next_entry().expect("read entry") {
+        if let fo3_esm::reader::EsmEntry::Record(record, subrecords) = entry {
+            if record.type_id == fo3_esm::types::REC_QUST {
+                qust_count += 1;
+                let mut edid = String::new();
+                let mut full = String::new();
+                let mut sub_tags = Vec::new();
+                for sub in &subrecords {
+                    sub_tags.push(std::str::from_utf8(&sub.type_id.0).unwrap_or("????").to_string());
+                    if sub.type_id == fo3_esm::types::SUB_EDID {
+                        edid = String::from_utf8_lossy(&sub.data).trim_end_matches('\0').to_string();
+                    } else if sub.type_id == fo3_esm::types::SUB_FULL {
+                        full = String::from_utf8_lossy(&sub.data).trim_end_matches('\0').to_string();
+                    }
+                }
+                if qust_count <= 5 || edid == "MQ01" || edid == "MS11" {
+                    println!(
+                        "QUST [0x{:08X}] EDID: \"{}\", FULL: \"{}\", Subs: {:?}",
+                        record.form_id.0, edid, full, sub_tags
+                    );
+                    for sub in &subrecords {
+                        let stag = std::str::from_utf8(&sub.type_id.0).unwrap_or("????");
+                        if matches!(stag, "INDX" | "QSDT" | "DATA" | "SCRI" | "SCHR" | "QOBJ" | "QSTA" | "NNAM") {
+                            println!("   Sub {}: len={}, hex={:02X?}", stag, sub.data.len(), &sub.data[..sub.data.len().min(16)]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    println!("Total QUST records found: {}", qust_count);
+    assert!(qust_count > 0, "QUST レコードが ESM から取得できること");
+}
+
 
 

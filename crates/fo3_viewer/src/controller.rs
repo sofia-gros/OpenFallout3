@@ -5,12 +5,16 @@
 use std::time::Instant;
 use fo3_physics::{RapierCharacterController, RapierPhysicsWorld};
 use fo3_render::OrbitCamera;
+use crate::camera::PlayerCamera;
+use crate::player::PlayerActor;
 use crate::types::CameraMode;
 
 /// 入力と移動状態を保持するコントローラー。
 pub struct Controller {
     pub camera_mode: CameraMode,
     pub camera: OrbitCamera,
+    pub player_camera: PlayerCamera,
+    pub player_actor: Option<PlayerActor>,
     pub physics_world: RapierPhysicsWorld,
     pub character_controller: RapierCharacterController,
     pub initial_spawn_point: glam::Vec3,
@@ -22,6 +26,7 @@ pub struct Controller {
     pub key_left: bool,
     pub key_right: bool,
     pub key_jump: bool,
+    pub key_run: bool,
     // マウス入力状態
     pub left_mouse_down: bool,
     pub right_mouse_down: bool,
@@ -43,11 +48,17 @@ impl Controller {
             camera.target, camera.distance
         );
 
+        let mut player_camera = PlayerCamera::new(aspect);
+        player_camera.yaw = camera.yaw;
+        player_camera.pitch = camera.pitch;
+
         let character_controller = RapierCharacterController::new(spawn_pos);
 
         Self {
             camera_mode: CameraMode::Orbit,
             camera,
+            player_camera,
+            player_actor: None,
             physics_world,
             character_controller,
             initial_spawn_point: spawn_pos,
@@ -58,6 +69,7 @@ impl Controller {
             key_left: false,
             key_right: false,
             key_jump: false,
+            key_run: true, // Fallout 3 デフォルトは常時Run (ShiftでWalk切替)
             left_mouse_down: false,
             right_mouse_down: false,
             last_mouse_pos: None,
@@ -72,11 +84,10 @@ impl Controller {
 
         // FPS ウォークスルー歩行モード時の物理シミュレーション
         if self.camera_mode == CameraMode::Walkthrough {
-            // 水平面上の移動方向（カメラのヨー角から計算: Z-up 右手系）
-            let forward =
-                glam::Vec3::new(self.camera.yaw.cos(), self.camera.yaw.sin(), 0.0).normalize();
-            let right =
-                glam::Vec3::new(self.camera.yaw.sin(), -self.camera.yaw.cos(), 0.0).normalize();
+            // 水平面上の移動方向（PlayerCamera のヨー角から計算: Z-up 右手系）
+            let cam_yaw = self.player_camera.yaw;
+            let forward = glam::Vec3::new(cam_yaw.cos(), cam_yaw.sin(), 0.0).normalize();
+            let right = glam::Vec3::new(cam_yaw.sin(), -cam_yaw.cos(), 0.0).normalize();
 
             let mut move_dir = glam::Vec3::ZERO;
             if self.key_forward {
@@ -92,15 +103,19 @@ impl Controller {
                 move_dir -= right;
             }
 
-            let move_speed = 300.0; // ゲーム単位/秒 (約 4.3 m/s)
-            let horiz_velocity = if move_dir.length_squared() > 0.001 {
-                move_dir.normalize() * move_speed
+            let is_moving = move_dir.length_squared() > 0.001;
+            let normalized_dir = if is_moving { Some(move_dir.normalize()) } else { None };
+
+            // Fallout 3 実機 GMST 移動速度準拠 (Walk: 130.0, Run: 300.0)
+            let move_speed = if self.key_run { 300.0 } else { 130.0 };
+            let horiz_velocity = if let Some(dir) = normalized_dir {
+                dir * move_speed
             } else {
                 glam::Vec3::ZERO
             };
 
             // 重力とジャンプ
-            let gravity = -980.0; // 重力加速度 (約 -14 m/s^2)
+            let gravity = -980.0;
             if self.character_controller.is_grounded {
                 if self.key_jump {
                     self.vertical_velocity = 350.0; // ジャンプ初速
@@ -124,9 +139,29 @@ impl Controller {
                 &self.physics_world.query_pipeline,
             );
 
-            // カメラの目の高さをキャラクタ位置 + 55 単位（プレイヤーアイレベル 約 119）に設定
-            let eye_level = self.character_controller.position + glam::Vec3::new(0.0, 0.0, 55.0);
-            self.camera.override_eye = Some(eye_level);
+            let feet_pos = self.character_controller.feet_position();
+
+            // ロコモーションステートマシンの入力更新
+            if let Some(ref mut actor) = self.player_actor {
+                actor.state_machine.update_state(
+                    self.key_forward,
+                    self.key_backward,
+                    self.key_left,
+                    self.key_right,
+                    self.key_run,
+                    self.key_jump,
+                    self.character_controller.is_grounded,
+                );
+            }
+
+            // プレイヤーカメラの更新 (足元接地面基準 & 壁クリッピング回避適用)
+            self.player_camera.update(feet_pos, Some(&self.physics_world));
+
+            // OrbitCamera へ視点位置・向きを反映 (レンダリング Uniform 生成用)
+            self.camera.override_eye = Some(self.player_camera.current_eye);
+            self.camera.target = self.player_camera.focal_point(feet_pos);
+            self.camera.yaw = self.player_camera.yaw;
+            self.camera.pitch = self.player_camera.pitch;
         } else {
             self.camera.override_eye = None;
         }

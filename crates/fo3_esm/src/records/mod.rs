@@ -17,10 +17,14 @@ pub mod hair;
 pub mod lvli;
 pub mod term;
 pub mod dial;
+pub mod scpt;
+pub mod glob;
+pub mod quest;
 
 pub use tes4::Tes4Header;
 pub use stat::StatRecord;
 pub use cell::{CellLighting, CellRecord};
+pub use quest::{QuestObjective, QuestRecord, QuestStage};
 pub use refr::{EnableParent, LockData, RefrRecord, TeleportDoor};
 pub use land::{LandRecord, LandTextureLayer, LAND_HEIGHT_SCALE, LAND_NUM_VERTS, LAND_REAL_SIZE, LAND_VERTS_PER_SIDE};
 pub use light::LightRecord;
@@ -33,7 +37,9 @@ pub use otft::OtftRecord;
 pub use hair::HairRecord;
 pub use lvli::{LvliRecord, LvloEntry};
 pub use term::{TermMenuItem, TermRecord};
-pub use dial::{info_flags, DialRecord, InfoRecord};
+pub use dial::{info_flags, DialRecord, InfoRecord, TargetCondition};
+pub use scpt::{ScptRecord, ScriptHeader, ScriptLocalVar, ScriptType};
+pub use glob::GlobRecord;
 
 
 

@@ -37,12 +37,19 @@ pub fn strips_to_triangles(strips: &[Vec<u16>]) -> Vec<u16> {
 
 /// NIF の共通ジオメトリデータから GPU 頂点配列を構築する。
 pub fn build_vertices(common: &NiGeometryDataCommon) -> Vec<Vertex> {
+    build_vertices_with_color_flag(common, true)
+}
+
+/// 頂点カラー有効フラグを指定して GPU 頂点配列を構築する。
+/// `use_vertex_colors` が false の場合、NiGeometryDataCommon に vertex_colors が存在しても無視して白色 (1,1,1,1) を適用する。
+/// 参照元: `references/nifxml/nif.xml:L6414` (`SLSF2_Vertex_Colors`), Fallout 3 髪の毛メッシュ
+pub fn build_vertices_with_color_flag(common: &NiGeometryDataCommon, use_vertex_colors: bool) -> Vec<Vertex> {
     let n = common.num_vertices as usize;
     let mut vertices = Vec::with_capacity(n);
 
     let has_normals = !common.normals.is_empty();
     let has_uv = !common.uv_sets.is_empty() && !common.uv_sets[0].is_empty();
-    let has_colors = !common.vertex_colors.is_empty();
+    let has_colors = use_vertex_colors && !common.vertex_colors.is_empty();
     let has_tangents = !common.tangents.is_empty();
     let has_bitangents = !common.bitangents.is_empty();
 
@@ -131,7 +138,12 @@ pub struct GpuMesh {
 impl GpuMesh {
     /// NiTriShapeData から GpuMesh を生成する。
     pub fn from_tri_shape(device: &wgpu::Device, data: &NiTriShapeData) -> Option<Self> {
-        let vertices = build_vertices(&data.common);
+        Self::from_tri_shape_with_vc(device, data, true)
+    }
+
+    /// 頂点カラー有効フラグを指定して NiTriShapeData から GpuMesh を生成する。
+    pub fn from_tri_shape_with_vc(device: &wgpu::Device, data: &NiTriShapeData, use_vertex_colors: bool) -> Option<Self> {
+        let vertices = build_vertices_with_color_flag(&data.common, use_vertex_colors);
         if vertices.is_empty() {
             return None;
         }
@@ -232,7 +244,12 @@ impl GpuMesh {
 
     /// NiTriStripsData から GpuMesh を生成する。
     pub fn from_tri_strips(device: &wgpu::Device, data: &NiTriStripsData) -> Option<Self> {
-        let vertices = build_vertices(&data.common);
+        Self::from_tri_strips_with_vc(device, data, true)
+    }
+
+    /// 頂点カラー有効フラグを指定して NiTriStripsData から GpuMesh を生成する。
+    pub fn from_tri_strips_with_vc(device: &wgpu::Device, data: &NiTriStripsData, use_vertex_colors: bool) -> Option<Self> {
+        let vertices = build_vertices_with_color_flag(&data.common, use_vertex_colors);
         if vertices.is_empty() {
             return None;
         }

@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use fo3_esm::{CellLighting, EsmMasterContext};
+use fo3_esm::{CellLighting, EsmMasterContext, FormId};
 use fo3_render::{
     GpuTexture, LightingUniform, NifCache, PlacedPointLight, RenderContext, RenderScene,
 };
@@ -24,14 +24,14 @@ use crate::anim::AnimState;
 use crate::controller::Controller;
 use crate::hud::HudRenderer;
 use crate::interact::{
-    find_focused_by_raycast, find_focused_interactable, InteractableKind, InteractableObject,
+    find_focused_by_raycast, find_focused_interactable, InteractableObject,
     F_ACTIVATE_PICK_LENGTH,
 };
 use crate::interactive_anim::{InteractiveAnimator, RefrBinding};
 use crate::inventory::PlayerInventory;
 use crate::loader::load_scene;
 use crate::types::{print_controls_guide, update_window_title, CameraMode, ViewerTarget};
-use crate::ui::{DialogChoice, DialogState, TerminalState, ViewerMode};
+use crate::ui::ViewerMode;
 
 pub struct ViewerState {
     pub window: Arc<Window>,
@@ -67,6 +67,9 @@ pub struct ViewerState {
     pub master_context: Arc<EsmMasterContext>,
     pub nif_cache: NifCache,
     pub texture_cache: HashMap<String, GpuTexture>,
+    pub vm: fo3_script::ScriptVm,
+    pub dispatcher: fo3_script::EventDispatcher,
+    pub ui_renderer: fo3_render::UiRenderer,
 }
 
 impl ViewerState {
@@ -136,7 +139,7 @@ impl ViewerState {
         let mut texture_cache = HashMap::new();
 
         // シーン・物理・ライティングのロード
-        let loaded = load_scene(
+        let mut loaded = load_scene(
             &device,
             &queue,
             &context,
@@ -203,18 +206,26 @@ impl ViewerState {
             };
             controller.camera.yaw = into_room.y.atan2(into_room.x);
             controller.camera.pitch = 0.0;
+            controller.player_camera.yaw = controller.camera.yaw;
+            controller.player_camera.pitch = controller.camera.pitch;
         }
 
+        // プレイヤーアクター (三人称全身モデル + 一人称腕モデル) の生成・配置
+        let player_actor = crate::player::build_player_actor(
+            &device,
+            &queue,
+            &context,
+            &mut vfs,
+            &mut nif_cache,
+            &mut texture_cache,
+            &mut loaded.scene,
+            spawn_pos,
+            controller.player_camera.yaw,
+        );
+        controller.player_actor = player_actor;
+
         let enable_fog = if let Some(ref cl) = loaded.cell_lighting {
-            if cl.fog_far > 0.0 && controller.camera.distance > cl.fog_far {
-                println!(
-                    "注記: カメラ距離 ({:.1}) がセルフォグ Far ({:.1}) を超えているため、初期状態でフォグを無効化しています (F キーでフォグ表示切替)。",
-                    controller.camera.distance, cl.fog_far
-                );
-                false
-            } else {
-                true
-            }
+            !(cl.fog_far > 0.0 && controller.camera.distance > cl.fog_far)
         } else {
             false
         };
@@ -260,10 +271,13 @@ impl ViewerState {
         });
 
         let hud = HudRenderer::new(&device, &queue, surface_format, &mut vfs);
+        let ui_renderer = fo3_render::UiRenderer::new(&device, &queue, surface_format);
+        let vm = fo3_script::ScriptVm::new();
+        let dispatcher = fo3_script::EventDispatcher::new();
 
         print_controls_guide();
 
-        Self {
+        let mut state = Self {
             window,
             surface,
             device,
@@ -297,6 +311,35 @@ impl ViewerState {
             master_context,
             nif_cache,
             texture_cache,
+            vm,
+            dispatcher,
+            ui_renderer,
+        };
+
+        state.setup_scripts_for_cell();
+        state
+    }
+
+    /// セル内の配置オブジェクトにアタッチされたスクリプトを抽出し、イベントディスパッチャーへ登録する。
+    pub fn setup_scripts_for_cell(&mut self) {
+        // 0. クエスト EditorID -> FormID マップを VM へ登録
+        for (edid, form_id) in &self.master_context.quest_edid_map {
+            self.vm.edid_map.insert(edid.clone(), *form_id);
+        }
+
+        // 1. master_context に存在する全スクリプトを dispatcher に登録
+        for scpt in self.master_context.script_map.values() {
+            self.dispatcher.register_script(scpt.clone());
+        }
+
+        // 2. セル内の配置オブジェクト (interactables) のスクリプトをアタッチ
+        for obj in &self.interactables {
+            let obj_id = FormId(obj.form_id);
+            if let Some(base_info) = self.master_context.model_map.get(&obj_id) {
+                if let Some(script_id) = base_info.script {
+                    self.dispatcher.attach_script(obj_id, script_id);
+                }
+            }
         }
     }
 
@@ -304,274 +347,9 @@ impl ViewerState {
     /// ドア (`XTEL`) の場合は遷移先セルを解決してロードしテレポートを行う。
     /// 参照元: Gamebryo 2.6 セル遷移 & `references/openmw/components/esm4/loadrefr.cpp:103-127`
     pub fn interact_or_teleport(&mut self) {
-        let focused = match &self.focused_interactable {
-            Some(f) => f.clone(),
-            None => {
-                println!("[インタラクト] 正面に操作可能なオブジェクトがありません。");
-                return;
-            }
-        };
-
-        println!("[インタラクト実行] {}", focused.prompt_text());
-
-        match &focused.kind {
-            InteractableKind::Door { teleport, lock, is_open } => {
-                if let Some(l) = lock {
-                    println!("  - このドアは施錠されています (難易度: {})。鍵が必要です。", l.lock_level);
-                    return;
-                }
-                if let Some(ref tp) = teleport {
-                    println!(
-                        "  - テレポートドア起動: 遷移先ドア FormID 0x{:08X}, 出現座標: {:?}, 出現回転: {:?}",
-                        tp.dest_door.0, tp.dest_pos, tp.dest_rot
-                    );
-
-                    // Fallout3.esm から dest_door の親セルおよび所属ワールドを逆引き検索
-                    let esm_path = std::path::Path::new(&self.data_dir).join("Fallout3.esm");
-                    let dest_cell_info = if let Ok(mut reader) = fo3_esm::EsmReader::open(&esm_path) {
-                        match reader.find_cell_containing_refr(tp.dest_door) {
-                            Ok(Some((cell, _, _, parent_world))) => Some((cell, parent_world)),
-                            _ => None,
-                        }
-                    } else {
-                        None
-                    };
-
-                    let next_target = if let Some((ref c, ref parent_world)) = dest_cell_info {
-                        println!("  - テレポート先セルを解決: \"{}\" (FormID: 0x{:08X})", c.edid, c.form_id.0);
-                        if c.is_interior() || parent_world.is_none() {
-                            ViewerTarget::Cell(c.edid.clone())
-                        } else {
-                            let world = parent_world.as_ref().unwrap();
-                            println!("  - 所属ワールドスペースを解決: \"{}\" (FormID: 0x{:08X}, 親: {:?})", world.edid, world.form_id.0, world.parent_world);
-                            ViewerTarget::World(world.edid.clone(), c.grid)
-                        }
-                    } else {
-                        println!("  - 相手側ドアからセル特定不能のため、出現座標グリッドからロードを試行します");
-                        let gx = (tp.dest_pos[0] / 4096.0).floor() as i32;
-                        let gy = (tp.dest_pos[1] / 4096.0).floor() as i32;
-                        ViewerTarget::World("Wasteland".to_string(), Some((gx, gy)))
-                    };
-
-                    println!("  - 次のセルをロード中: {:?}...", next_target);
-                    let loaded = load_scene(
-                        &self.device,
-                        &self.queue,
-                        &self.context,
-                        &self.data_dir,
-                        &next_target,
-                        &mut self.vfs,
-                        &self.master_context,
-                        &mut self.nif_cache,
-                        &mut self.texture_cache,
-                    );
-
-                    // シーンおよびワールド状態の置換
-                    self.scene = loaded.scene;
-                    self.cell_lighting = loaded.cell_lighting;
-                    self.placed_lights = loaded.placed_lights;
-                    self.clear_color = loaded.clear_color;
-                    self.interactables = loaded.interactables;
-                    self.refr_bindings = loaded.refr_bindings;
-                    self.animators.clear();
-                    self.focused_interactable = None;
-                    self.anim = AnimState::new(&next_target, &mut self.vfs);
-
-                    // プレイヤーの出現位置および姿勢角の設定
-                    // テレポートマーカー座標 (tp.dest_pos) は床面（足元）位置。
-                    // カプセルコライダー中心は足元から +65.0 単位上の位置に配置する。
-                    let marker_pos = glam::Vec3::new(tp.dest_pos[0], tp.dest_pos[1], tp.dest_pos[2]);
-                    // 出現位置の真上 (+100.0) から真下へレイキャストを行い、実コリジョン床面へ精密スナップ
-                    let ray_origin = marker_pos + glam::Vec3::new(0.0, 0.0, 100.0);
-                    let ray_dir = glam::Vec3::new(0.0, 0.0, -1.0);
-                    let spawn_pos = if let Some(hit) = loaded.physics_world.cast_ray(ray_origin, ray_dir, 200.0) {
-                        println!("  - テレポート先床面コリジョン検出: Z = {:.1} -> スポーン中心 Z = {:.1}", hit.point.z, hit.point.z + 65.0);
-                        glam::Vec3::new(marker_pos.x, marker_pos.y, hit.point.z + 65.0)
-                    } else {
-                        println!("  - テレポート先床面レイキャスト未ヒット: デフォルトオフセット (+65.0) で配置");
-                        marker_pos + glam::Vec3::new(0.0, 0.0, 65.0)
-                    };
-
-                    self.controller.physics_world = loaded.physics_world;
-                    self.controller.initial_spawn_point = spawn_pos;
-                    self.controller.character_controller.position = spawn_pos;
-                    self.controller.character_controller.is_grounded = true;
-                    self.controller.vertical_velocity = 0.0;
-                    self.controller.camera.yaw = tp.dest_rot[2];
-                    self.controller.camera.pitch = tp.dest_rot[0].clamp(-1.2, 1.2);
-                    self.controller.camera.distance = 150.0;
-                    self.controller.camera.target = spawn_pos;
-
-                    update_window_title(&self.window, &next_target);
-                    println!("  - セル間テレポート完了: プレイヤー座標 {:?}", spawn_pos);
-                } else {
-                    let currently_open = *is_open;
-                    let target_open = !currently_open;
-                    println!(
-                        "  - 通常ドア開閉アニメーション起動: {} (現在: {})",
-                        if target_open { "開く" } else { "閉じる" },
-                        if currently_open { "開" } else { "閉" }
-                    );
-                    let form_id = focused.form_id;
-                    if let Some(binding) = self.refr_bindings.get(&form_id) {
-                        let anim = self.animators.entry(form_id).or_insert_with(|| {
-                            InteractiveAnimator::from_binding(binding, currently_open)
-                        });
-                        anim.toggle();
-                    }
-
-                    // インタラクティブ対象の状態を更新
-                    if let Some(obj) = self.interactables.iter_mut().find(|o| o.form_id == form_id) {
-                        if let InteractableKind::Door { ref mut is_open, .. } = obj.kind {
-                            *is_open = target_open;
-                        }
-                    }
-                    if let Some(ref mut obj) = self.focused_interactable {
-                        if obj.form_id == form_id {
-                            if let InteractableKind::Door { ref mut is_open, .. } = obj.kind {
-                                *is_open = target_open;
-                            }
-                        }
-                    }
-                }
-            }
-            InteractableKind::Container { form_id: _, lock, is_open } => {
-                if let Some(l) = lock {
-                    println!("  - このコンテナは施錠されています (難易度: {})。鍵が必要です。", l.lock_level);
-                    return;
-                }
-                let currently_open = *is_open;
-                let target_open = !currently_open;
-                println!(
-                    "  - コンテナ開閉アニメーション起動: \"{}\" -> {}",
-                    focused.name,
-                    if target_open { "開く" } else { "閉じる" }
-                );
-                let form_id = focused.form_id;
-                if let Some(binding) = self.refr_bindings.get(&form_id) {
-                    let anim = self.animators.entry(form_id).or_insert_with(|| {
-                        InteractiveAnimator::from_binding(binding, currently_open)
-                    });
-                    anim.toggle();
-                }
-
-                // インタラクティブ対象の状態を更新
-                if let Some(obj) = self.interactables.iter_mut().find(|o| o.form_id == form_id) {
-                    if let InteractableKind::Container { ref mut is_open, .. } = obj.kind {
-                        *is_open = target_open;
-                    }
-                }
-                if let Some(ref mut obj) = self.focused_interactable {
-                    if obj.form_id == form_id {
-                        if let InteractableKind::Container { ref mut is_open, .. } = obj.kind {
-                            *is_open = target_open;
-                        }
-                    }
-                }
-            }
-            InteractableKind::Item { form_id: base_form_id } => {
-                // アイテムをプレイヤーインベントリへ追加
-                self.inventory.add_item(fo3_esm::FormId(*base_form_id), 1, &focused.name);
-                let total = self.inventory.get_count(fo3_esm::FormId(*base_form_id));
-                println!(
-                    "  - アイテム取得: \"{}\" (FormID: 0x{:08X}) をインベントリに追加 (所持数: {})",
-                    focused.name, base_form_id, total
-                );
-
-                // 物理ワールドから剛体を削除
-                if let Some(binding) = self.refr_bindings.get(&focused.form_id) {
-                    for rb in &binding.static_rigid_bodies {
-                        self.controller.physics_world.remove_rigid_body(*rb);
-                    }
-                    for part in &binding.moving_parts {
-                        for rb in &part.rigid_bodies {
-                            self.controller.physics_world.remove_rigid_body(*rb);
-                        }
-                    }
-                    // GPU メッシュをスケール 0 にして不可視化
-                    let mut all_meshes = binding.static_mesh_indices.clone();
-                    for part in &binding.moving_parts {
-                        all_meshes.extend_from_slice(&part.mesh_indices);
-                    }
-                    for mesh_idx in all_meshes {
-                        if let Some(mesh) = self.scene.meshes.get(mesh_idx) {
-                            self.queue.write_buffer(
-                                &mesh.model_uniform_buffer,
-                                0,
-                                bytemuck::cast_slice(&[[[0.0f32; 4]; 4]]),
-                            );
-                        }
-                    }
-                }
-
-                // インタラクト候補から削除
-                self.interactables.retain(|obj| obj.form_id != focused.form_id);
-                self.focused_interactable = None;
-            }
-            InteractableKind::Actor { form_id: actor_form_id, is_dead } => {
-                if *is_dead {
-                    println!("  - アクター \"{}\" の所持品を調べます。", focused.name);
-                    return;
-                }
-                println!("  - アクター \"{}\" (FormID: 0x{:08X}) との会話を開始します...", focused.name, actor_form_id);
-                let esm_path = std::path::Path::new(&self.data_dir).join("Fallout3.esm");
-                if let Ok(mut reader) = fo3_esm::EsmReader::open(&esm_path) {
-                    match reader.find_npc_dialogue(fo3_esm::FormId(*actor_form_id)) {
-                        Ok((greeting_opt, topics)) => {
-                            let greeting = greeting_opt
-                                .as_ref()
-                                .map(|g| g.response_text.as_str())
-                                .unwrap_or("何か用か？");
-                            let choices: Vec<DialogChoice> = topics
-                                .into_iter()
-                                .map(|(dial, infos)| {
-                                    let prompt = dial.prompt.unwrap_or(dial.edid);
-                                    let response = infos
-                                        .first()
-                                        .map(|i| i.response_text.clone())
-                                        .unwrap_or_else(|| "...".to_string());
-                                    let is_goodbye = infos
-                                        .first()
-                                        .map(|i| i.is_goodbye())
-                                        .unwrap_or(false);
-                                    DialogChoice { prompt, response, is_goodbye }
-                                })
-                                .collect();
-                            let dialog_state = DialogState::new(&focused.name, greeting, choices);
-                            println!("  - 会話UIモードへ遷移: 挨拶「{}」 (選択肢: {} 件)", greeting, dialog_state.choices.len());
-                            self.mode = ViewerMode::Dialog(dialog_state);
-                        }
-                        _ => {
-                            println!("  - アクター \"{}\" には利用可能な会話データがありません。", focused.name);
-                        }
-                    }
-                }
-            }
-            InteractableKind::Terminal { form_id: term_form_id, lock } => {
-                if let Some(l) = lock {
-                    println!("  - このターミナルは施錠されています (難易度: {})。ハッキングが必要です。", l.lock_level);
-                    return;
-                }
-                println!("  - ターミナル \"{}\" (FormID: 0x{:08X}) を起動します...", focused.name, term_form_id);
-                let esm_path = std::path::Path::new(&self.data_dir).join("Fallout3.esm");
-                if let Ok(mut reader) = fo3_esm::EsmReader::open(&esm_path) {
-                    match reader.find_terminal(fo3_esm::FormId(*term_form_id)) {
-                        Ok(Some(term_rec)) => {
-                            let term_state = TerminalState::from_record(&term_rec);
-                            println!("  - ターミナルUIモードへ遷移: \"{}\" (項目: {} 件)", term_state.title, term_state.menu_items.len());
-                            self.mode = ViewerMode::Terminal(term_state);
-                        }
-                        _ => {
-                            println!("  - ターミナルデータが見つかりませんでした。");
-                        }
-                    }
-                }
-            }
-            InteractableKind::Activator { .. } => {
-                println!("  - アクティベーター \"{}\" を作動させました。", focused.name);
-            }
-        }
+        crate::action::perform_interact(self);
     }
+
 
     pub fn resize(&mut self, new_size: PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
@@ -650,6 +428,33 @@ impl ViewerState {
         // セル配置アクターの更新
         self.scene.update_actors(dt, &self.device, &self.queue);
 
+        // プレイヤーアクター (三人称・一人称) の姿勢・位置・ロコモーション・GPUスキニング更新
+        if let Some(ref mut player) = self.controller.player_actor {
+            let feet_pos = self.controller.character_controller.feet_position();
+            let cam_yaw = self.controller.player_camera.yaw;
+            let is_moving = self.controller.key_forward || self.controller.key_backward || self.controller.key_left || self.controller.key_right;
+            let fwd = glam::Vec3::new(cam_yaw.cos(), cam_yaw.sin(), 0.0).normalize();
+            let rgt = glam::Vec3::new(cam_yaw.sin(), -cam_yaw.cos(), 0.0).normalize();
+            let mut m_dir = glam::Vec3::ZERO;
+            if self.controller.key_forward { m_dir += fwd; }
+            if self.controller.key_backward { m_dir -= fwd; }
+            if self.controller.key_right { m_dir += rgt; }
+            if self.controller.key_left { m_dir -= rgt; }
+            let move_opt = if is_moving { Some(m_dir.normalize()) } else { None };
+
+            player.update(
+                dt,
+                feet_pos,
+                cam_yaw,
+                is_moving,
+                move_opt,
+                &self.device,
+                &self.queue,
+                &mut self.scene.actors,
+                &mut self.scene.meshes,
+            );
+        }
+
         // 単体 Anim / Actor モード時のスキニング・アニメーション更新
         self.anim.update(dt, &self.device, &self.queue, &mut self.scene);
 
@@ -724,35 +529,48 @@ impl ViewerState {
 
             // Fallout 3 実機 HUD / UI オーバーレイ描画
             let elapsed = self.start_time.elapsed().as_secs_f32();
-            match &self.mode {
-                ViewerMode::Exploring => {
-                    self.hud.render_crosshair(
-                        &mut render_pass,
-                        &self.queue,
-                        self.size.width as f32,
-                        self.size.height as f32,
-                        elapsed,
-                    );
-                }
-                ViewerMode::Dialog(dialog_state) => {
-                    self.hud.render_dialog_overlay(
-                        &mut render_pass,
-                        &self.queue,
-                        self.size.width as f32,
-                        self.size.height as f32,
-                        dialog_state,
-                    );
-                }
-                ViewerMode::Terminal(term_state) => {
-                    self.hud.render_terminal_overlay(
-                        &mut render_pass,
-                        &self.queue,
-                        self.size.width as f32,
-                        self.size.height as f32,
-                        term_state,
-                    );
-                }
+            if matches!(self.mode, ViewerMode::Exploring) {
+                self.hud.render_crosshair(
+                    &mut render_pass,
+                    &self.queue,
+                    self.size.width as f32,
+                    self.size.height as f32,
+                    elapsed,
+                );
             }
+        }
+
+        // Phase 9: 最前面 2D UI (会話テキスト・選択肢・ターミナル画面) の描画パス
+        let mut ui_batch = fo3_render::TextBatch::default();
+        self.mode.populate_batch(
+            &mut ui_batch,
+            self.ui_renderer.font(),
+            self.size.width as f32,
+            self.size.height as f32,
+        );
+        if !ui_batch.indices.is_empty() {
+            self.ui_renderer.update_resolution(
+                &self.queue,
+                self.size.width as f32,
+                self.size.height as f32,
+            );
+            self.ui_renderer.upload_batch(&self.device, &ui_batch);
+
+            let mut ui_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("2D UI Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            self.ui_renderer.render(&mut ui_pass);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -837,7 +655,7 @@ impl ApplicationHandler for App {
                         }
                         CameraMode::Walkthrough => {
                             if state.controller.left_mouse_down || state.controller.right_mouse_down {
-                                state.controller.camera.rotate(dx, dy);
+                                state.controller.player_camera.rotate(dx * 0.003, dy * 0.003);
                                 state.window.request_redraw();
                             }
                         }
@@ -850,15 +668,21 @@ impl ApplicationHandler for App {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.05,
                 };
-                state.controller.camera.zoom(zoom_amount);
+                if state.controller.camera_mode == CameraMode::Walkthrough {
+                    state.controller.player_camera.zoom(zoom_amount);
+                    if let Some(ref mut player) = state.controller.player_actor {
+                        player.set_view_mode(state.controller.player_camera.mode, &mut state.scene.meshes);
+                    }
+                } else {
+                    state.controller.camera.zoom(zoom_amount);
+                }
                 state.window.request_redraw();
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 let pressed = event.state == ElementState::Pressed;
                 if let PhysicalKey::Code(key) = event.physical_key {
-                    // 会話・ターミナル等の UI 表示中は専用の入力処理を実行
                     if pressed && state.mode.is_ui_active() {
-                        if state.mode.handle_key(key) {
+                        if state.mode.handle_key_with_vm(key, &mut state.vm) {
                             state.window.request_redraw();
                             return;
                         }
@@ -870,6 +694,7 @@ impl ApplicationHandler for App {
                         KeyCode::KeyA => state.controller.key_left = pressed,
                         KeyCode::KeyD => state.controller.key_right = pressed,
                         KeyCode::Space => state.controller.key_jump = pressed,
+                        KeyCode::ShiftLeft | KeyCode::ShiftRight => state.controller.key_run = !pressed,
                         _ => {}
                     }
 
@@ -905,6 +730,14 @@ impl ApplicationHandler for App {
                             }
                             KeyCode::KeyE => {
                                 state.interact_or_teleport();
+                                state.window.request_redraw();
+                            }
+                            KeyCode::KeyV => {
+                                state.controller.player_camera.toggle_view_mode();
+                                if let Some(ref mut player) = state.controller.player_actor {
+                                    player.set_view_mode(state.controller.player_camera.mode, &mut state.scene.meshes);
+                                }
+                                println!("[視点切替] 現在の視点モード: {:?}", state.controller.player_camera.mode);
                                 state.window.request_redraw();
                             }
                             KeyCode::KeyC => {

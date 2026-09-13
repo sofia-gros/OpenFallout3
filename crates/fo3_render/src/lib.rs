@@ -23,8 +23,10 @@ pub mod sequence;
 pub mod facegen;
 pub mod resource;
 pub mod gpu_skin;
+pub mod ui;
 
 pub use vertex::{BonePaletteUniform, SkinnedVertex, Vertex, MAX_BONES_PER_PALETTE};
+pub use ui::{BitmapFont, GlyphMetrics, TextBatch, UiRenderer, UiVertex, colors as ui_colors};
 pub use gpu_skin::{GpuBonePalette, create_gpu_skin_mesh_from_partition};
 pub use mesh::GpuMesh;
 pub use texture::GpuTexture;

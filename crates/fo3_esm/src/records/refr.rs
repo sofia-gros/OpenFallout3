@@ -8,7 +8,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{
-    FormId, FourCC, SUB_DATA, SUB_EDID, SUB_NAME, SUB_TNAM, SUB_XCNT, SUB_XESP,
+    FormId, FourCC, SUB_DATA, SUB_EDID, SUB_NAME, SUB_SCRI, SUB_TNAM, SUB_XCNT, SUB_XESP,
     SUB_XLOC, SUB_XMRK, SUB_XOWN, SUB_XRNK, SUB_XSCL, SUB_XTEL,
 };
 
@@ -86,6 +86,8 @@ pub struct RefrRecord {
     pub faction_rank: Option<i32>,
     /// 配置スタック個数 (XCNT, アイテム配置時。省略時は 1)
     pub count: i32,
+    /// アタッチされたスクリプトの FormID (SCRI, 存在する場合)
+    pub script: Option<FormId>,
 }
 
 impl RefrRecord {
@@ -104,6 +106,7 @@ impl RefrRecord {
         let mut owner = None;
         let mut faction_rank = None;
         let mut count = 1;
+        let mut script = None;
 
         for sub in subrecords {
             match sub.type_id {
@@ -203,6 +206,11 @@ impl RefrRecord {
                         count = c;
                     }
                 }
+                SUB_SCRI => {
+                    if let Ok(id) = sub.as_form_id() {
+                        script = Some(id);
+                    }
+                }
                 _ => {}
             }
         }
@@ -223,6 +231,7 @@ impl RefrRecord {
             owner,
             faction_rank,
             count,
+            script,
         })
     }
 }

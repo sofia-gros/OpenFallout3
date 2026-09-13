@@ -13,14 +13,14 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use crate::header::{GroupHeader, RecordHeader};
 use crate::records::{
     ArmorRecord, HairRecord, LightRecord, LtexRecord, LvliRecord, NpcRecord, OtftRecord,
-    StatRecord, Tes4Header, TextureSetRecord,
+    QuestRecord, ScptRecord, StatRecord, Tes4Header, TextureSetRecord,
 };
 use crate::subrecord::{parse_subrecords, Subrecord};
 use crate::types::{
     FormId, FourCC, REC_ACTI, REC_ALCH, REC_AMMO, REC_ARMO, REC_BOOK,
     REC_CONT, REC_DOOR, REC_FURN, REC_HAIR, REC_KEYM, REC_LIGH, REC_LTEX, REC_LVLI, REC_MISC,
-    REC_MSTT, REC_NPC_, REC_OTFT, REC_SCOL, REC_STAT, REC_TERM, REC_TES4, REC_TXST,
-    REC_WEAP, SUB_EDID, SUB_MODL,
+    REC_MSTT, REC_NPC_, REC_OTFT, REC_QUST, REC_SCOL, REC_SCPT, REC_STAT, REC_TERM, REC_TES4, REC_TXST,
+    REC_WEAP, SUB_EDID, SUB_MODL, SUB_SCRI,
 };
 
 /// 配置元ベースオブジェクトのメタ情報（モデルパス、エディタID、レコード型）。
@@ -30,6 +30,7 @@ pub struct BaseObjectInfo {
     pub edid: String,
     pub model: String,
     pub record_type: FourCC,
+    pub script: Option<FormId>,
 }
 
 /// ESM ファイルのエントリ（レコードまたはグループ）。
@@ -421,11 +422,16 @@ impl<R: Read + Seek> EsmReader<R> {
                                     if let EsmEntry::Record(header, subrecords) = inner {
                                         let mut edid = String::new();
                                         let mut model = String::new();
+                                        let mut script = None;
                                         for sub in &subrecords {
                                             if sub.type_id == SUB_EDID {
                                                 edid = sub.as_string();
                                             } else if sub.type_id == SUB_MODL {
                                                 model = sub.as_string();
+                                            } else if sub.type_id == SUB_SCRI {
+                                                if let Ok(id) = sub.as_form_id() {
+                                                    script = Some(id);
+                                                }
                                             }
                                         }
                                         if !model.is_empty() {
@@ -434,6 +440,7 @@ impl<R: Read + Seek> EsmReader<R> {
                                                 edid,
                                                 model,
                                                 record_type: header.type_id,
+                                                script,
                                             });
                                         }
                                     }
@@ -533,5 +540,93 @@ impl<R: Read + Seek> EsmReader<R> {
         }
 
         Ok((npcs, armors, outfits, hairs, lvlis))
+    }
+
+    /// 全てのスクリプトレコード (SCPT) を一括走査して FormID -> ScptRecord マップを構築する。
+    pub fn read_all_scripts_map(&mut self) -> io::Result<HashMap<FormId, ScptRecord>> {
+        let mut scripts = HashMap::new();
+        let start_pos = 24 + self.header_record.data_size as u64;
+        self.reader.seek(SeekFrom::Start(start_pos))?;
+
+        while let Some(entry) = self.read_next_entry()? {
+            match entry {
+                EsmEntry::Group(group) => {
+                    if group.target_record_type() == Some(REC_SCPT) {
+                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        while self.reader.stream_position()? < group_end {
+                            if let Some(inner) = self.read_next_entry()? {
+                                match inner {
+                                    EsmEntry::Record(header, subs) => {
+                                        if header.type_id == REC_SCPT {
+                                            if let Ok(scpt) = ScptRecord::parse(&header, &subs) {
+                                                scripts.insert(header.form_id, scpt);
+                                            }
+                                        }
+                                    }
+                                    EsmEntry::Group(child_group) => {
+                                        let skip = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        self.skip(skip)?;
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+                    let remaining = group.group_size as u64 - GroupHeader::SIZE as u64;
+                    self.skip(remaining)?;
+                }
+                EsmEntry::Record(rec, _) => {
+                    self.skip(rec.data_size as u64)?;
+                }
+            }
+        }
+
+        Ok(scripts)
+    }
+
+    /// 全てのクエストレコード (QUST) を一括走査して FormID -> QuestRecord マップを構築する。
+    pub fn read_all_quests_map(&mut self) -> io::Result<HashMap<FormId, QuestRecord>> {
+        let mut quests = HashMap::new();
+        let start_pos = 24 + self.header_record.data_size as u64;
+        self.reader.seek(SeekFrom::Start(start_pos))?;
+
+        while let Some(entry) = self.read_next_entry()? {
+            match entry {
+                EsmEntry::Group(group) => {
+                    if group.target_record_type() == Some(REC_QUST) {
+                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        while self.reader.stream_position()? < group_end {
+                            if let Some(inner) = self.read_next_entry()? {
+                                match inner {
+                                    EsmEntry::Record(header, subs) => {
+                                        if header.type_id == REC_QUST {
+                                            if let Ok(qust) = QuestRecord::parse(header.form_id, &subs) {
+                                                quests.insert(header.form_id, qust);
+                                            }
+                                        }
+                                    }
+                                    EsmEntry::Group(child_group) => {
+                                        let skip = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        self.skip(skip)?;
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+                    let remaining = group.group_size as u64 - GroupHeader::SIZE as u64;
+                    self.skip(remaining)?;
+                }
+                EsmEntry::Record(rec, _) => {
+                    self.skip(rec.data_size as u64)?;
+                }
+            }
+        }
+
+        Ok(quests)
     }
 }

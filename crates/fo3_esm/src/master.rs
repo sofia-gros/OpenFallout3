@@ -15,6 +15,8 @@ use crate::records::npc::NpcRecord;
 use crate::records::otft::OtftRecord;
 use crate::records::hair::HairRecord;
 use crate::records::armo::ArmorRecord;
+use crate::records::quest::QuestRecord;
+use crate::records::scpt::ScptRecord;
 use crate::reader::{BaseObjectInfo, EsmReader};
 use crate::types::FormId;
 
@@ -38,6 +40,12 @@ pub struct EsmMasterContext {
     pub lvli_map: HashMap<FormId, LvliRecord>,
     /// FormID から光源定義レコードへのマップ
     pub light_map: HashMap<FormId, LightRecord>,
+    /// FormID からスクリプトレコードへのマップ (SCPT)
+    pub script_map: HashMap<FormId, ScptRecord>,
+    /// FormID からクエストレコードへのマップ (QUST)
+    pub quest_map: HashMap<FormId, QuestRecord>,
+    /// EditorID (大文字正規化) から Quest FormID へのインデックス
+    pub quest_edid_map: HashMap<String, FormId>,
 }
 
 impl EsmMasterContext {
@@ -54,6 +62,15 @@ impl EsmMasterContext {
         let (npc_map, armor_map, outfit_map, hair_map, lvli_map) =
             reader.read_npc_and_armor_map().unwrap_or_default();
         let light_map = reader.read_light_map().unwrap_or_default();
+        let script_map = reader.read_all_scripts_map().unwrap_or_default();
+        let quest_map = reader.read_all_quests_map().unwrap_or_default();
+
+        let mut quest_edid_map = HashMap::new();
+        for (form_id, q) in &quest_map {
+            if !q.editor_id.is_empty() {
+                quest_edid_map.insert(q.editor_id.to_ascii_uppercase(), *form_id);
+            }
+        }
 
         Ok(Self {
             model_map,
@@ -63,6 +80,9 @@ impl EsmMasterContext {
             hair_map,
             lvli_map,
             light_map,
+            script_map,
+            quest_map,
+            quest_edid_map,
         })
     }
 

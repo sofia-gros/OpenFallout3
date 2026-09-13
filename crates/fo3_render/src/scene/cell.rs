@@ -172,6 +172,7 @@ impl RenderScene {
                             world_center: world_bound.center,
                             world_bound,
                             bone_palette: None,
+                            is_visible: true,
                         });
                     }
                 }
@@ -262,6 +263,7 @@ impl RenderScene {
                             world_center: world_bound.center,
                             world_bound,
                             bone_palette: None,
+                            is_visible: true,
                         });
                     }
                 }
