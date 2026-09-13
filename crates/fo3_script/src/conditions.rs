@@ -81,14 +81,17 @@ pub fn evaluate_single_condition(cond: &TargetCondition, ctx: &ConditionContext)
         }
     };
 
-    let op_type = cond.operator & 0x7F; // 下位ビットが演算子
+    // 参照元: Bethesda ESM CTDA 仕様 (OpenMW loadctda.hpp)
+    // - Bit 0 (0x01): OR 結合フラグ (0 = AND, 1 = OR)
+    // - Bits 5..7 (0xE0 >> 5): 比較演算子 (0: ==, 1: !=, 2: >, 3: >=, 4: <, 5: <=)
+    let op_type = (cond.operator >> 5) & 0x07;
     match op_type {
         0 => (actual_value - cond.comparison_value).abs() < 1e-4, // ==
         1 => (actual_value - cond.comparison_value).abs() >= 1e-4, // !=
-        2 => actual_value > cond.comparison_value,                 // >
-        3 => actual_value >= cond.comparison_value,                // >=
-        4 => actual_value < cond.comparison_value,                 // <
-        5 => actual_value <= cond.comparison_value,                // <=
+        2 => actual_value > cond.comparison_value + 1e-4,          // >
+        3 => actual_value >= cond.comparison_value - 1e-4,         // >=
+        4 => actual_value < cond.comparison_value - 1e-4,          // <
+        5 => actual_value <= cond.comparison_value + 1e-4,         // <=
         _ => true,
     }
 }
@@ -96,7 +99,7 @@ pub fn evaluate_single_condition(cond: &TargetCondition, ctx: &ConditionContext)
 /// 複数条件式リスト（AND / OR 結合）を順次評価する。
 ///
 /// 参照元: `references/openmw/components/esm4/loadinfo.cpp:81-105`
-/// `operator` の bit 7 (0x80) が立っている場合は OR 結合。
+/// `operator` の bit 0 (0x01) が立っている場合は OR 結合。
 pub fn evaluate_conditions(conditions: &[TargetCondition], ctx: &ConditionContext) -> bool {
     if conditions.is_empty() {
         return true;
@@ -106,7 +109,7 @@ pub fn evaluate_conditions(conditions: &[TargetCondition], ctx: &ConditionContex
     let mut in_or_chain = false;
 
     for cond in conditions {
-        let is_or = (cond.operator & 0x80) != 0;
+        let is_or = (cond.operator & 0x01) != 0;
         let result = evaluate_single_condition(cond, ctx);
 
         if is_or {

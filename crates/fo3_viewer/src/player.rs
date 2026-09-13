@@ -387,14 +387,14 @@ impl PlayerActor {
             let actor = &mut actors[self.third_person_actor_idx];
             actor.world_transform = world_transform.clone();
 
-            // 単体 anim_player による姿勢上書きを防止 (ロコモーションステートマシン側で統括管理)
-            actor.anim_player = None;
-
-            // ステートマシンからボーン姿勢をサンプリング
-            self.state_machine.sample_pose(dt, &mut actor.anim_pose);
-
-            // アクターのボーンマップ再計算 & GPU スキニング更新
-            actor.update(0.0, device, queue, meshes);
+            if actor.anim_player.is_some() {
+                // スクリプトパッケージ等の専用アニメーション再生中
+                actor.update(dt, device, queue, meshes);
+            } else {
+                // 通常時: ステートマシンからボーン姿勢をサンプリング
+                self.state_machine.sample_pose(dt, &mut actor.anim_pose);
+                actor.update(0.0, device, queue, meshes);
+            }
         }
 
         // 一人称腕アクターの更新 (カメラ手前に配置)

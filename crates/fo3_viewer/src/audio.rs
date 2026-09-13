@@ -82,22 +82,41 @@ impl SoundEngine {
 
         // パス区切りの正規化
         let normalized = rel_path.replace('/', "\\");
-        let bytes = match vfs.read(&normalized) {
-            Ok(b) => b,
+        let (bytes, resolved_path) = match vfs.read(&normalized) {
+            Ok(b) => (b, normalized.clone()),
             Err(_) => {
                 // 先頭に sound\ を補正して再試行
                 let fallback = format!("sound\\{}", normalized.trim_start_matches("sound\\"));
                 match vfs.read(&fallback) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        println!("[SoundEngine] 音声ファイルが見つかりません: \"{}\" ({:?})", rel_path, e);
-                        return None;
+                    Ok(b) => (b, fallback),
+                    Err(_) => {
+                        // ディレクトリパスや部分プレフィックスから音声ファイルを探索
+                        let candidates = [
+                            fallback.clone(),
+                            normalized.clone(),
+                        ];
+                        let mut found = None;
+                        for cand in &candidates {
+                            if let Some(matched) = vfs.find_path_by_prefix(cand) {
+                                if let Ok(b) = vfs.read(&matched) {
+                                    found = Some((b, matched));
+                                    break;
+                                }
+                            }
+                        }
+                        match found {
+                            Some(res) => res,
+                            None => {
+                                println!("[SoundEngine] 音声ファイルが見つかりません: \"{}\"", rel_path);
+                                return None;
+                            }
+                        }
                     }
                 }
             }
         };
 
-        println!("[SoundEngine] 音声データ再生開始: \"{}\" ({} bytes, is_voice={})", rel_path, bytes.len(), is_voice);
+        println!("[SoundEngine] 音声データ再生開始: \"{}\" ({} bytes, is_voice={})", resolved_path, bytes.len(), is_voice);
         let cursor = Cursor::new(bytes);
         match Decoder::new(cursor) {
             Ok(source) => {

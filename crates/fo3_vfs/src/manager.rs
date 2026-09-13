@@ -86,6 +86,20 @@ impl VfsManager {
         None
     }
 
+    /// 指定されたプレフィックス（大文字小文字無視、ディレクトリ指定等）で始まる音声ファイル（.wav / .ogg）を探索し、最初に見つかったパスを返す。
+    pub fn find_path_by_prefix(&self, prefix: &str) -> Option<String> {
+        let clean_prefix = normalize_path(prefix).to_ascii_lowercase();
+        for bsa in self.bsa_archives.iter().rev() {
+            for f in bsa.list_files() {
+                let norm = normalize_path(f).to_ascii_lowercase();
+                if norm.starts_with(&clean_prefix) && (norm.ends_with(".wav") || norm.ends_with(".ogg")) {
+                    return Some(f.to_string());
+                }
+            }
+        }
+        None
+    }
+
     /// 相対パスを指定してファイルデータを読み込む。
     /// ルーズファイル（ディスク）を最優先で探索し、存在しない場合はマウントされた BSA から抽出・解凍します。
     pub fn read(&mut self, relative_path: &str) -> Result<Vec<u8>, VfsError> {

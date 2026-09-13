@@ -220,6 +220,15 @@ impl RenderActorInstance {
             mgr.add_track(track);
         }
     }
+
+    /// 新しい KF アニメーションをアクターに適用し、即座に再生を開始する。
+    ///
+    /// 参照元: Gamebryo 2.6 `NiControllerManager::ActivateSequence`
+    pub fn set_animation(&mut self, kf: Arc<NifFile>, clip: Arc<crate::animation::AnimationClip>) {
+        self.kf_nif = Some(kf);
+        self.anim_player = Some(crate::animation::AnimationPlayer::new((*clip).clone()));
+        self.sequence_manager = None;
+    }
 }
 
 /// メッシュ名リストから、該当 NIF に対応するスキンメッシュ情報を収集する。

@@ -98,3 +98,17 @@ fn test_check_tai_entries() {
         }
     }
 }
+
+#[test]
+fn test_find_cg00_kf() {
+    let data_dir = "A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data";
+    let meshes_bsa_path = format!("{}\\Fallout - Meshes.bsa", data_dir);
+    if let Ok(bsa) = fo3_bsa::BsaArchive::open(&meshes_bsa_path) {
+        let kf_files: Vec<_> = bsa.list_files().iter().filter(|f| f.to_ascii_lowercase().contains("cg00") && f.ends_with(".kf")).cloned().collect();
+        println!("=== Found {} CG00 KF files ===", kf_files.len());
+        for f in kf_files {
+            println!("  KF: {}", f);
+        }
+    }
+}
+

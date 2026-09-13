@@ -432,3 +432,145 @@ pub fn process_teleport_requests(app: &mut ViewerState) {
     }
 }
 
+/// スクリプトからの AI パッケージ追加 (`AddScriptPackage`) および再評価 (`EvaluatePackage` / `evp`) 要求を消化し、
+/// 対象アクター（NPC およびプレイヤー）に適切な実機 KF アニメーションを適用・再生する。
+///
+/// 参照元:
+/// - Gamebryo 2.6 `NiControllerManager::ActivateSequence`
+/// - Fallout 3 クエスト `CG00` (FormID: 0x0001F388), パッケージ `CG00PlayerSection0` 〜 `CG00PlayerSection5`
+/// - 実機アニメーション: `Fallout - Meshes.bsa` (`meshes\characters\_male\idleanims\cg00*section*.kf`)
+pub fn process_package_requests(app: &mut ViewerState) {
+    let mut add_pkgs = Vec::new();
+    std::mem::swap(&mut add_pkgs, &mut app.vm.script_package_requests);
+
+    let mut evp_requests = Vec::new();
+    std::mem::swap(&mut evp_requests, &mut app.vm.evaluate_package_requests);
+
+    let cg00_id = FormId(0x0001F388);
+    let stage = app.vm.quest_manager.get_stage(cg00_id);
+
+    // 1. AddScriptPackage 要求の消化
+    for (subject_opt, pkg_name) in add_pkgs {
+        let target_fid = subject_opt.unwrap_or(FormId(0x00000014));
+        let lower = pkg_name.to_ascii_lowercase();
+
+        // KF ファイルパスの解決
+        let mut kf_paths = Vec::new();
+        kf_paths.push(format!("meshes\\characters\\_male\\idleanims\\{}.kf", lower));
+
+        // 末尾の 0 を 00 等にパディング（例: cg00playersection0 -> cg00playersection00.kf）
+        if let Some(pos) = lower.rfind(|c: char| c.is_ascii_digit()) {
+            let (prefix, num_str) = lower.split_at(pos);
+            if let Ok(num) = num_str.parse::<u32>() {
+                kf_paths.push(format!("meshes\\characters\\_male\\idleanims\\{:}{:02}.kf", prefix, num));
+            }
+        }
+
+        let mut loaded = None;
+        for path in &kf_paths {
+            if let Ok(bytes) = app.vfs.read(path) {
+                let mut cursor = std::io::Cursor::new(bytes);
+                if let Ok(kf) = fo3_nif::NifFile::read(&mut cursor) {
+                    if let Some(clip) = fo3_render::AnimationClip::from_kf(&kf) {
+                        loaded = Some((path.clone(), std::sync::Arc::new(kf), std::sync::Arc::new(clip)));
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some((path, kf, clip)) = loaded {
+            if target_fid == FormId(0x00000014) {
+                if let Some(ref player) = app.controller.player_actor {
+                    if player.third_person_actor_idx < app.scene.actors.len() {
+                        app.scene.actors[player.third_person_actor_idx].set_animation(kf, clip);
+                        println!("[Package] プレイヤーにアニメーション \"{}\" を適用", path);
+                    }
+                }
+            } else if let Some(actor) = app.scene.actors.iter_mut().find(|a| a.form_id == target_fid.0) {
+                actor.set_animation(kf, clip);
+                println!("[Package] アクター 0x{:08X} にアニメーション \"{}\" を適用", target_fid.0, path);
+            }
+        } else {
+            println!("[Package] アニメーション KF が見つかりません: package=\"{}\"", pkg_name);
+        }
+    }
+
+    // 2. EvaluatePackage (evp) 要求の消化
+    for subject_opt in evp_requests {
+        let target_fid = subject_opt.unwrap_or(FormId(0x00000014));
+        let kf_rel_path = match target_fid.0 {
+            // Dad (CG00DadREF: 0x000290A7)
+            0x000290A7 => {
+                if stage >= 40 {
+                    "meshes\\characters\\_male\\idleanims\\cg00dadsection04.kf"
+                } else if stage >= 30 {
+                    "meshes\\characters\\_male\\idleanims\\cg00dadsection03.kf"
+                } else if stage >= 20 {
+                    "meshes\\characters\\_male\\idleanims\\cg00dadsection02.kf"
+                } else if stage >= 10 {
+                    "meshes\\characters\\_male\\idleanims\\cg00dadsection01.kf"
+                } else {
+                    "meshes\\characters\\_male\\idleanims\\cg00dadsection00.kf"
+                }
+            }
+            // Mom (CG00MomREF: 0x0005EDE0)
+            0x0005EDE0 => {
+                if stage >= 30 {
+                    "meshes\\characters\\_male\\idleanims\\cg00momsection03.kf"
+                } else if stage >= 20 {
+                    "meshes\\characters\\_male\\idleanims\\cg00momsection02.kf"
+                } else if stage >= 10 {
+                    "meshes\\characters\\_male\\idleanims\\cg00momsection01.kf"
+                } else {
+                    "meshes\\characters\\_male\\idleanims\\cg00momsection00.kf"
+                }
+            }
+            // Dr. Li (CG00DoctorLiREF: 0x000290A5)
+            0x000290A5 => {
+                if stage >= 30 {
+                    "meshes\\characters\\_male\\idleanims\\cg00drlisection03.kf"
+                } else if stage >= 20 {
+                    "meshes\\characters\\_male\\idleanims\\cg00drlisection02.kf"
+                } else if stage >= 10 {
+                    "meshes\\characters\\_male\\idleanims\\cg00drlisection01.kf"
+                } else {
+                    "meshes\\characters\\_male\\idleanims\\cg00drlisection00.kf"
+                }
+            }
+            // Player (0x00000014)
+            0x00000014 => {
+                if stage >= 10 {
+                    "meshes\\characters\\_male\\idleanims\\cg00playersection01.kf"
+                } else {
+                    "meshes\\characters\\_male\\idleanims\\cg00playersection00.kf"
+                }
+            }
+            _ => continue,
+        };
+
+        if let Ok(bytes) = app.vfs.read(kf_rel_path) {
+            let mut cursor = std::io::Cursor::new(bytes);
+            if let Ok(kf) = fo3_nif::NifFile::read(&mut cursor) {
+                if let Some(clip) = fo3_render::AnimationClip::from_kf(&kf) {
+                    let kf_arc = std::sync::Arc::new(kf);
+                    let clip_arc = std::sync::Arc::new(clip);
+                    if target_fid == FormId(0x00000014) {
+                        if let Some(ref player) = app.controller.player_actor {
+                            if player.third_person_actor_idx < app.scene.actors.len() {
+                                app.scene.actors[player.third_person_actor_idx].set_animation(kf_arc, clip_arc);
+                                println!("[AI/EVP] プレイヤーにアニメーション \"{}\" を適用", kf_rel_path);
+                            }
+                        }
+                    } else if let Some(actor) = app.scene.actors.iter_mut().find(|a| a.form_id == target_fid.0) {
+                        actor.set_animation(kf_arc, clip_arc);
+                        println!("[AI/EVP] アクター 0x{:08X} (\"{}\") にアニメーション \"{}\" を適用", target_fid.0, actor.name, kf_rel_path);
+                    }
+                }
+            }
+        } else {
+            println!("[AI/EVP] KF ファイル読み込み失敗: \"{}\"", kf_rel_path);
+        }
+    }
+}
+

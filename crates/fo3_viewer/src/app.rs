@@ -416,7 +416,10 @@ impl ViewerState {
         // 0.1 スクリプトからのテレポート移動要求 (MoveTo) の消化
         crate::action::process_teleport_requests(self);
 
-        // 0.2 オーディオ・会話シーケンスの進行更新 (実機 DIAL/INFO/SOUN 連動)
+        // 0.2 スクリプトからの AI パッケージ・アニメーション要求 (AddScriptPackage / evp) の消化
+        crate::action::process_package_requests(self);
+
+        // 0.3 オーディオ・会話シーケンスの進行更新 (実機 DIAL/INFO/SOUN 連動)
         self.sound_engine.update(dt, &mut self.vm, &self.master_context, &mut self.vfs);
 
         // 開閉アニメーションの進行および物理剛体・GPUメッシュの追従更新
@@ -903,17 +906,21 @@ impl ApplicationHandler for App {
                                     }
                                 }
                                 crate::input::InputCommand::Game(crate::input::GameAction::TogglePOV) => {
-                                    state.controller.player_camera.toggle_view_mode();
-                                    if let Some(ref mut player) = state.controller.player_actor {
-                                        player.set_view_mode(state.controller.player_camera.mode, &mut state.scene.meshes);
+                                    if state.vm.player_controls.pov {
+                                        state.controller.player_camera.toggle_view_mode();
+                                        if let Some(ref mut player) = state.controller.player_actor {
+                                            player.set_view_mode(state.controller.player_camera.mode, &mut state.scene.meshes);
+                                        }
+                                        println!("[視点切替] 現在の視点モード: {:?}", state.controller.player_camera.mode);
                                     }
-                                    println!("[視点切替] 現在の視点モード: {:?}", state.controller.player_camera.mode);
                                 }
                                 crate::input::InputCommand::Game(crate::input::GameAction::PipBoy) => {
-                                    if state.mode.is_ui_active() {
-                                        state.mode = ViewerMode::Exploring;
-                                    } else {
-                                        println!("[Pip-Boy] メニュー (Tab)");
+                                    if state.vm.player_controls.pipboy {
+                                        if state.mode.is_ui_active() {
+                                            state.mode = ViewerMode::Exploring;
+                                        } else {
+                                            println!("[Pip-Boy] メニュー (Tab)");
+                                        }
                                     }
                                 }
                                 crate::input::InputCommand::Debug(crate::input::DebugAction::Help) => {

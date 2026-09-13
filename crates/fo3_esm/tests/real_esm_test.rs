@@ -163,11 +163,6 @@ fn test_real_lvli_resolution() {
     }
 
     let mut reader = EsmReader::open(esm_path).expect("Failed to open Fallout3.esm");
-    let script_map = reader.read_all_scripts_map().expect("read_all_scripts_map");
-    let (_topics, all_infos) = reader.read_all_dialogues_map().expect("read dialogues");
-    if let Some(info) = all_infos.get(&fo3_esm::FormId(0x0001F387)) {
-        println!("=== INFO 0x0001F387: topic_id={:?}, text=\"{}\", conds={:?} ===", info.topic_id, info.response_text, info.conditions);
-    }
     let model_map = reader.read_all_models_map().expect("Failed to read models");
     let (npc_map, armor_map, _outfit_map, _hair_map, lvli_map) = reader
         .read_npc_and_armor_map()

@@ -103,6 +103,10 @@ pub struct ScriptVm {
     pub teleport_requests: Vec<(Option<FormId>, String)>,
     /// 台詞発言リクエストキュー: (Speaker FormID, Topic EDID)
     pub say_queue: Vec<(Option<FormId>, String)>,
+    /// スクリプトパッケージ追加リクエストキュー: (Subject FormID, Package EDID)
+    pub script_package_requests: Vec<(Option<FormId>, String)>,
+    /// AIパッケージ再評価リクエストキュー: (Subject FormID)
+    pub evaluate_package_requests: Vec<Option<FormId>>,
     /// フレームデルタタイム秒 (GetSecondsPassed 評価用)
     pub delta_time: f32,
 }
@@ -135,6 +139,8 @@ impl Default for ScriptVm {
             chargen_events: Vec::new(),
             teleport_requests: Vec::new(),
             say_queue: Vec::new(),
+            script_package_requests: Vec::new(),
+            evaluate_package_requests: Vec::new(),
             delta_time: 0.016,
         }
     }
@@ -356,7 +362,10 @@ impl ScriptVm {
             }
             "addscriptpackage" | "player.addscriptpackage" => {
                 if parts.len() >= 2 {
-                    println!("[Script] AddScriptPackage: {}", parts[1]);
+                    let pkg_name = parts[1].to_string();
+                    let target = self_id.unwrap_or(FormId(0x00000014));
+                    println!("[Script] AddScriptPackage: {} (target={:?})", pkg_name, target);
+                    self.script_package_requests.push((Some(target), pkg_name));
                 }
             }
             "removescriptpackage" | "player.removescriptpackage" => {
@@ -428,7 +437,8 @@ impl ScriptVm {
                 }
             }
             "evaluatepackage" | "evp" => {
-                println!("[Script] EvaluatePackage (AI パッケージ再評価要求)");
+                println!("[Script] EvaluatePackage (AI パッケージ再評価要求): subject={:?}", self_id);
+                self.evaluate_package_requests.push(self_id);
             }
             "say" => {
                 if parts.len() >= 2 {
