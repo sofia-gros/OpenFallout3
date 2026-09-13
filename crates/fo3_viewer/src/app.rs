@@ -76,6 +76,8 @@ pub struct ViewerState {
     pub screen_fade_color: [f32; 4],
     /// 全画面フェードエフェクトの不透明度 (0.0=透明, 1.0=完全不透明)
     pub screen_fade_alpha: f32,
+    /// オーディオ再生及びダイアログ・字幕進行管理
+    pub sound_engine: crate::audio::SoundEngine,
 }
 
 impl ViewerState {
@@ -135,10 +137,10 @@ impl ViewerState {
         let depth_view = RenderContext::create_depth_texture(&device, width, height);
 
         // 永続 VFS の初期化 (全 BSA を一度だけオープン・インデックス常駐)
-        let mut vfs = initialize_vfs(data_dir);
+        let mut vfs = crate::init::initialize_vfs(data_dir);
 
         // マスター ESM 静的定義の初期化 (3Dモデル、アクター、防具、光源マップの一括常駐)
-        let master_context = Arc::new(initialize_master_context(data_dir));
+        let master_context = Arc::new(crate::init::initialize_master_context(data_dir));
 
         // NIF AST および GPU テクスチャの永続キャッシュ
         let mut nif_cache = NifCache::new();
@@ -317,6 +319,7 @@ impl ViewerState {
             input_manager: crate::input::InputManager::new(),
             screen_fade_color: [0.0, 0.0, 0.0, 1.0],
             screen_fade_alpha: if matches!(target, ViewerTarget::NewGame) { 1.0 } else { 0.0 },
+            sound_engine: crate::audio::SoundEngine::new(),
         };
 
         state.setup_scripts_for_cell();
@@ -345,6 +348,23 @@ impl ViewerState {
         // 0. クエスト EditorID -> FormID マップを VM へ登録
         for (edid, form_id) in &self.master_context.quest_edid_map {
             self.vm.edid_map.insert(edid.clone(), *form_id);
+        }
+
+        // 0.1 セル内の配置参照 (REFR / ACHR) の EditorID およびスクリプトを登録
+        let esm_path = Path::new(&self.data_dir).join("Fallout3.esm");
+        if let Ok(mut reader) = fo3_esm::EsmReader::open(&esm_path) {
+            if let Ok(Some(cells)) = reader.find_cell_and_neighbors("Vault101d", 0) {
+                for (_, refrs, _) in cells {
+                    for refr in refrs {
+                        if !refr.edid.is_empty() {
+                            self.vm.edid_map.insert(refr.edid.to_ascii_uppercase(), refr.form_id);
+                        }
+                        if let Some(scpt_id) = refr.script {
+                            self.dispatcher.attach_script(refr.form_id, scpt_id);
+                        }
+                    }
+                }
+            }
         }
 
         // 1. master_context に存在する全スクリプトを dispatcher に登録
@@ -394,53 +414,10 @@ impl ViewerState {
         }
 
         // 0.1 スクリプトからのテレポート移動要求 (MoveTo) の消化
-        while !self.vm.teleport_requests.is_empty() {
-            let (subject, marker) = self.vm.teleport_requests.remove(0);
-            let marker_data = match marker.to_ascii_lowercase().as_str() {
-                "cg00playerstartmarker" => Some((
-                    glam::Vec3::new(-5275.8867, -7148.175, 7542.536),
-                    glam::Vec3::new(0.0, 0.0, std::f32::consts::PI),
-                )),
-                "cg00dadstartmarker" => Some((
-                    glam::Vec3::new(-5360.3623, -7332.082, 7542.536),
-                    glam::Vec3::new(0.0, 0.0, 6.19592),
-                )),
-                "cg00doctorlistartmarker" => Some((
-                    glam::Vec3::new(-5286.7715, -7202.23, 7542.536),
-                    glam::Vec3::new(0.0, 0.0, 0.20673425),
-                )),
-                "cg00momstartmarker" => Some((
-                    glam::Vec3::new(-5220.8076, -7153.035, 7542.536),
-                    glam::Vec3::new(0.0, 0.0, 3.1336458),
-                )),
-                _ => None,
-            };
+        crate::action::process_teleport_requests(self);
 
-            if let Some((pos, rot)) = marker_data {
-                if subject.is_none() || subject == Some(FormId(0x00000014)) {
-                    println!("[MoveTo] プレイヤーをマーカー \"{}\" へ配置: {:?}", marker, pos);
-                    self.controller.character_controller.position = pos + glam::Vec3::new(0.0, 0.0, 32.0);
-                    self.controller.player_camera.current_eye = pos + glam::Vec3::new(0.0, 0.0, 22.0);
-                    self.controller.player_camera.yaw = -2.15;
-                    self.controller.player_camera.pitch = 0.52;
-                    self.controller.camera.yaw = -2.15;
-                    self.controller.camera.pitch = 0.52;
-                } else if let Some(sub_id) = subject {
-                    println!("[MoveTo] アクター 0x{:08X} をマーカー \"{}\" へ移動: {:?}", sub_id.0, marker, pos);
-                    for actor in &mut self.scene.actors {
-                        if actor.form_id == sub_id.0 {
-                            actor.world_transform.translation = pos;
-                            actor.world_transform.rotation = glam::Mat3::from_rotation_z(rot.z);
-                        }
-                    }
-                    for interactable in &mut self.interactables {
-                        if interactable.form_id == sub_id.0 {
-                            interactable.position = pos;
-                        }
-                    }
-                }
-            }
-        }
+        // 0.2 オーディオ・会話シーケンスの進行更新 (実機 DIAL/INFO/SOUN 連動)
+        self.sound_engine.update(dt, &mut self.vm, &self.master_context, &mut self.vfs);
 
         // 開閉アニメーションの進行および物理剛体・GPUメッシュの追従更新
         // 参照元: Gamebryo 2.6 `bhkRigidBody` (MO_SYS_KEYFRAMED) 追従
@@ -686,6 +663,53 @@ impl ViewerState {
             self.size.width as f32,
             self.size.height as f32,
         );
+
+        // 字幕 (Subtitle) の描画
+        if let Some(ref sub) = self.sound_engine.active_subtitle {
+            let subtitle_text = format!("{}: {}", sub.speaker, sub.text);
+            let screen_w = self.size.width as f32;
+            let screen_h = self.size.height as f32;
+            ui_batch.add_text(
+                self.ui_renderer.font(),
+                &subtitle_text,
+                screen_w * 0.1,
+                screen_h * 0.85,
+                1.2,
+                [0.2, 1.0, 0.4, 1.0],
+            );
+        }
+
+        // 実機メッセージメニュー (MESG / ShowMessage) の描画
+        if let Some(msg_id) = self.vm.show_messages.first() {
+            let mesg_opt = self.master_context.mesg_edid_map.get(&msg_id.to_ascii_uppercase())
+                .and_then(|fid| self.master_context.mesg_map.get(fid))
+                .or_else(|| {
+                    let hex_str = msg_id.trim_start_matches("0x").trim_start_matches("0X");
+                    if let Ok(val) = u32::from_str_radix(hex_str, 16) {
+                        self.master_context.mesg_map.get(&fo3_esm::FormId(val))
+                    } else {
+                        None
+                    }
+                });
+
+            if let Some(mesg) = mesg_opt {
+                let screen_w = self.size.width as f32;
+                let screen_h = self.size.height as f32;
+                let cx = screen_w * 0.35;
+                let mut cy = screen_h * 0.42;
+
+                if !mesg.text.is_empty() {
+                    ui_batch.add_text(self.ui_renderer.font(), &mesg.text, cx, cy, 1.25, [1.0, 0.9, 0.2, 1.0]);
+                    cy += 35.0;
+                }
+
+                for (idx, btn_text) in mesg.buttons.iter().enumerate() {
+                    let label = format!("[{}] {}", idx + 1, btn_text);
+                    ui_batch.add_text(self.ui_renderer.font(), &label, cx, cy, 1.1, [0.2, 1.0, 0.4, 1.0]);
+                    cy += 28.0;
+                }
+            }
+        }
         if !ui_batch.indices.is_empty() {
             self.ui_renderer.update_resolution(
                 &self.queue,
@@ -795,7 +819,7 @@ impl ApplicationHandler for App {
                             }
                         }
                         CameraMode::Standard => {
-                            if state.controller.left_mouse_down || state.controller.right_mouse_down {
+                            if state.vm.player_controls.looking && (state.controller.left_mouse_down || state.controller.right_mouse_down) {
                                 state.controller.player_camera.rotate(dx * 0.003, dy * 0.003);
                                 state.window.request_redraw();
                             }
@@ -810,9 +834,11 @@ impl ApplicationHandler for App {
                     MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.05,
                 };
                 if state.controller.camera_mode == CameraMode::Standard {
-                    state.controller.player_camera.zoom(zoom_amount);
-                    if let Some(ref mut player) = state.controller.player_actor {
-                        player.set_view_mode(state.controller.player_camera.mode, &mut state.scene.meshes);
+                    if state.vm.player_controls.pov {
+                        state.controller.player_camera.zoom(zoom_amount);
+                        if let Some(ref mut player) = state.controller.player_actor {
+                            player.set_view_mode(state.controller.player_camera.mode, &mut state.scene.meshes);
+                        }
                     }
                 } else {
                     state.controller.camera.zoom(zoom_amount);
@@ -822,6 +848,32 @@ impl ApplicationHandler for App {
             WindowEvent::KeyboardInput { event, .. } => {
                 let pressed = event.state == ElementState::Pressed;
                 if let PhysicalKey::Code(key) = event.physical_key {
+                    // 実機メッセージダイアログ (MESG / ShowMessage) のボタン選択
+                    if pressed {
+                        if let Some(msg_id) = state.vm.show_messages.first().cloned() {
+                            let mesg_opt = state.master_context.mesg_edid_map.get(&msg_id.to_ascii_uppercase())
+                                .and_then(|fid| state.master_context.mesg_map.get(fid));
+                            if let Some(mesg) = mesg_opt {
+                                let btn_idx = match key {
+                                    KeyCode::Digit1 | KeyCode::Numpad1 => Some(0),
+                                    KeyCode::Digit2 | KeyCode::Numpad2 => Some(1),
+                                    KeyCode::Digit3 | KeyCode::Numpad3 => Some(2),
+                                    KeyCode::Digit4 | KeyCode::Numpad4 => Some(3),
+                                    _ => None,
+                                };
+                                if let Some(idx) = btn_idx {
+                                    if idx < mesg.buttons.len() {
+                                        state.vm.show_messages.remove(0);
+                                        state.vm.set_button_pressed(idx as i32);
+                                        println!("[MessageMenu] ボタン選択: {} -> GetButtonPressed", idx);
+                                        state.window.request_redraw();
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     if pressed && state.mode.is_ui_active() {
                         if state.mode.handle_key_with_vm(key, &mut state.vm) {
                             state.window.request_redraw();
@@ -832,20 +884,23 @@ impl ApplicationHandler for App {
                     // キーマネージャーの押下状態更新
                     state.input_manager.handle_key_event(key, pressed);
 
-                    // キャラクタ移動・姿勢入力の同期 (Fallout 3 実機標準操作)
-                    state.controller.key_forward = state.input_manager.is_action_down(crate::input::GameAction::Forward);
-                    state.controller.key_backward = state.input_manager.is_action_down(crate::input::GameAction::Backward);
-                    state.controller.key_left = state.input_manager.is_action_down(crate::input::GameAction::StrafeLeft);
-                    state.controller.key_right = state.input_manager.is_action_down(crate::input::GameAction::StrafeRight);
-                    state.controller.key_jump = state.input_manager.is_action_down(crate::input::GameAction::Jump);
-                    state.controller.key_sneak = state.input_manager.is_action_down(crate::input::GameAction::Sneak);
+                    // キャラクタ移動・姿勢入力の同期 (実機 DisablePlayerControls 反映)
+                    let can_move = state.vm.player_controls.movement;
+                    state.controller.key_forward = can_move && state.input_manager.is_action_down(crate::input::GameAction::Forward);
+                    state.controller.key_backward = can_move && state.input_manager.is_action_down(crate::input::GameAction::Backward);
+                    state.controller.key_left = can_move && state.input_manager.is_action_down(crate::input::GameAction::StrafeLeft);
+                    state.controller.key_right = can_move && state.input_manager.is_action_down(crate::input::GameAction::StrafeRight);
+                    state.controller.key_jump = can_move && state.input_manager.is_action_down(crate::input::GameAction::Jump);
+                    state.controller.key_sneak = can_move && state.input_manager.is_action_down(crate::input::GameAction::Sneak);
                     state.controller.key_run = !state.input_manager.is_action_down(crate::input::GameAction::Run);
 
                     if pressed {
                         if let Some(action) = state.input_manager.get_action(key) {
                             match action {
                                 crate::input::InputCommand::Game(crate::input::GameAction::Activate) => {
-                                    state.interact_or_teleport();
+                                    if state.vm.player_controls.movement && !state.vm.in_chargen {
+                                        state.interact_or_teleport();
+                                    }
                                 }
                                 crate::input::InputCommand::Game(crate::input::GameAction::TogglePOV) => {
                                     state.controller.player_camera.toggle_view_mode();
@@ -916,59 +971,5 @@ impl ApplicationHandler for App {
         if let Some(ref state) = self.state {
             state.window.request_redraw();
         }
-    }
-}
-
-/// ゲーム起動時に仮想ファイルシステム (VFS) を初期化し、全 BSA アーカイブのインデックスを常駐させる。
-///
-/// 参照元: Gamebryo 2.6 アーカイブマネージャ, `references/openmw/components/resource/resourcesystem.hpp`
-fn initialize_vfs(data_dir: &str) -> VfsManager {
-    let mut vfs = VfsManager::new();
-    let data_p = Path::new(data_dir);
-    vfs.add_loose_root(data_p);
-
-    let bsa_names = [
-        "Fallout - Meshes.bsa",
-        "Fallout - Textures.bsa",
-        "Fallout - Misc.bsa",
-    ];
-    for bsa_name in &bsa_names {
-        let bsa_file = data_p.join(bsa_name);
-        if bsa_file.exists() {
-            if let Ok(archive) = fo3_bsa::BsaArchive::open(&bsa_file) {
-                vfs.add_bsa(archive);
-            }
-        }
-    }
-    vfs
-}
-
-/// マスター ESM (`Fallout3.esm`) から全静的定義 (3Dモデル、アクター、防具、光源) を一括ロードして常駐させる。
-///
-/// 参照元: Bethesda ESM/BSA アーキテクチャ, `knowledge/gamebryo_resource_management_and_caching.md`
-fn initialize_master_context(data_dir: &str) -> EsmMasterContext {
-    let esm_path = Path::new(data_dir).join("Fallout3.esm");
-    if esm_path.exists() {
-        println!("マスター ESM \"{:?}\" から静的定義を一括ロード中...", esm_path);
-        match EsmMasterContext::open_and_load(&esm_path) {
-            Ok(ctx) => {
-                println!(
-                    "マスター定義ロード完了: 3Dモデル {} 件, アクター {} 件, 防具 {} 件, 光源 {} 件, クエスト {} 件, スクリプト {} 件",
-                    ctx.model_map.len(),
-                    ctx.npc_map.len(),
-                    ctx.armor_map.len(),
-                    ctx.light_map.len(),
-                    ctx.quest_map.len(),
-                    ctx.script_map.len()
-                );
-                ctx
-            }
-            Err(e) => {
-                eprintln!("警告: マスター定義のロードに失敗しました: {:?}", e);
-                EsmMasterContext::default()
-            }
-        }
-    } else {
-        EsmMasterContext::default()
     }
 }

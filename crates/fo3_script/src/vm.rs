@@ -28,6 +28,37 @@ impl std::fmt::Display for ScriptError {
 
 impl std::error::Error for ScriptError {}
 
+/// プレイヤー操作の有効/無効フラグ (Gamebryo / GECK DisablePlayerControls 仕様)
+/// 参照元: GECK Wiki `DisablePlayerControls`, `EnablePlayerControls`
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayerControlFlags {
+    /// 移動操作 (WASD / スティック)
+    pub movement: bool,
+    /// 視点回転操作 (マウス移動 / 右スティック)
+    pub looking: bool,
+    /// Pip-Boy 開閉
+    pub pipboy: bool,
+    /// 攻撃・武器構え・戦闘
+    pub fight: bool,
+    /// 1人称/3人称 視点切り替え (マウスホイール等)
+    pub pov: bool,
+    /// カメラ切り替え
+    pub cam_switch: bool,
+}
+
+impl Default for PlayerControlFlags {
+    fn default() -> Self {
+        Self {
+            movement: true,
+            looking: true,
+            pipboy: true,
+            fight: true,
+            pov: true,
+            cam_switch: true,
+        }
+    }
+}
+
 /// スクリプト実行コンテキストおよび永続化ステートマシン。
 pub struct ScriptVm {
     /// グローバル変数 (`GLOB`) マップ (EDID -> f32)
@@ -54,8 +85,14 @@ pub struct ScriptVm {
     pub play_bink_queue: Vec<String>,
     /// 表示メッセージリクエストキュー
     pub show_messages: Vec<String>,
-    /// プレイヤー操作の有効/無効フラグ
+    /// プレイヤー操作の個別フラグ (GECK DisablePlayerControls 仕様)
+    pub player_controls: PlayerControlFlags,
+    /// プレイヤー操作の有効/無効フラグ (互換用)
     pub player_controls_enabled: bool,
+    /// キャラクター作成中フラグ (SetInCharGen)
+    pub in_chargen: bool,
+    /// 最後に押されたメッセージボタン番号 (GetButtonPressed で取得・消費)
+    pub last_button_pressed: std::cell::Cell<Option<i32>>,
     /// 画面エフェクトスタック (ImageSpaceModifier)
     pub active_imods: Vec<String>,
     /// サウンド再生キュー
@@ -64,6 +101,8 @@ pub struct ScriptVm {
     pub chargen_events: Vec<String>,
     /// テレポート移動リクエストキュー: (Subject FormID (None は player), Target Marker EDID)
     pub teleport_requests: Vec<(Option<FormId>, String)>,
+    /// 台詞発言リクエストキュー: (Speaker FormID, Topic EDID)
+    pub say_queue: Vec<(Option<FormId>, String)>,
     /// フレームデルタタイム秒 (GetSecondsPassed 評価用)
     pub delta_time: f32,
 }
@@ -87,17 +126,25 @@ impl Default for ScriptVm {
             scripts: HashMap::new(),
             play_bink_queue: Vec::new(),
             show_messages: Vec::new(),
+            player_controls: PlayerControlFlags::default(),
             player_controls_enabled: true,
+            in_chargen: false,
+            last_button_pressed: std::cell::Cell::new(None),
             active_imods: Vec::new(),
             sound_queue: Vec::new(),
             chargen_events: Vec::new(),
             teleport_requests: Vec::new(),
+            say_queue: Vec::new(),
             delta_time: 0.016,
         }
     }
 }
 
 impl ScriptVm {
+    /// メッセージダイアログ等のボタン押下結果を設定する (GetButtonPressed で取得・消費される)。
+    pub fn set_button_pressed(&self, button: i32) {
+        self.last_button_pressed.set(Some(button));
+    }
     /// 新規 ScriptVm を生成。
     pub fn new() -> Self {
         Self::default()
@@ -239,12 +286,39 @@ impl ScriptVm {
                 }
             }
             "disableplayercontrols" => {
-                self.player_controls_enabled = false;
-                println!("[Script] DisablePlayerControls: プレイヤー操作無効化");
+                // 参照元: GECK Wiki `DisablePlayerControls [bMovement] [bLooking] [bPipboy] [bFight] [bPOV] [bCamSwitch]`
+                if parts.len() == 1 {
+                    self.player_controls.movement = false;
+                    self.player_controls.looking = false;
+                    self.player_controls.pipboy = false;
+                    self.player_controls.fight = false;
+                    self.player_controls.pov = false;
+                    self.player_controls.cam_switch = false;
+                } else {
+                    if let Some(p) = parts.get(1) { if *p == "1" { self.player_controls.movement = false; } }
+                    if let Some(p) = parts.get(2) { if *p == "1" { self.player_controls.looking = false; } }
+                    if let Some(p) = parts.get(3) { if *p == "1" { self.player_controls.pipboy = false; } }
+                    if let Some(p) = parts.get(4) { if *p == "1" { self.player_controls.fight = false; } }
+                    if let Some(p) = parts.get(5) { if *p == "1" { self.player_controls.pov = false; } }
+                    if let Some(p) = parts.get(6) { if *p == "1" { self.player_controls.cam_switch = false; } }
+                }
+                self.player_controls_enabled = self.player_controls.movement && self.player_controls.looking;
+                println!("[Script] DisablePlayerControls: プレイヤー操作無効化 (flags: {:?})", self.player_controls);
             }
             "enableplayercontrols" => {
-                self.player_controls_enabled = true;
-                println!("[Script] EnablePlayerControls: プレイヤー操作有効化");
+                // 参照元: GECK Wiki `EnablePlayerControls [bMovement] [bLooking] [bPipboy] [bFight] [bPOV] [bCamSwitch]`
+                if parts.len() == 1 {
+                    self.player_controls = PlayerControlFlags::default();
+                } else {
+                    if let Some(p) = parts.get(1) { if *p == "1" { self.player_controls.movement = true; } }
+                    if let Some(p) = parts.get(2) { if *p == "1" { self.player_controls.looking = true; } }
+                    if let Some(p) = parts.get(3) { if *p == "1" { self.player_controls.pipboy = true; } }
+                    if let Some(p) = parts.get(4) { if *p == "1" { self.player_controls.fight = true; } }
+                    if let Some(p) = parts.get(5) { if *p == "1" { self.player_controls.pov = true; } }
+                    if let Some(p) = parts.get(6) { if *p == "1" { self.player_controls.cam_switch = true; } }
+                }
+                self.player_controls_enabled = self.player_controls.movement && self.player_controls.looking;
+                println!("[Script] EnablePlayerControls: プレイヤー操作有効化 (flags: {:?})", self.player_controls);
             }
             "imod" => {
                 if parts.len() >= 2 {
@@ -290,7 +364,9 @@ impl ScriptVm {
             }
             "setinchargen" => {
                 if parts.len() >= 2 {
-                    println!("[Script] SetInCharGen: {}", parts[1]);
+                    let flag = parts[1] == "1";
+                    self.in_chargen = flag;
+                    println!("[Script] SetInCharGen: {} (in_chargen={})", parts[1], flag);
                 }
             }
             "setpcyoung" | "agerace" | "player.agerace" => {
@@ -356,7 +432,21 @@ impl ScriptVm {
             }
             "say" => {
                 if parts.len() >= 2 {
-                    println!("[Script] Say (台詞発言要求): topic={:?}", parts[1]);
+                    let topic = parts[1].to_string();
+                    println!("[Script] Say (台詞発言要求): topic={:?}, speaker={:?}", topic, self_id);
+                    self.say_queue.push((self_id, topic));
+                }
+            }
+            "sayto" => {
+                // SayTo <Target> <Topic> [Force]
+                if parts.len() >= 3 {
+                    let topic = parts[2].to_string();
+                    println!("[Script] SayTo (対象指定台詞要求): target={:?}, topic={:?}, speaker={:?}", parts[1], topic, self_id);
+                    self.say_queue.push((self_id, topic));
+                } else if parts.len() == 2 {
+                    let topic = parts[1].to_string();
+                    println!("[Script] SayTo (台詞発言要求): topic={:?}, speaker={:?}", topic, self_id);
+                    self.say_queue.push((self_id, topic));
                 }
             }
             "startquest" => {
@@ -477,7 +567,13 @@ impl ScriptVm {
             return self.delta_time;
         }
         if lower == "getbuttonpressed" {
-            return 0.0; // 性別ダイアログ: 0 = male
+            // 参照元: GECK Wiki `GetButtonPressed`
+            // ボタンが押されていればインデックス (0, 1, ...) を返し、直後に -1 にリセットされる。未押下は -1。
+            return self.last_button_pressed.take().map(|b| b as f32).unwrap_or(-1.0);
+        }
+        if lower == "getinchargen" {
+            // 参照元: GECK Wiki `GetInCharGen`
+            return if self.in_chargen { 1.0 } else { 0.0 };
         }
         if lower.starts_with("getstage ") {
             let q_str = lower["getstage ".len()..].trim();

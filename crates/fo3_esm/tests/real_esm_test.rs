@@ -164,12 +164,9 @@ fn test_real_lvli_resolution() {
 
     let mut reader = EsmReader::open(esm_path).expect("Failed to open Fallout3.esm");
     let script_map = reader.read_all_scripts_map().expect("read_all_scripts_map");
-    let cg00_script_id = fo3_esm::types::FormId(0x0003A17C);
-    if let Some(scpt) = script_map.get(&cg00_script_id) {
-        println!("=== CG00 Script: {} ===", scpt.edid);
-        if let Some(ref text) = scpt.source_text {
-            println!("{}", text);
-        }
+    let (_topics, all_infos) = reader.read_all_dialogues_map().expect("read dialogues");
+    if let Some(info) = all_infos.get(&fo3_esm::FormId(0x0001F387)) {
+        println!("=== INFO 0x0001F387: topic_id={:?}, text=\"{}\", conds={:?} ===", info.topic_id, info.response_text, info.conditions);
     }
     let model_map = reader.read_all_models_map().expect("Failed to read models");
     let (npc_map, armor_map, _outfit_map, _hair_map, lvli_map) = reader
@@ -343,9 +340,21 @@ fn test_real_cg00_cell_and_markers() {
     while let Some(entry) = reader2.read_next_entry().expect("read") {
         if let fo3_esm::reader::EsmEntry::Record(record, subs) = entry {
             if marker_ids.contains(&record.form_id) {
+                let edid = cg00_refrs.iter().find(|(id, _, _)| *id == record.form_id).map(|(_, e, _)| e.as_str()).unwrap_or("");
                 if let Ok(refr) = fo3_esm::records::refr::RefrRecord::from_record(&record, &subs) {
-                    let edid = cg00_refrs.iter().find(|(id, _, _)| *id == record.form_id).map(|(_, e, _)| e.as_str()).unwrap_or("");
                     println!("★ CG00 REFR \"{}\" (0x{:08X}): Pos={:?}, Rot={:?}", edid, record.form_id.0, refr.position, refr.rotation);
+                }
+                println!("  Subs for \"{}\" (0x{:08X}):", edid, record.form_id.0);
+                for s in &subs {
+                    let tag = std::str::from_utf8(&s.type_id.0).unwrap_or("????");
+                    if s.data.len() == 4 {
+                        let fid = u32::from_le_bytes(s.data.as_slice().try_into().unwrap());
+                        println!("    [{}] len=4, FormId=0x{:08X}", tag, fid);
+                    } else if s.data.len() < 30 {
+                        println!("    [{}] len={}, str=\"{}\"", tag, s.data.len(), s.as_string());
+                    } else {
+                        println!("    [{}] len={}", tag, s.data.len());
+                    }
                 }
             }
         }

@@ -12,14 +12,15 @@ use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::header::{GroupHeader, RecordHeader};
 use crate::records::{
-    ArmorRecord, HairRecord, LightRecord, LtexRecord, LvliRecord, NpcRecord, OtftRecord,
-    PackRecord, QuestRecord, ScptRecord, StatRecord, Tes4Header, TextureSetRecord,
+    ArmorRecord, DialRecord, HairRecord, InfoRecord, LightRecord, LtexRecord, LvliRecord,
+    MesgRecord, NpcRecord, OtftRecord, PackRecord, QuestRecord, ScptRecord, SounRecord,
+    StatRecord, Tes4Header, TextureSetRecord,
 };
 use crate::subrecord::{parse_subrecords, Subrecord};
 use crate::types::{
     FormId, FourCC, REC_ACTI, REC_ALCH, REC_AMMO, REC_ARMO, REC_BOOK,
-    REC_CONT, REC_DOOR, REC_FURN, REC_HAIR, REC_KEYM, REC_LIGH, REC_LTEX, REC_LVLI, REC_MISC,
-    REC_MSTT, REC_NPC_, REC_OTFT, REC_PACK, REC_QUST, REC_SCOL, REC_SCPT, REC_STAT, REC_TERM, REC_TES4, REC_TXST,
+    REC_CONT, REC_DIAL, REC_DOOR, REC_FURN, REC_HAIR, REC_INFO, REC_KEYM, REC_LIGH, REC_LTEX, REC_LVLI, REC_MESG, REC_MISC,
+    REC_MSTT, REC_NPC_, REC_OTFT, REC_PACK, REC_QUST, REC_SCOL, REC_SCPT, REC_SOUN, REC_STAT, REC_TERM, REC_TES4, REC_TXST,
     REC_WEAP, SUB_EDID, SUB_MODL, SUB_SCRI,
 };
 
@@ -673,4 +674,173 @@ impl<R: Read + Seek> EsmReader<R> {
 
         Ok(packages)
     }
+
+    /// 全てのメッセージレコード (MESG) を一括走査して FormID -> MesgRecord マップを構築する。
+    pub fn read_all_messages_map(&mut self) -> io::Result<HashMap<FormId, MesgRecord>> {
+        let mut messages = HashMap::new();
+        let start_pos = 24 + self.header_record.data_size as u64;
+        self.reader.seek(SeekFrom::Start(start_pos))?;
+
+        while let Some(entry) = self.read_next_entry()? {
+            match entry {
+                EsmEntry::Group(group) => {
+                    if group.target_record_type() == Some(REC_MESG) {
+                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        while self.reader.stream_position()? < group_end {
+                            if let Some(inner) = self.read_next_entry()? {
+                                match inner {
+                                    EsmEntry::Record(header, subs) => {
+                                        if header.type_id == REC_MESG {
+                                            if let Ok(mesg) = MesgRecord::parse(&header, &subs) {
+                                                messages.insert(header.form_id, mesg);
+                                            }
+                                        }
+                                    }
+                                    EsmEntry::Group(child_group) => {
+                                        let skip = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        self.skip(skip)?;
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+                    let remaining = group.group_size as u64 - GroupHeader::SIZE as u64;
+                    self.skip(remaining)?;
+                }
+                EsmEntry::Record(rec, _) => {
+                    self.skip(rec.data_size as u64)?;
+                }
+            }
+        }
+
+        Ok(messages)
+    }
+
+    /// 全てのサウンドレコード (SOUN) を一括走査して FormID -> SounRecord マップを構築する。
+    pub fn read_all_sounds_map(&mut self) -> io::Result<HashMap<FormId, SounRecord>> {
+        let mut sounds = HashMap::new();
+        let start_pos = 24 + self.header_record.data_size as u64;
+        self.reader.seek(SeekFrom::Start(start_pos))?;
+
+        while let Some(entry) = self.read_next_entry()? {
+            match entry {
+                EsmEntry::Group(group) => {
+                    if group.target_record_type() == Some(REC_SOUN) {
+                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        while self.reader.stream_position()? < group_end {
+                            if let Some(inner) = self.read_next_entry()? {
+                                match inner {
+                                    EsmEntry::Record(header, subs) => {
+                                        if header.type_id == REC_SOUN {
+                                            if let Ok(soun) = SounRecord::parse(&header, &subs) {
+                                                sounds.insert(header.form_id, soun);
+                                            }
+                                        }
+                                    }
+                                    EsmEntry::Group(child_group) => {
+                                        let skip = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        self.skip(skip)?;
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+                    let remaining = group.group_size as u64 - GroupHeader::SIZE as u64;
+                    self.skip(remaining)?;
+                }
+                EsmEntry::Record(rec, _) => {
+                    self.skip(rec.data_size as u64)?;
+                }
+            }
+        }
+
+        Ok(sounds)
+    }
+
+    /// 全てのトピック (DIAL) および連動するセリフ (INFO) を一括走査してマップを構築する。
+    /// 戻り値: (Topic EDID 大文字 -> (DialRecord, Vec<InfoRecord>), FormID -> InfoRecord)
+    pub fn read_all_dialogues_map(&mut self) -> io::Result<(HashMap<String, (DialRecord, Vec<InfoRecord>)>, HashMap<FormId, InfoRecord>)> {
+        let mut topic_map: HashMap<String, (DialRecord, Vec<InfoRecord>)> = HashMap::new();
+        let mut info_map: HashMap<FormId, InfoRecord> = HashMap::new();
+        let start_pos = 24 + self.header_record.data_size as u64;
+        self.reader.seek(SeekFrom::Start(start_pos))?;
+
+        let mut current_dial: Option<DialRecord> = None;
+        let mut current_infos: Vec<InfoRecord> = Vec::new();
+
+        while let Some(entry) = self.read_next_entry()? {
+            match entry {
+                EsmEntry::Group(group) => {
+                    if group.target_record_type() == Some(REC_DIAL) {
+                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        while self.reader.stream_position()? < group_end {
+                            if let Some(inner) = self.read_next_entry()? {
+                                match inner {
+                                    EsmEntry::Record(rec_hdr, subs) => {
+                                        if rec_hdr.type_id == REC_DIAL {
+                                            if let Some(dial) = current_dial.take() {
+                                                let edid = dial.edid.to_ascii_uppercase();
+                                                topic_map.insert(edid, (dial, current_infos));
+                                                current_infos = Vec::new();
+                                            }
+                                            if let Ok(d) = DialRecord::parse(&rec_hdr, &subs) {
+                                                current_dial = Some(d);
+                                            }
+                                        } else if rec_hdr.type_id == REC_INFO {
+                                            if let Ok(info) = InfoRecord::parse(&rec_hdr, &subs) {
+                                                info_map.insert(info.form_id, info.clone());
+                                                current_infos.push(info);
+                                            }
+                                        }
+                                    }
+                                    EsmEntry::Group(child_group) => {
+                                        // Grp_TopicChild などのサブグループ走査
+                                        let sub_size = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        let sub_end = self.reader.stream_position()? + sub_size;
+                                        while self.reader.stream_position()? < sub_end {
+                                            if let Some(inner_entry) = self.read_next_entry()? {
+                                                if let EsmEntry::Record(rec_hdr, subs) = inner_entry {
+                                                    if rec_hdr.type_id == REC_INFO {
+                                                        if let Ok(info) = InfoRecord::parse(&rec_hdr, &subs) {
+                                                            info_map.insert(info.form_id, info.clone());
+                                                            current_infos.push(info);
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        if let Some(dial) = current_dial.take() {
+                            let edid = dial.edid.to_ascii_uppercase();
+                            topic_map.insert(edid, (dial, current_infos));
+                            current_infos = Vec::new();
+                        }
+                        continue;
+                    }
+                    let remaining = group.group_size as u64 - GroupHeader::SIZE as u64;
+                    self.skip(remaining)?;
+                }
+                EsmEntry::Record(rec, _) => {
+                    self.skip(rec.data_size as u64)?;
+                }
+            }
+        }
+
+        Ok((topic_map, info_map))
+    }
 }
+
+

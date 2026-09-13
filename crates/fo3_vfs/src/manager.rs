@@ -73,6 +73,19 @@ impl VfsManager {
         false
     }
 
+    /// 指定されたサフィックス（大文字小文字無視、例: "_0001f387_1.ogg"）を含むファイルを探索し、最初に見つかったパスを返す。
+    pub fn find_path_by_suffix(&self, suffix: &str) -> Option<String> {
+        let clean_suffix = suffix.to_ascii_lowercase();
+        for bsa in self.bsa_archives.iter().rev() {
+            for f in bsa.list_files() {
+                if f.to_ascii_lowercase().ends_with(&clean_suffix) {
+                    return Some(f.to_string());
+                }
+            }
+        }
+        None
+    }
+
     /// 相対パスを指定してファイルデータを読み込む。
     /// ルーズファイル（ディスク）を最優先で探索し、存在しない場合はマウントされた BSA から抽出・解凍します。
     pub fn read(&mut self, relative_path: &str) -> Result<Vec<u8>, VfsError> {

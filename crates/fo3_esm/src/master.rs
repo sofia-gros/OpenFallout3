@@ -18,6 +18,9 @@ use crate::records::armo::ArmorRecord;
 use crate::records::pack::PackRecord;
 use crate::records::quest::QuestRecord;
 use crate::records::scpt::ScptRecord;
+use crate::records::mesg::MesgRecord;
+use crate::records::soun::SounRecord;
+use crate::records::dial::{DialRecord, InfoRecord};
 use crate::reader::{BaseObjectInfo, EsmReader};
 use crate::types::FormId;
 
@@ -49,6 +52,18 @@ pub struct EsmMasterContext {
     pub quest_edid_map: HashMap<String, FormId>,
     /// FormID から AI パッケージレコードへのマップ (PACK)
     pub pack_map: HashMap<FormId, PackRecord>,
+    /// FormID からメッセージレコードへのマップ (MESG)
+    pub mesg_map: HashMap<FormId, MesgRecord>,
+    /// EditorID (大文字正規化) から Message FormID へのインデックス
+    pub mesg_edid_map: HashMap<String, FormId>,
+    /// FormID からサウンドレコードへのマップ (SOUN)
+    pub soun_map: HashMap<FormId, SounRecord>,
+    /// EditorID (大文字正規化) から Sound FormID へのインデックス
+    pub soun_edid_map: HashMap<String, FormId>,
+    /// トピック EDID (大文字正規化) から (DIAL, 所属 INFO リスト) へのマップ
+    pub topic_map: HashMap<String, (DialRecord, Vec<InfoRecord>)>,
+    /// FormID から INFO レコードへのマップ
+    pub info_map: HashMap<FormId, InfoRecord>,
 }
 
 impl EsmMasterContext {
@@ -68,11 +83,28 @@ impl EsmMasterContext {
         let script_map = reader.read_all_scripts_map().unwrap_or_default();
         let quest_map = reader.read_all_quests_map().unwrap_or_default();
         let pack_map = reader.read_all_packages_map().unwrap_or_default();
+        let mesg_map = reader.read_all_messages_map().unwrap_or_default();
+        let soun_map = reader.read_all_sounds_map().unwrap_or_default();
+        let (topic_map, info_map) = reader.read_all_dialogues_map().unwrap_or_default();
 
         let mut quest_edid_map = HashMap::new();
         for (form_id, q) in &quest_map {
             if !q.editor_id.is_empty() {
                 quest_edid_map.insert(q.editor_id.to_ascii_uppercase(), *form_id);
+            }
+        }
+
+        let mut mesg_edid_map = HashMap::new();
+        for (form_id, m) in &mesg_map {
+            if !m.editor_id.is_empty() {
+                mesg_edid_map.insert(m.editor_id.to_ascii_uppercase(), *form_id);
+            }
+        }
+
+        let mut soun_edid_map = HashMap::new();
+        for (form_id, s) in &soun_map {
+            if !s.edid.is_empty() {
+                soun_edid_map.insert(s.edid.to_ascii_uppercase(), *form_id);
             }
         }
 
@@ -88,6 +120,12 @@ impl EsmMasterContext {
             quest_map,
             quest_edid_map,
             pack_map,
+            mesg_map,
+            mesg_edid_map,
+            soun_map,
+            soun_edid_map,
+            topic_map,
+            info_map,
         })
     }
 

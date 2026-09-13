@@ -5,9 +5,11 @@
 mod action;
 mod anim;
 mod app;
+pub mod audio;
 mod camera;
 mod controller;
 mod hud;
+pub mod init;
 pub mod input;
 mod interact;
 mod interactive_anim;

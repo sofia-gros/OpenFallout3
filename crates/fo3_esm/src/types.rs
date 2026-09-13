@@ -85,6 +85,8 @@ pub const REC_DIAL: FourCC = FourCC(*b"DIAL");
 pub const REC_INFO: FourCC = FourCC(*b"INFO");
 pub const REC_QUST: FourCC = FourCC(*b"QUST");
 pub const REC_PACK: FourCC = FourCC(*b"PACK");
+pub const REC_MESG: FourCC = FourCC(*b"MESG");
+pub const REC_SOUN: FourCC = FourCC(*b"SOUN");
 
 pub const SUB_EDID: FourCC = FourCC(*b"EDID");
 pub const SUB_PKDT: FourCC = FourCC(*b"PKDT");

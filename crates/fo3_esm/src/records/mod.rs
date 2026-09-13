@@ -24,6 +24,8 @@ pub mod pack;
 pub mod items;
 pub mod equipment;
 pub mod misc_items;
+pub mod mesg;
+pub mod soun;
 
 pub use tes4::Tes4Header;
 pub use stat::StatRecord;
@@ -48,6 +50,8 @@ pub use items::{ActiRecord, ContRecord, DoorRecord, FurnRecord, GmstRecord, Gmst
 pub use equipment::{AmmoRecord, WeapRecord};
 pub use misc_items::{AlchRecord, BookRecord, KeymRecord};
 pub use pack::{PackLocation, PackRecord, PackSchedule, PackTarget, PackType};
+pub use mesg::MesgRecord;
+pub use soun::SounRecord;
 
 
 

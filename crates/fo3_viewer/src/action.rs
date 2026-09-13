@@ -384,3 +384,51 @@ pub fn play_bink_video(file_path: &str) {
         }
     }
 }
+
+/// スクリプトからのテレポート移動要求 (MoveTo) を消化し、アクターやプレイヤーを移動させる。
+pub fn process_teleport_requests(app: &mut ViewerState) {
+    while !app.vm.teleport_requests.is_empty() {
+        let (subject, marker) = app.vm.teleport_requests.remove(0);
+        let marker_data = match marker.to_ascii_lowercase().as_str() {
+            "cg00playerstartmarker" => Some((glam::Vec3::new(-5275.8867, -7148.175, 7542.536), glam::Vec3::new(0.0, 0.0, std::f32::consts::PI))),
+            "cg00momstartmarker" => Some((glam::Vec3::new(-5275.8867, -7250.0, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
+            "cg00dadstartmarker" => Some((glam::Vec3::new(-5360.3623, -7332.082, 7542.536), glam::Vec3::new(0.0, 0.0, 6.19592))),
+            "cg00doctorlistartmarker" => Some((glam::Vec3::new(-5190.0, -7330.0, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
+            _ => None,
+        };
+
+        if let Some((pos, rot)) = marker_data {
+            let target_form_id = subject.or_else(|| {
+                match marker.to_ascii_lowercase().as_str() {
+                    "cg00dadstartmarker" => Some(FormId(0x000290A7)),
+                    "cg00doctorlistartmarker" => Some(FormId(0x000290A5)),
+                    "cg00momstartmarker" => Some(FormId(0x0005EDE0)),
+                    _ => None,
+                }
+            });
+
+            if let Some(fid) = target_form_id {
+                if let Some(actor) = app.scene.actors.iter_mut().find(|a| a.form_id == fid.0) {
+                    actor.world_transform.translation = pos;
+                    actor.world_transform.rotation = glam::Mat3::from_euler(glam::EulerRot::XYZ, rot.x, rot.y, rot.z);
+                    println!("[MoveTo] アクター 0x{:08X} をマーカー \"{}\" (pos={:?}) へ配置完了", fid.0, marker, pos);
+                }
+            } else {
+                app.controller.character_controller.position = pos;
+                app.controller.initial_spawn_point = pos;
+                app.controller.player_camera.current_eye = pos + glam::Vec3::new(0.0, 0.0, 60.0);
+                app.controller.player_camera.yaw = -2.15;
+                app.controller.player_camera.pitch = 0.52;
+                app.controller.camera.yaw = -2.15;
+                app.controller.camera.pitch = 0.52;
+                if let Some(ref mut player) = app.controller.player_actor {
+                    player.position = pos;
+                }
+                println!("[MoveTo] プレイヤーをマーカー \"{}\" (pos={:?}) へテレポート完了", marker, pos);
+            }
+        } else {
+            println!("[MoveTo] 未知のマーカー \"{}\" への配置要求 (スキップ)", marker);
+        }
+    }
+}
+

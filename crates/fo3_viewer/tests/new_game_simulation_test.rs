@@ -8,6 +8,9 @@ use fo3_esm::EsmReader;
 use fo3_script::{EventDispatcher, GameEvent, ScriptVm};
 use std::path::Path;
 
+#[path = "../src/audio.rs"]
+mod audio;
+
 #[test]
 fn test_new_game_cg00_progression_simulation() {
     let esm_path = "A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\\Fallout3.esm";
@@ -146,4 +149,95 @@ fn test_new_game_cg00_progression_simulation() {
 
     let stage_after_timer3 = vm.get_stage(cg00_id);
     println!("Stage 9 満了後の CG00 ステージ: {}", stage_after_timer3);
+    assert_eq!(stage_after_timer3, 10, "Stage 9 満了後に自動的に Stage 10 (父親の台詞開始) へ進むこと");
+
+    // 10. サウンド再生キューの検証 (QSTBirthStart, QSTBabyCry)
+    println!("サウンド再生キュー: {:?}", vm.sound_queue);
+    assert!(
+        vm.sound_queue.iter().any(|s| s.eq_ignore_ascii_case("QSTBirthStart")),
+        "Stage 6 で QSTBirthStart サウンドが要求されていること"
+    );
+    assert!(
+        vm.sound_queue.iter().any(|s| s.eq_ignore_ascii_case("QSTBabyCry")),
+        "Stage 8 で QSTBabyCry (産声) サウンドが要求されていること"
+    );
+
+    // 11. SoundEngine による台詞進行 (Stage 10 -> 父親の台詞 -> Stage 18 -> 性別選択 -> Stage 22)
+    let mut sound_engine = audio::SoundEngine::new();
+    let mut vfs = fo3_vfs::VfsManager::new();
+    let mut master = fo3_esm::EsmMasterContext::new();
+
+    // テスト用のトピックと INFO レコードを master に設定 (実機 Fallout3.esm 構造)
+    let dad_info_10 = fo3_esm::InfoRecord {
+        form_id: fo3_esm::FormId(0x0001F387),
+        topic_id: None,
+        response_text: "Let's see... Are you a boy or a girl?".to_string(),
+        actor_notes: None,
+        flags: 0,
+        speaker_npc: Some(fo3_esm::FormId(0x000290A7)),
+        conditions: vec![],
+        response_data: None,
+        speech_challenge: None,
+        prompt_override: None,
+        choices: vec![],
+        result_script_source: Some("setstage CG00 18".to_string()),
+        result_script_bytecode: None,
+        unknown_subrecords: vec![],
+    };
+    let dad_dial = fo3_esm::DialRecord {
+        form_id: fo3_esm::FormId(0x0001F388),
+        edid: "CG00DadSpeech".to_string(),
+        prompt: None,
+        dial_type: 0,
+        dial_flags: 0,
+        priority: 50.0,
+        quests: vec![],
+        info_ids: vec![],
+        script_id: None,
+        unknown_subrecords: vec![],
+    };
+    master.topic_map.insert("CG00DADSPEECH".to_string(), (dad_dial, vec![dad_info_10]));
+
+    // SoundEngine を駆動して Stage 10 の父親の台詞を発火
+    sound_engine.update(0.016, &mut vm, &master, &mut vfs);
+    assert!(
+        sound_engine.active_subtitle.is_some(),
+        "Stage 10 で父親の台詞字幕が開始されていること"
+    );
+    let sub = sound_engine.active_subtitle.as_ref().unwrap();
+    println!("表示中の台詞字幕: \"{}\" ({})", sub.text, sub.speaker);
+    assert!(sub.text.contains("Are you a boy or a girl"));
+
+    // 台詞終了 (6.0秒経過) -> ResultScript `setstage CG00 18` の自動実行
+    sound_engine.update(6.0, &mut vm, &master, &mut vfs);
+    let stage_after_speech = vm.get_stage(cg00_id);
+    println!("台詞終了後の CG00 ステージ: {}", stage_after_speech);
+    assert_eq!(stage_after_speech, 18, "父親の台詞完了により Stage 18 へ自動遷移すること");
+
+    // Stage 18 の 1秒タイマー経過 -> Stage 20 (性別選択メニュー表示)
+    vm.delta_time = 1.5;
+    dispatcher.push_event(GameEvent::GameMode);
+    dispatcher.process_queue(&mut vm).unwrap();
+    dispatcher.push_event(GameEvent::GameMode);
+    dispatcher.process_queue(&mut vm).unwrap();
+
+    let stage_choose_sex = vm.get_stage(cg00_id);
+    println!("性別選択フェーズの CG00 ステージ: {}", stage_choose_sex);
+    assert_eq!(stage_choose_sex, 20, "タイマー満了で Stage 20 (性別選択) へ進むこと");
+
+    // 性別選択: 実機 GetButtonPressed 仕様 (0: Male)
+    vm.set_button_pressed(0);
+    dispatcher.push_event(GameEvent::GameMode);
+    dispatcher.process_queue(&mut vm).unwrap();
+
+    // 実機 CG00SCRIPT: chooseSex == 1 により GetButtonPressed が処理され、
+    // timer <= 0 で if getStage CG00 == 20 -> setstage CG00 22 が実行される
+    vm.delta_time = 1.5;
+    dispatcher.push_event(GameEvent::GameMode);
+    dispatcher.process_queue(&mut vm).unwrap();
+
+    let stage_after_select = vm.get_stage(cg00_id);
+    println!("性別選択後の CG00 ステージ: {}", stage_after_select);
+    assert_eq!(stage_after_select, 22, "性別選択により Stage 22 (父親・母親のリアクション) へ進むこと");
 }
+

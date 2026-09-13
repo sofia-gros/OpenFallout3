@@ -17,3 +17,4 @@ wgpu = { workspace = true }
 winit = { workspace = true }
 pollster = { workspace = true }
 bytemuck = { workspace = true }
+rodio = { workspace = true }
