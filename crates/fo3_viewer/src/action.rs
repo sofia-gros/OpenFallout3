@@ -251,6 +251,7 @@ pub fn perform_interact(app: &mut ViewerState) {
                 quest_stages: app.vm.quest_stages.clone(),
                 quest_stage_history: app.vm.quest_manager.get_stage_history_u32(),
                 inventory: app.vm.inventory.clone(),
+                is_female: app.vm.player_is_female,
             };
 
             let esm_path = std::path::Path::new(&app.data_dir).join("Fallout3.esm");

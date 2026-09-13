@@ -37,6 +37,12 @@ pub mod functions {
     pub const FN_GET_DISTANCE: u16 = 0x0035;
     /// 同一セル存在判定 (`GetInSameCell [Target]`)
     pub const FN_GET_IN_SAME_CELL: u16 = 0x0038;
+    /// 対象性別判定 (`GetIsSex [0=Male, 1=Female]`)
+    /// 参照元: `references/openmw/components/esm4/script.hpp:112` (FUN_GetIsSex = 70 = 0x0046)
+    pub const FN_GET_IS_SEX: u16 = 0x0046;
+    /// プレイヤー性別判定 (`GetPCIsSex [0=Male, 1=Female]`)
+    /// 参照元: `references/openmw/components/esm4/script.hpp:147` (FUN_GetPCIsSex = 131 = 0x0083)
+    pub const FN_GET_PC_IS_SEX: u16 = 0x0083;
     /// 対象 Base FormID 判定 (`GetIsID [BaseFormID]`)
     /// 参照元: `references/openmw/components/esm4/script.hpp:114` (FUN_GetIsID = 72 = 0x0048)
     pub const FN_GET_IS_ID: u16 = 0x0048;

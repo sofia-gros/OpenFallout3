@@ -7,6 +7,7 @@ mod anim;
 mod app;
 pub mod audio;
 mod camera;
+mod chargen_menu;
 mod controller;
 mod hud;
 pub mod init;
@@ -18,6 +19,7 @@ mod loader;
 mod player;
 mod types;
 mod ui;
+mod window_input;
 
 use std::env;
 use winit::event_loop::EventLoop;

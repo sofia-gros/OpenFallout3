@@ -78,6 +78,8 @@ pub struct ViewerState {
     pub screen_fade_alpha: f32,
     /// オーディオ再生及びダイアログ・字幕進行管理
     pub sound_engine: crate::audio::SoundEngine,
+    /// キャラクター作成画面 (RaceSexMenu / NameMenu)
+    pub chargen_menu: crate::chargen_menu::ChargenMenu,
 }
 
 impl ViewerState {
@@ -320,6 +322,7 @@ impl ViewerState {
             screen_fade_color: [0.0, 0.0, 0.0, 1.0],
             screen_fade_alpha: if matches!(target, ViewerTarget::NewGame) { 1.0 } else { 0.0 },
             sound_engine: crate::audio::SoundEngine::new(),
+            chargen_menu: crate::chargen_menu::ChargenMenu::new(),
         };
 
         state.setup_scripts_for_cell();
@@ -421,6 +424,9 @@ impl ViewerState {
 
         // 0.3 オーディオ・会話シーケンスの進行更新 (実機 DIAL/INFO/SOUN 連動)
         self.sound_engine.update(dt, &mut self.vm, &self.master_context, &mut self.vfs);
+
+        // 0.4 キャラクター作成イベント (GetPlayerName / ShowRaceMenu) のポーリング
+        self.chargen_menu.poll_events(&mut self.vm);
 
         // 開閉アニメーションの進行および物理剛体・GPUメッシュの追従更新
         // 参照元: Gamebryo 2.6 `bhkRigidBody` (MO_SYS_KEYFRAMED) 追従
@@ -698,21 +704,38 @@ impl ViewerState {
             if let Some(mesg) = mesg_opt {
                 let screen_w = self.size.width as f32;
                 let screen_h = self.size.height as f32;
-                let cx = screen_w * 0.35;
-                let mut cy = screen_h * 0.42;
+                let box_w = 460.0;
+                let box_h = 140.0 + (mesg.buttons.len() as f32 * 36.0);
+                let bx = (screen_w - box_w) * 0.5;
+                let by = (screen_h - box_h) * 0.5;
 
+                // Pip-Boy ウィンドウ背景 & 外枠
+                ui_batch.add_rect(bx, by, box_w, box_h, [0.02, 0.08, 0.03, 0.92]);
+                ui_batch.add_rect(bx, by, box_w, 2.0, [0.2, 1.0, 0.4, 1.0]);
+                ui_batch.add_rect(bx, by + box_h - 2.0, box_w, 2.0, [0.2, 1.0, 0.4, 1.0]);
+                ui_batch.add_rect(bx, by, 2.0, box_h, [0.2, 1.0, 0.4, 1.0]);
+                ui_batch.add_rect(bx + box_w - 2.0, by, 2.0, box_h, [0.2, 1.0, 0.4, 1.0]);
+
+                let mut cy = by + 25.0;
                 if !mesg.text.is_empty() {
-                    ui_batch.add_text(self.ui_renderer.font(), &mesg.text, cx, cy, 1.25, [1.0, 0.9, 0.2, 1.0]);
-                    cy += 35.0;
+                    ui_batch.add_text(self.ui_renderer.font(), &mesg.text, bx + 30.0, cy, 1.2, [1.0, 0.9, 0.2, 1.0]);
+                    cy += 45.0;
                 }
 
                 for (idx, btn_text) in mesg.buttons.iter().enumerate() {
-                    let label = format!("[{}] {}", idx + 1, btn_text);
-                    ui_batch.add_text(self.ui_renderer.font(), &label, cx, cy, 1.1, [0.2, 1.0, 0.4, 1.0]);
-                    cy += 28.0;
+                    let btn_y = cy;
+                    ui_batch.add_rect(bx + 30.0, btn_y - 2.0, box_w - 60.0, 28.0, [0.05, 0.18, 0.08, 0.85]);
+                    let label = format!("  [{}] {}", idx + 1, btn_text);
+                    ui_batch.add_text(self.ui_renderer.font(), &label, bx + 35.0, btn_y + 3.0, 1.15, [0.2, 1.0, 0.4, 1.0]);
+                    cy += 34.0;
                 }
             }
         }
+
+        // キャラクター作成画面 (RaceSexMenu / NameMenu) の描画
+        let screen_w = self.size.width as f32;
+        let screen_h = self.size.height as f32;
+        self.chargen_menu.render(&self.ui_renderer, &mut ui_batch, screen_w, screen_h);
         if !ui_batch.indices.is_empty() {
             self.ui_renderer.update_resolution(
                 &self.queue,
@@ -831,144 +854,8 @@ impl ApplicationHandler for App {
                 }
                 state.controller.last_mouse_pos = Some((position.x, position.y));
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                let zoom_amount = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => y,
-                    MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.05,
-                };
-                if state.controller.camera_mode == CameraMode::Standard {
-                    if state.vm.player_controls.pov {
-                        state.controller.player_camera.zoom(zoom_amount);
-                        if let Some(ref mut player) = state.controller.player_actor {
-                            player.set_view_mode(state.controller.player_camera.mode, &mut state.scene.meshes);
-                        }
-                    }
-                } else {
-                    state.controller.camera.zoom(zoom_amount);
-                }
-                state.window.request_redraw();
-            }
-            WindowEvent::KeyboardInput { event, .. } => {
-                let pressed = event.state == ElementState::Pressed;
-                if let PhysicalKey::Code(key) = event.physical_key {
-                    // 実機メッセージダイアログ (MESG / ShowMessage) のボタン選択
-                    if pressed {
-                        if let Some(msg_id) = state.vm.show_messages.first().cloned() {
-                            let mesg_opt = state.master_context.mesg_edid_map.get(&msg_id.to_ascii_uppercase())
-                                .and_then(|fid| state.master_context.mesg_map.get(fid));
-                            if let Some(mesg) = mesg_opt {
-                                let btn_idx = match key {
-                                    KeyCode::Digit1 | KeyCode::Numpad1 => Some(0),
-                                    KeyCode::Digit2 | KeyCode::Numpad2 => Some(1),
-                                    KeyCode::Digit3 | KeyCode::Numpad3 => Some(2),
-                                    KeyCode::Digit4 | KeyCode::Numpad4 => Some(3),
-                                    _ => None,
-                                };
-                                if let Some(idx) = btn_idx {
-                                    if idx < mesg.buttons.len() {
-                                        state.vm.show_messages.remove(0);
-                                        state.vm.set_button_pressed(idx as i32);
-                                        println!("[MessageMenu] ボタン選択: {} -> GetButtonPressed", idx);
-                                        state.window.request_redraw();
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if pressed && state.mode.is_ui_active() {
-                        if state.mode.handle_key_with_vm(key, &mut state.vm) {
-                            state.window.request_redraw();
-                            return;
-                        }
-                    }
-
-                    // キーマネージャーの押下状態更新
-                    state.input_manager.handle_key_event(key, pressed);
-
-                    // キャラクタ移動・姿勢入力の同期 (実機 DisablePlayerControls 反映)
-                    let can_move = state.vm.player_controls.movement;
-                    state.controller.key_forward = can_move && state.input_manager.is_action_down(crate::input::GameAction::Forward);
-                    state.controller.key_backward = can_move && state.input_manager.is_action_down(crate::input::GameAction::Backward);
-                    state.controller.key_left = can_move && state.input_manager.is_action_down(crate::input::GameAction::StrafeLeft);
-                    state.controller.key_right = can_move && state.input_manager.is_action_down(crate::input::GameAction::StrafeRight);
-                    state.controller.key_jump = can_move && state.input_manager.is_action_down(crate::input::GameAction::Jump);
-                    state.controller.key_sneak = can_move && state.input_manager.is_action_down(crate::input::GameAction::Sneak);
-                    state.controller.key_run = !state.input_manager.is_action_down(crate::input::GameAction::Run);
-
-                    if pressed {
-                        if let Some(action) = state.input_manager.get_action(key) {
-                            match action {
-                                crate::input::InputCommand::Game(crate::input::GameAction::Activate) => {
-                                    if state.vm.player_controls.movement && !state.vm.in_chargen {
-                                        state.interact_or_teleport();
-                                    }
-                                }
-                                crate::input::InputCommand::Game(crate::input::GameAction::TogglePOV) => {
-                                    if state.vm.player_controls.pov {
-                                        state.controller.player_camera.toggle_view_mode();
-                                        if let Some(ref mut player) = state.controller.player_actor {
-                                            player.set_view_mode(state.controller.player_camera.mode, &mut state.scene.meshes);
-                                        }
-                                        println!("[視点切替] 現在の視点モード: {:?}", state.controller.player_camera.mode);
-                                    }
-                                }
-                                crate::input::InputCommand::Game(crate::input::GameAction::PipBoy) => {
-                                    if state.vm.player_controls.pipboy {
-                                        if state.mode.is_ui_active() {
-                                            state.mode = ViewerMode::Exploring;
-                                        } else {
-                                            println!("[Pip-Boy] メニュー (Tab)");
-                                        }
-                                    }
-                                }
-                                crate::input::InputCommand::Debug(crate::input::DebugAction::Help) => {
-                                    println!("{}", state.input_manager.get_guide_text());
-                                }
-                                crate::input::InputCommand::Debug(crate::input::DebugAction::ToggleCollision) => {
-                                    state.show_collision = !state.show_collision;
-                                    println!("Havok コリジョン表示 [F2]: {}", if state.show_collision { "ON" } else { "OFF" });
-                                }
-                                crate::input::InputCommand::Debug(crate::input::DebugAction::ToggleFog) => {
-                                    state.enable_fog = !state.enable_fog;
-                                    println!("セル環境フォグ [F3]: {}", if state.enable_fog { "ON" } else { "OFF" });
-                                }
-                                crate::input::InputCommand::Debug(crate::input::DebugAction::ToggleHeadlight) => {
-                                    state.headlight = !state.headlight;
-                                    println!("ビューア補助ヘッドライト [F4]: {}", if state.headlight { "ON" } else { "OFF" });
-                                }
-                                crate::input::InputCommand::Debug(crate::input::DebugAction::ResetCamera) => {
-                                    state.controller.camera.focus(state.scene.bounds_center, state.scene.bounds_radius);
-                                    state.controller.character_controller.position = state.scene.bounds_center + glam::Vec3::new(0.0, 0.0, 64.0);
-                                    state.controller.vertical_velocity = 0.0;
-                                    println!("カメラ・スポーン位置再フォーカス [F7]");
-                                }
-                                crate::input::InputCommand::Debug(crate::input::DebugAction::ToggleFreeOrbit) => {
-                                    state.controller.camera_mode = match state.controller.camera_mode {
-                                        CameraMode::Standard => {
-                                            println!("\n[カメラモード] F12: フリーオービットカメラ (全体俯瞰・回転周回) に切り替えました。");
-                                            println!("  左ドラッグ: 回転, 右ドラッグ: 平行移動, ホイール: ズーム, F12: 実機カメラへ復帰");
-                                            state.controller.camera.target = state.controller.character_controller.position;
-                                            CameraMode::FreeOrbit
-                                        }
-                                        CameraMode::FreeOrbit => {
-                                            println!("\n[カメラモード] F12: Fallout 3 実機標準プレイヤーカメラに復帰しました。");
-                                            println!("  WASD: 移動, Space: ジャンプ, Ctrl: しゃがみ, E: 調べる, F/V: 視点切替");
-                                            state.controller.character_controller.position = state.controller.initial_spawn_point;
-                                            state.controller.vertical_velocity = 0.0;
-                                            CameraMode::Standard
-                                        }
-                                    };
-                                }
-                                _ => {}
-                            }
-                        } else if key == KeyCode::Escape {
-                            event_loop.exit();
-                        }
-                    }
-                }
-                state.window.request_redraw();
+            WindowEvent::MouseWheel { .. } | WindowEvent::KeyboardInput { .. } => {
+                crate::window_input::handle_input_event(state, event, event_loop);
             }
             _ => {}
         }

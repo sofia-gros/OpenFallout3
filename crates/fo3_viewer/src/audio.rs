@@ -17,7 +17,7 @@
 //!
 //! 参照元: `references/openmw/components/esm4/loadinfo.cpp`, `Fallout3.esm:DIAL`, `Fallout3.esm:INFO`, `Fallout3.esm:SOUN`
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::sync::Arc;
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
@@ -29,6 +29,8 @@ use fo3_script::conditions::{evaluate_conditions, ConditionContext};
 /// 現在表示中の字幕情報 (実機 `INFO` レコード由来)。
 #[derive(Clone, Debug)]
 pub struct Subtitle {
+    /// 発言 INFO の FormID
+    pub form_id: FormId,
     /// 発言者表示名
     pub speaker: String,
     /// 台詞本文 (実機 `INFO.NAM1`)
@@ -51,6 +53,8 @@ pub struct SoundEngine {
     pub active_subtitle: Option<Subtitle>,
     /// 最後に処理したクエストステージ履歴 (QuestID -> Stage)
     last_processed_stages: HashMap<FormId, u32>,
+    /// 発話済み INFO レコードの FormID (実機 Say Once フラグ対応)
+    pub spoken_infos: HashSet<FormId>,
 }
 
 impl SoundEngine {
@@ -70,6 +74,7 @@ impl SoundEngine {
             current_voice_sink: None,
             active_subtitle: None,
             last_processed_stages: HashMap::new(),
+            spoken_infos: HashSet::new(),
         }
     }
 
@@ -163,7 +168,7 @@ impl SoundEngine {
                 .unwrap_or(false);
 
             if sub.remaining <= 0.0 || is_voice_finished {
-                println!("[SoundEngine] 台詞終了: \"{}\"", sub.text);
+                println!("[SoundEngine] 台詞終了: FormID=0x{:08X}", sub.form_id.0);
                 let on_complete = sub.on_complete_script.take();
                 self.active_subtitle = None;
                 self.current_voice_sink = None;
@@ -207,25 +212,23 @@ impl SoundEngine {
         }
 
         // 3. クエストステージ変化時の自動トピックトリガー (汎用)
-        // 実機 CG00 出産シーケンス等におけるクエスト連動台詞の発話
-        let cg00_id = FormId(0x0001F388);
-        let current_cg00_stage = vm.get_stage(cg00_id);
-        let last_cg00_stage = self.last_processed_stages.get(&cg00_id).copied().unwrap_or(0);
+        // 3. doTalk フラグに基づく自律的トピックトリガー (CG00 等の実機 AI 会話進行)
+        // 参照元: Fallout 3 実機スクリプト `CG00DadREF.doTalk`, `CG00MomREF.doTalk`, `CG00DoctorLiREF.doTalk`
+        if self.active_subtitle.is_none() && vm.say_queue.is_empty() {
+            let dad_talking = vm.locals.get("cg00dadref.dotalk").copied().unwrap_or(0.0) == 1.0;
+            let mom_talking = vm.locals.get("cg00momref.dotalk").copied().unwrap_or(0.0) == 1.0;
+            let drli_talking = vm.locals.get("cg00doctorliref.dotalk").copied().unwrap_or(0.0) == 1.0;
 
-        if current_cg00_stage != last_cg00_stage {
-            self.last_processed_stages.insert(cg00_id, current_cg00_stage);
-            match current_cg00_stage {
-                10 => {
-                    // 父親 James の語りかけ (CG00DadSpeech)
-                    let dad_id = FormId(0x000290A7);
-                    vm.say_queue.push((Some(dad_id), "CG00DadSpeech".to_string()));
-                }
-                22 => {
-                    // 父親 James の性別認知台詞
-                    let dad_id = FormId(0x000290A7);
-                    vm.say_queue.push((Some(dad_id), "CG00DadSpeech".to_string()));
-                }
-                _ => {}
+            // Dad が話すターンになった場合は Mom の発話を終了とみなす
+            if dad_talking {
+                let dad_id = FormId(0x000290A7);
+                vm.say_queue.push((Some(dad_id), "CG00DadSpeech".to_string()));
+            } else if mom_talking {
+                let mom_id = FormId(0x0005EDE0);
+                vm.say_queue.push((Some(mom_id), "CG00MomSpeech".to_string()));
+            } else if drli_talking {
+                let drli_id = FormId(0x000290A5);
+                vm.say_queue.push((Some(drli_id), "CG00DoctorLiSpeech".to_string()));
             }
         }
 
@@ -250,18 +253,41 @@ impl SoundEngine {
                 quest_stages: vm.quest_stages.clone(),
                 quest_stage_history: HashMap::new(),
                 inventory: vm.inventory.clone(),
+                is_female: vm.player_is_female,
             };
 
-            // 適合する INFO レコードを検索
+            // 適合する INFO レコードを検索 (未読のものを優先し、Say Once は完全除外)
             let matched_info: Option<&InfoRecord> = infos.iter().find(|info| {
+                let is_say_once = (info.flags & 0x0004) != 0;
+                if is_say_once && self.spoken_infos.contains(&info.form_id) {
+                    return false;
+                }
+                if self.spoken_infos.contains(&info.form_id) {
+                    return false;
+                }
                 if info.conditions.is_empty() {
                     true
                 } else {
                     evaluate_conditions(&info.conditions, &cond_ctx)
                 }
+            }).or_else(|| {
+                // 未読がない場合、Say Once でない候補から再探索
+                infos.iter().find(|info| {
+                    let is_say_once = (info.flags & 0x0004) != 0;
+                    if is_say_once && self.spoken_infos.contains(&info.form_id) {
+                        return false;
+                    }
+                    if info.conditions.is_empty() {
+                        true
+                    } else {
+                        evaluate_conditions(&info.conditions, &cond_ctx)
+                    }
+                })
             });
 
             if let Some(info) = matched_info {
+                self.spoken_infos.insert(info.form_id);
+
                 // 話者名の特定 (NPC レコードの FULL 名、または EDID)
                 let speaker_name = speaker_id.and_then(|id| {
                     master.npc_map.get(&id).map(|npc| {
@@ -271,8 +297,8 @@ impl SoundEngine {
 
                 let subtitle_text = info.response_text.clone();
                 println!(
-                    "[SoundEngine] 実機 INFO 選択成功: FormID=0x{:08X}, Speaker=\"{}\", Text=\"{}\"",
-                    info.form_id.0, speaker_name, subtitle_text
+                    "[SoundEngine] 実機 INFO 選択成功: FormID=0x{:08X}, Speaker=\"{}\"",
+                    info.form_id.0, speaker_name
                 );
 
                 // 実機音声ファイルの探索 (接尾辞: _{form_id:08x}_1.ogg または .wav)
@@ -295,6 +321,7 @@ impl SoundEngine {
 
                 // 実機字幕および ResultScript を登録
                 self.active_subtitle = Some(Subtitle {
+                    form_id: info.form_id,
                     speaker: speaker_name,
                     text: subtitle_text,
                     remaining: duration,
@@ -302,6 +329,15 @@ impl SoundEngine {
                 });
             } else {
                 println!("[SoundEngine] トピック \"{}\" に適合する INFO 条件が見つかりませんでした", dial.edid);
+                // これ以上話す台詞がないため、該当アクターの doTalk フラグをクリア
+                let edid_lower = dial.edid.to_ascii_lowercase();
+                if edid_lower.contains("dad") {
+                    vm.locals.insert("cg00dadref.dotalk".to_string(), 0.0);
+                } else if edid_lower.contains("mom") {
+                    vm.locals.insert("cg00momref.dotalk".to_string(), 0.0);
+                } else if edid_lower.contains("doctorli") || edid_lower.contains("drli") {
+                    vm.locals.insert("cg00doctorliref.dotalk".to_string(), 0.0);
+                }
             }
         }
     }

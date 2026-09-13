@@ -10,6 +10,8 @@ use std::path::Path;
 
 #[path = "../src/audio.rs"]
 mod audio;
+#[path = "../src/chargen_menu.rs"]
+mod chargen_menu;
 
 #[test]
 fn test_new_game_cg00_progression_simulation() {
@@ -24,11 +26,13 @@ fn test_new_game_cg00_progression_simulation() {
     let quest_map = reader.read_all_quests_map().expect("Failed to read quest map");
     let script_map = reader.read_all_scripts_map().expect("Failed to read script map");
     let pack_map = reader.read_all_packages_map().expect("Failed to read pack map");
+    let (dialogue_map, info_map) = reader.read_all_dialogues_map().expect("Failed to read dialogues");
 
     println!("マスター定義ロード完了:");
     println!("  - クエスト: {} 件", quest_map.len());
     println!("  - スクリプト: {} 件", script_map.len());
     println!("  - AI パッケージ: {} 件", pack_map.len());
+    println!("  - 会話トピック: {} 件", dialogue_map.len());
 
     // 2. ScriptVm の初期化とマスター同期
     let mut vm = ScriptVm::new();
@@ -167,46 +171,22 @@ fn test_new_game_cg00_progression_simulation() {
     let mut vfs = fo3_vfs::VfsManager::new();
     let mut master = fo3_esm::EsmMasterContext::new();
 
-    // テスト用のトピックと INFO レコードを master に設定 (実機 Fallout3.esm 構造)
-    let dad_info_10 = fo3_esm::InfoRecord {
-        form_id: fo3_esm::FormId(0x0001F387),
-        topic_id: None,
-        response_text: "Let's see... Are you a boy or a girl?".to_string(),
-        actor_notes: None,
-        flags: 0,
-        speaker_npc: Some(fo3_esm::FormId(0x000290A7)),
-        conditions: vec![],
-        response_data: None,
-        speech_challenge: None,
-        prompt_override: None,
-        choices: vec![],
-        result_script_source: Some("setstage CG00 18".to_string()),
-        result_script_bytecode: None,
-        unknown_subrecords: vec![],
-    };
-    let dad_dial = fo3_esm::DialRecord {
-        form_id: fo3_esm::FormId(0x0001F388),
-        edid: "CG00DadSpeech".to_string(),
-        prompt: None,
-        dial_type: 0,
-        dial_flags: 0,
-        priority: 50.0,
-        quests: vec![],
-        info_ids: vec![],
-        script_id: None,
-        unknown_subrecords: vec![],
-    };
-    master.topic_map.insert("CG00DADSPEECH".to_string(), (dad_dial, vec![dad_info_10]));
+    // 11. SoundEngine による台詞進行 (実機 ESM トピックと条件式による完全駆動)
+    let mut sound_engine = audio::SoundEngine::new();
+    let mut vfs = fo3_vfs::VfsManager::new();
+    let mut master = fo3_esm::EsmMasterContext::new();
+    master.topic_map = dialogue_map;
+    master.info_map = info_map;
 
-    // SoundEngine を駆動して Stage 10 の父親の台詞を発火
+    // Stage 10: 父親の最初の台詞を発火 (doTalk == 1)
     sound_engine.update(0.016, &mut vm, &master, &mut vfs);
     assert!(
         sound_engine.active_subtitle.is_some(),
         "Stage 10 で父親の台詞字幕が開始されていること"
     );
     let sub = sound_engine.active_subtitle.as_ref().unwrap();
-    println!("表示中の台詞字幕: \"{}\" ({})", sub.text, sub.speaker);
-    assert!(sub.text.contains("Are you a boy or a girl"));
+    println!("表示中の台詞字幕: FormID=0x{:08X}, Speaker={}", sub.form_id.0, sub.speaker);
+    assert_eq!(sub.form_id, FormId(0x0001F387));
 
     // 台詞終了 (6.0秒経過) -> ResultScript `setstage CG00 18` の自動実行
     sound_engine.update(6.0, &mut vm, &master, &mut vfs);
@@ -225,8 +205,9 @@ fn test_new_game_cg00_progression_simulation() {
     println!("性別選択フェーズの CG00 ステージ: {}", stage_choose_sex);
     assert_eq!(stage_choose_sex, 20, "タイマー満了で Stage 20 (性別選択) へ進むこと");
 
-    // 性別選択: 実機 GetButtonPressed 仕様 (0: Male)
-    vm.set_button_pressed(0);
+    // 性別選択: 1 (Female) を選択
+    vm.player_is_female = true;
+    vm.set_button_pressed(1);
     dispatcher.push_event(GameEvent::GameMode);
     dispatcher.process_queue(&mut vm).unwrap();
 
@@ -238,6 +219,64 @@ fn test_new_game_cg00_progression_simulation() {
 
     let stage_after_select = vm.get_stage(cg00_id);
     println!("性別選択後の CG00 ステージ: {}", stage_after_select);
-    assert_eq!(stage_after_select, 22, "性別選択により Stage 22 (父親・母親のリアクション) へ進むこと");
+    assert_eq!(stage_after_select, 22, "性別選択により Stage 22 へ進むこと");
+
+    // 12. Stage 22: 父親の性別認知台詞 (INFO 0x0001F385)
+    sound_engine.update(0.016, &mut vm, &master, &mut vfs);
+    assert!(sound_engine.active_subtitle.is_some(), "父親の台詞が開始されること");
+    let dad_sub = sound_engine.active_subtitle.as_ref().unwrap();
+    println!("父親の台詞1: FormID=0x{:08X}", dad_sub.form_id.0);
+    assert_eq!(dad_sub.form_id, FormId(0x0001F385));
+
+    // 父親の台詞終了 (15秒経過) -> ResultScript `set CG00DadREF.doTalk to 0; set CG00MomREF.doTalk to 1` が実行され、
+    // 即座に自律トピックトリガーにより母親の台詞 (CG00MomSpeech, INFO 0x0005EDD8) が開始される
+    sound_engine.update(15.0, &mut vm, &master, &mut vfs);
+    assert!(sound_engine.active_subtitle.is_some(), "父親終了後に母親の台詞が自律開始されること");
+    let mom_sub = sound_engine.active_subtitle.as_ref().unwrap();
+    println!("母親の台詞: FormID=0x{:08X}", mom_sub.form_id.0);
+    assert_eq!(mom_sub.form_id, FormId(0x0005EDD8));
+
+    // 母親の台詞終了 (15秒経過) -> ResultScript `set CG00DadREF.doTalk to 1` が実行され、
+    // 即座に自律トピックトリガーにより父親の台詞が開始される
+    sound_engine.update(15.0, &mut vm, &master, &mut vfs);
+    assert!(sound_engine.active_subtitle.is_some(), "母親終了後に父親の台詞が自律開始されること");
+
+    // 父親が名前を促す Stage 38 に到達するまで台詞を自動進行
+    for _ in 0..5 {
+        if vm.get_stage(cg00_id) >= 38 {
+            break;
+        }
+        sound_engine.update(0.016, &mut vm, &master, &mut vfs);
+        if let Some(sub) = sound_engine.active_subtitle.as_ref() {
+            println!("父親の台詞: FormID=0x{:08X}", sub.form_id.0);
+        }
+        sound_engine.update(15.0, &mut vm, &master, &mut vfs);
+    }
+
+    let stage_name_prompt = vm.get_stage(cg00_id);
+    println!("名前入力準備ステージ: {}", stage_name_prompt);
+    assert_eq!(stage_name_prompt, 38, "名前促し台詞終了で Stage 38 へ遷移すること");
+
+    // Stage 38 の 1秒タイマー経過 -> Stage 40 (名前入力フェーズ)
+    vm.delta_time = 1.5;
+    dispatcher.push_event(GameEvent::GameMode);
+    dispatcher.process_queue(&mut vm).unwrap();
+    dispatcher.push_event(GameEvent::GameMode);
+    dispatcher.process_queue(&mut vm).unwrap();
+
+    let stage_name = vm.get_stage(cg00_id);
+    println!("名前決定ステージ: {}", stage_name);
+    assert_eq!(stage_name, 40, "タイマー満了で Stage 40 (GetPlayerName) へ進むこと");
+
+    // 16. ChargenMenu による名前入力処理
+    let mut chargen_menu = chargen_menu::ChargenMenu::new();
+    chargen_menu.poll_events(&mut vm);
+    assert!(chargen_menu.is_active(), "GetPlayerName により ChargenMenu がアクティブになること");
+
+    // Enter キーで名前決定 -> Stage 42 へ自動進行
+    chargen_menu.handle_key(winit::keyboard::KeyCode::Enter, &mut vm);
+    let stage_after_name = vm.get_stage(cg00_id);
+    println!("名前決定後のステージ: {}", stage_after_name);
+    assert_eq!(stage_after_name, 42, "名前決定により Stage 42 へ進むこと");
 }
 

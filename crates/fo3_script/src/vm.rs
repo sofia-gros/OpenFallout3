@@ -107,6 +107,8 @@ pub struct ScriptVm {
     pub script_package_requests: Vec<(Option<FormId>, String)>,
     /// AIパッケージ再評価リクエストキュー: (Subject FormID)
     pub evaluate_package_requests: Vec<Option<FormId>>,
+    /// プレイヤーの性別 (true: Female, false: Male)
+    pub player_is_female: bool,
     /// フレームデルタタイム秒 (GetSecondsPassed 評価用)
     pub delta_time: f32,
 }
@@ -141,6 +143,7 @@ impl Default for ScriptVm {
             say_queue: Vec::new(),
             script_package_requests: Vec::new(),
             evaluate_package_requests: Vec::new(),
+            player_is_female: false,
             delta_time: 0.016,
         }
     }
@@ -243,8 +246,13 @@ impl ScriptVm {
     /// - `player.additem 0x000abcde 1`
     /// - `Unlock`
     pub fn execute_statement(&mut self, line: &str, self_id: Option<FormId>) -> Result<(), ScriptError> {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with(';') {
+        let no_comment = if let Some(pos) = line.find(';') {
+            &line[..pos]
+        } else {
+            line
+        };
+        let trimmed = no_comment.trim();
+        if trimmed.is_empty() {
             return Ok(());
         }
 
@@ -423,8 +431,18 @@ impl ScriptVm {
                 }
             }
             "playbink" => {
-                if parts.len() >= 2 {
-                    let bink_file = parts[1..].join(" ").trim_matches('"').to_string();
+                let bink_file = if let Some(first_quote) = trimmed.find('"') {
+                    if let Some(second_quote) = trimmed[first_quote + 1..].find('"') {
+                        trimmed[first_quote + 1..first_quote + 1 + second_quote].to_string()
+                    } else {
+                        trimmed[first_quote + 1..].trim().to_string()
+                    }
+                } else if parts.len() >= 2 {
+                    parts[1].trim_matches('"').to_string()
+                } else {
+                    String::new()
+                };
+                if !bink_file.is_empty() {
                     println!("[Script] PlayBink ムービー再生要求: \"{}\"", bink_file);
                     self.play_bink_queue.push(bink_file);
                 }

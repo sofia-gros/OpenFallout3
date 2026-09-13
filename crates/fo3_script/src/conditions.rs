@@ -26,11 +26,18 @@ pub struct ConditionContext {
     pub quest_stage_history: HashMap<FormId, HashSet<u32>>,
     /// プレイヤーのインベントリ所持数 (`ItemFormID -> Count`)
     pub inventory: HashMap<FormId, u32>,
+    /// プレイヤーの性別 (true: Female=1, false: Male=0)
+    pub is_female: bool,
 }
 
 /// 単一の `TargetCondition` を評価する。
 pub fn evaluate_single_condition(cond: &TargetCondition, ctx: &ConditionContext) -> bool {
     let actual_value = match cond.function_index {
+        FN_GET_IS_SEX | FN_GET_PC_IS_SEX => {
+            // 対象の性別 (param1: 0 = Male, 1 = Female)
+            let current_sex = if ctx.is_female { 1 } else { 0 };
+            if current_sex == cond.param1 { 1.0 } else { 0.0 }
+        }
         FN_GET_IS_ID => {
             // 話者の Base FormID と比較
             if let Some(speaker_id) = ctx.speaker {
