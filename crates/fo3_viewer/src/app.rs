@@ -70,6 +70,12 @@ pub struct ViewerState {
     pub vm: fo3_script::ScriptVm,
     pub dispatcher: fo3_script::EventDispatcher,
     pub ui_renderer: fo3_render::UiRenderer,
+    /// キーバインド・入力管理マネージャー (Fallout 3 実機標準 + F1-F12 デバッグ)
+    pub input_manager: crate::input::InputManager,
+    /// 全画面フェードエフェクト色 (暗転・ホワイトアウト用)
+    pub screen_fade_color: [f32; 4],
+    /// 全画面フェードエフェクトの不透明度 (0.0=透明, 1.0=完全不透明)
+    pub screen_fade_alpha: f32,
 }
 
 impl ViewerState {
@@ -159,7 +165,12 @@ impl ViewerState {
         // カメラ・物理コントローラーの初期化
         let aspect = width as f32 / height as f32;
 
-        let spawn_pos = if let Some((door_pos, _)) = loaded.door_spawn_point {
+        let (spawn_pos, initial_yaw) = if matches!(target, ViewerTarget::NewGame) {
+            // 実機 CG00PlayerStartMarker (0x00039562): Pos=[-5275.8867, -7148.175, 7542.536], Rot=[0.0, 0.0, PI]
+            let marker_pos = glam::Vec3::new(-5275.8867, -7148.175, 7542.536);
+            println!("★ ニューゲーム開始: CG00PlayerStartMarker へ配置 {:?}", marker_pos);
+            (marker_pos, std::f32::consts::PI)
+        } else if let Some((door_pos, _)) = loaded.door_spawn_point {
             let to_center = loaded.scene.bounds_center - door_pos;
             let into_room = if to_center.x.hypot(to_center.y) > 1.0 {
                 glam::Vec3::new(to_center.x, to_center.y, 0.0).normalize()
@@ -167,26 +178,21 @@ impl ViewerState {
                 glam::Vec3::X
             };
             let pos = door_pos + into_room * 80.0 + glam::Vec3::new(0.0, 0.0, 65.0);
-            println!(
-                "出入口ドアから室内方向への初期スポーン地点を設定: {:?}",
-                pos
-            );
-            pos
+            println!("出入口ドアから室内方向への初期スポーン地点を設定: {:?}", pos);
+            (pos, into_room.y.atan2(into_room.x))
         } else {
             let ray_origin =
                 loaded.scene.bounds_center + glam::Vec3::new(0.0, 0.0, loaded.scene.bounds_radius * 0.5);
             let ray_dir = glam::Vec3::new(0.0, 0.0, -1.0);
-            if let Some(hit) =
+            let pos = if let Some(hit) =
                 loaded.physics_world.cast_ray(ray_origin, ray_dir, loaded.scene.bounds_radius * 2.0)
             {
-                println!(
-                    "レイキャストによる安全な床面検出に成功: Z = {:.1}",
-                    hit.point.z
-                );
+                println!("レイキャストによる安全な床面検出に成功: Z = {:.1}", hit.point.z);
                 hit.point + glam::Vec3::new(0.0, 0.0, 65.0)
             } else {
                 loaded.scene.bounds_center + glam::Vec3::new(0.0, 0.0, 64.0)
-            }
+            };
+            (pos, 0.0)
         };
 
         let mut controller = Controller::new(
@@ -197,18 +203,10 @@ impl ViewerState {
             loaded.physics_world,
         );
 
-        if let Some((door_pos, _)) = loaded.door_spawn_point {
-            let to_center = loaded.scene.bounds_center - door_pos;
-            let into_room = if to_center.x.hypot(to_center.y) > 1.0 {
-                glam::Vec3::new(to_center.x, to_center.y, 0.0).normalize()
-            } else {
-                glam::Vec3::X
-            };
-            controller.camera.yaw = into_room.y.atan2(into_room.x);
-            controller.camera.pitch = 0.0;
-            controller.player_camera.yaw = controller.camera.yaw;
-            controller.player_camera.pitch = controller.camera.pitch;
-        }
+        controller.camera.yaw = initial_yaw;
+        controller.camera.pitch = 0.0;
+        controller.player_camera.yaw = initial_yaw;
+        controller.player_camera.pitch = 0.0;
 
         // プレイヤーアクター (三人称全身モデル + 一人称腕モデル) の生成・配置
         let player_actor = crate::player::build_player_actor(
@@ -272,8 +270,10 @@ impl ViewerState {
 
         let hud = HudRenderer::new(&device, &queue, surface_format, &mut vfs);
         let ui_renderer = fo3_render::UiRenderer::new(&device, &queue, surface_format);
-        let vm = fo3_script::ScriptVm::new();
-        let dispatcher = fo3_script::EventDispatcher::new();
+        let mut vm = fo3_script::ScriptVm::new();
+        vm.initialize_from_master(&master_context);
+        let mut dispatcher = fo3_script::EventDispatcher::new();
+        dispatcher.register_all_scripts(&master_context.script_map);
 
         print_controls_guide();
 
@@ -314,9 +314,29 @@ impl ViewerState {
             vm,
             dispatcher,
             ui_renderer,
+            input_manager: crate::input::InputManager::new(),
+            screen_fade_color: [0.0, 0.0, 0.0, 1.0],
+            screen_fade_alpha: if matches!(target, ViewerTarget::NewGame) { 1.0 } else { 0.0 },
         };
 
         state.setup_scripts_for_cell();
+
+        if matches!(target, ViewerTarget::NewGame) {
+            println!("============================================================");
+            println!("★ 実機ニューゲームシーケンス開始: CG00 (FormID: 0x0001F388)");
+            println!("============================================================");
+
+            // 1. 実機オープニングムービー (Fallout INTRO Vsk.bik) のフルスクリーン再生
+            let intro_bik = Path::new(data_dir).join("Video").join("Fallout INTRO Vsk.bik");
+            if intro_bik.exists() {
+                crate::action::play_bink_video(&intro_bik.to_string_lossy());
+            }
+
+            // 2. CG00 クエスト Stage 0 開始
+            let cg00_id = fo3_esm::types::FormId(0x0001F388);
+            state.vm.set_stage(cg00_id, 0);
+        }
+
         state
     }
 
@@ -364,7 +384,63 @@ impl ViewerState {
     }
 
     pub fn update(&mut self) {
+        self.input_manager.update_frame();
         let dt = self.controller.update();
+
+        // 0. スクリプトからの動画再生要求の消化
+        while !self.vm.play_bink_queue.is_empty() {
+            let bink_file = self.vm.play_bink_queue.remove(0);
+            crate::action::play_bink_video(&bink_file);
+        }
+
+        // 0.1 スクリプトからのテレポート移動要求 (MoveTo) の消化
+        while !self.vm.teleport_requests.is_empty() {
+            let (subject, marker) = self.vm.teleport_requests.remove(0);
+            let marker_data = match marker.to_ascii_lowercase().as_str() {
+                "cg00playerstartmarker" => Some((
+                    glam::Vec3::new(-5275.8867, -7148.175, 7542.536),
+                    glam::Vec3::new(0.0, 0.0, std::f32::consts::PI),
+                )),
+                "cg00dadstartmarker" => Some((
+                    glam::Vec3::new(-5360.3623, -7332.082, 7542.536),
+                    glam::Vec3::new(0.0, 0.0, 6.19592),
+                )),
+                "cg00doctorlistartmarker" => Some((
+                    glam::Vec3::new(-5286.7715, -7202.23, 7542.536),
+                    glam::Vec3::new(0.0, 0.0, 0.20673425),
+                )),
+                "cg00momstartmarker" => Some((
+                    glam::Vec3::new(-5220.8076, -7153.035, 7542.536),
+                    glam::Vec3::new(0.0, 0.0, 3.1336458),
+                )),
+                _ => None,
+            };
+
+            if let Some((pos, rot)) = marker_data {
+                if subject.is_none() || subject == Some(FormId(0x00000014)) {
+                    println!("[MoveTo] プレイヤーをマーカー \"{}\" へ配置: {:?}", marker, pos);
+                    self.controller.character_controller.position = pos + glam::Vec3::new(0.0, 0.0, 32.0);
+                    self.controller.player_camera.current_eye = pos + glam::Vec3::new(0.0, 0.0, 22.0);
+                    self.controller.player_camera.yaw = -2.15;
+                    self.controller.player_camera.pitch = 0.52;
+                    self.controller.camera.yaw = -2.15;
+                    self.controller.camera.pitch = 0.52;
+                } else if let Some(sub_id) = subject {
+                    println!("[MoveTo] アクター 0x{:08X} をマーカー \"{}\" へ移動: {:?}", sub_id.0, marker, pos);
+                    for actor in &mut self.scene.actors {
+                        if actor.form_id == sub_id.0 {
+                            actor.world_transform.translation = pos;
+                            actor.world_transform.rotation = glam::Mat3::from_rotation_z(rot.z);
+                        }
+                    }
+                    for interactable in &mut self.interactables {
+                        if interactable.form_id == sub_id.0 {
+                            interactable.position = pos;
+                        }
+                    }
+                }
+            }
+        }
 
         // 開閉アニメーションの進行および物理剛体・GPUメッシュの追従更新
         // 参照元: Gamebryo 2.6 `bhkRigidBody` (MO_SYS_KEYFRAMED) 追従
@@ -458,6 +534,48 @@ impl ViewerState {
         // 単体 Anim / Actor モード時のスキニング・アニメーション更新
         self.anim.update(dt, &self.device, &self.queue, &mut self.scene);
 
+        // 全 NPC アクターのアニメーション・ボーン姿勢・メッシュ更新
+        for actor in &mut self.scene.actors {
+            actor.update(dt, &self.device, &self.queue, &mut self.scene.meshes);
+        }
+
+        // CG00 出産シーケンス (Chargen 拘束中) の赤ちゃん仰向け視点
+        let cg00_id = fo3_esm::types::FormId(0x0001F388);
+        let cg00_stage = self.vm.get_stage(cg00_id);
+        if cg00_stage > 0 && cg00_stage < 15 && !self.vm.player_controls_enabled {
+            let baby_eye = glam::Vec3::new(-5275.8867, -7148.175, 7542.536 + 22.0);
+            self.controller.player_camera.current_eye = baby_eye;
+            self.controller.player_camera.yaw = -2.15;
+            self.controller.player_camera.pitch = 0.52;
+            self.controller.camera.override_eye = Some(baby_eye);
+            self.controller.camera.yaw = -2.15;
+            self.controller.camera.pitch = 0.52;
+        }
+
+        // ゲーム内スクリプトイベントの毎フレームディスパッチ (GameMode ループ)
+        self.vm.delta_time = dt;
+        self.dispatcher.push_event(fo3_script::GameEvent::GameMode);
+        let _ = self.dispatcher.process_queue(&mut self.vm);
+
+        // 画面エフェクト (暗転・ホワイトアウト・徐々に視界が開ける演出)
+        // 参照元: GECK `imod CG00BlackScreenISFX`, `imod CG00BirthISFX`
+        if self.vm.active_imods.iter().any(|m| m.eq_ignore_ascii_case("CG00BirthISFX") || m.eq_ignore_ascii_case("CG00BirthBaseISFX")) {
+            self.screen_fade_color = [1.0, 1.0, 1.0, 1.0];
+            if self.screen_fade_alpha > 0.0 {
+                self.screen_fade_alpha = (self.screen_fade_alpha - dt * 0.2).max(0.0);
+            }
+        } else if self.vm.active_imods.iter().any(|m| m.eq_ignore_ascii_case("CG00BlackScreenISFX")) {
+            self.screen_fade_color = [0.0, 0.0, 0.0, 1.0];
+            self.screen_fade_alpha = 1.0;
+        } else if self.screen_fade_alpha > 0.0 {
+            self.screen_fade_alpha = (self.screen_fade_alpha - dt * 1.0).max(0.0);
+        }
+
+        // クエスト通知の出力
+        for notif in self.vm.quest_manager.notifications.drain(..) {
+            println!("[HUD通知] {}", notif);
+        }
+
         // プレイヤー正面の視線レイキャスト & オブジェクト検知
         // 参照元: Gamebryo 2.6 NiPick, FO3 実機インタラクト判定 (GMST fActivatePickLength = 180.0)
         let eye = self.controller.camera.eye_position();
@@ -529,13 +647,33 @@ impl ViewerState {
 
             // Fallout 3 実機 HUD / UI オーバーレイ描画
             let elapsed = self.start_time.elapsed().as_secs_f32();
-            if matches!(self.mode, ViewerMode::Exploring) {
+            if matches!(self.mode, ViewerMode::Exploring) && self.screen_fade_alpha < 0.99 {
                 self.hud.render_crosshair(
                     &mut render_pass,
                     &self.queue,
                     self.size.width as f32,
                     self.size.height as f32,
                     elapsed,
+                );
+            }
+
+            // 全画面フェードエフェクト (暗転・ホワイトアウト・視界開放)
+            if self.screen_fade_alpha > 0.001 {
+                self.hud.render_rect(
+                    &mut render_pass,
+                    &self.queue,
+                    0.0,
+                    0.0,
+                    self.size.width as f32,
+                    self.size.height as f32,
+                    [
+                        self.screen_fade_color[0],
+                        self.screen_fade_color[1],
+                        self.screen_fade_color[2],
+                        self.screen_fade_alpha,
+                    ],
+                    self.size.width as f32,
+                    self.size.height as f32,
                 );
             }
         }
@@ -628,6 +766,9 @@ impl ApplicationHandler for App {
                 ..
             } => {
                 let pressed = btn_state == ElementState::Pressed;
+                if pressed && button == MouseButton::Left && state.mode.is_ui_active() {
+                    let _ = state.mode.handle_key_with_vm(winit::keyboard::KeyCode::Space, &mut state.vm);
+                }
                 match button {
                     MouseButton::Left => state.controller.left_mouse_down = pressed,
                     MouseButton::Right => state.controller.right_mouse_down = pressed,
@@ -644,7 +785,7 @@ impl ApplicationHandler for App {
                     let dy = (position.y - last_y) as f32;
 
                     match state.controller.camera_mode {
-                        CameraMode::Orbit => {
+                        CameraMode::FreeOrbit => {
                             if state.controller.left_mouse_down {
                                 state.controller.camera.rotate(dx, dy);
                                 state.window.request_redraw();
@@ -653,7 +794,7 @@ impl ApplicationHandler for App {
                                 state.window.request_redraw();
                             }
                         }
-                        CameraMode::Walkthrough => {
+                        CameraMode::Standard => {
                             if state.controller.left_mouse_down || state.controller.right_mouse_down {
                                 state.controller.player_camera.rotate(dx * 0.003, dy * 0.003);
                                 state.window.request_redraw();
@@ -668,7 +809,7 @@ impl ApplicationHandler for App {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(pos) => pos.y as f32 * 0.05,
                 };
-                if state.controller.camera_mode == CameraMode::Walkthrough {
+                if state.controller.camera_mode == CameraMode::Standard {
                     state.controller.player_camera.zoom(zoom_amount);
                     if let Some(ref mut player) = state.controller.player_actor {
                         player.set_view_mode(state.controller.player_camera.mode, &mut state.scene.meshes);
@@ -688,86 +829,80 @@ impl ApplicationHandler for App {
                         }
                     }
 
-                    match key {
-                        KeyCode::KeyW => state.controller.key_forward = pressed,
-                        KeyCode::KeyS => state.controller.key_backward = pressed,
-                        KeyCode::KeyA => state.controller.key_left = pressed,
-                        KeyCode::KeyD => state.controller.key_right = pressed,
-                        KeyCode::Space => state.controller.key_jump = pressed,
-                        KeyCode::ShiftLeft | KeyCode::ShiftRight => state.controller.key_run = !pressed,
-                        _ => {}
-                    }
+                    // キーマネージャーの押下状態更新
+                    state.input_manager.handle_key_event(key, pressed);
+
+                    // キャラクタ移動・姿勢入力の同期 (Fallout 3 実機標準操作)
+                    state.controller.key_forward = state.input_manager.is_action_down(crate::input::GameAction::Forward);
+                    state.controller.key_backward = state.input_manager.is_action_down(crate::input::GameAction::Backward);
+                    state.controller.key_left = state.input_manager.is_action_down(crate::input::GameAction::StrafeLeft);
+                    state.controller.key_right = state.input_manager.is_action_down(crate::input::GameAction::StrafeRight);
+                    state.controller.key_jump = state.input_manager.is_action_down(crate::input::GameAction::Jump);
+                    state.controller.key_sneak = state.input_manager.is_action_down(crate::input::GameAction::Sneak);
+                    state.controller.key_run = !state.input_manager.is_action_down(crate::input::GameAction::Run);
 
                     if pressed {
-                        match key {
-                            KeyCode::Tab | KeyCode::KeyM => {
-                                state.controller.camera_mode = match state.controller.camera_mode {
-                                    CameraMode::Orbit => {
-                                        println!("\n[カメラモード] FPS ウォークスルー歩行モード (物理演算 & KCC 有効) に切り替えました。");
-                                        println!("  WASD: 移動, Space: ジャンプ, マウスドラッグ: 視線変更, Tab/M: オービット復帰");
-                                        state.controller.character_controller.position =
-                                            state.controller.initial_spawn_point;
-                                        state.controller.vertical_velocity = 0.0;
-                                        CameraMode::Walkthrough
-                                    }
-                                    CameraMode::Walkthrough => {
-                                        println!("\n[カメラモード] オービットカメラ (全体周回) に切り替えました。");
-                                        state.controller.camera.target = state.controller.character_controller.position;
-                                        CameraMode::Orbit
-                                    }
-                                };
-                                state.window.request_redraw();
-                            }
-                            KeyCode::KeyR => {
-                                state
-                                    .controller
-                                    .camera
-                                    .focus(state.scene.bounds_center, state.scene.bounds_radius);
-                                state.controller.character_controller.position =
-                                    state.scene.bounds_center + glam::Vec3::new(0.0, 0.0, 64.0);
-                                state.controller.vertical_velocity = 0.0;
-                                state.window.request_redraw();
-                            }
-                            KeyCode::KeyE => {
-                                state.interact_or_teleport();
-                                state.window.request_redraw();
-                            }
-                            KeyCode::KeyV => {
-                                state.controller.player_camera.toggle_view_mode();
-                                if let Some(ref mut player) = state.controller.player_actor {
-                                    player.set_view_mode(state.controller.player_camera.mode, &mut state.scene.meshes);
+                        if let Some(action) = state.input_manager.get_action(key) {
+                            match action {
+                                crate::input::InputCommand::Game(crate::input::GameAction::Activate) => {
+                                    state.interact_or_teleport();
                                 }
-                                println!("[視点切替] 現在の視点モード: {:?}", state.controller.player_camera.mode);
-                                state.window.request_redraw();
+                                crate::input::InputCommand::Game(crate::input::GameAction::TogglePOV) => {
+                                    state.controller.player_camera.toggle_view_mode();
+                                    if let Some(ref mut player) = state.controller.player_actor {
+                                        player.set_view_mode(state.controller.player_camera.mode, &mut state.scene.meshes);
+                                    }
+                                    println!("[視点切替] 現在の視点モード: {:?}", state.controller.player_camera.mode);
+                                }
+                                crate::input::InputCommand::Game(crate::input::GameAction::PipBoy) => {
+                                    if state.mode.is_ui_active() {
+                                        state.mode = ViewerMode::Exploring;
+                                    } else {
+                                        println!("[Pip-Boy] メニュー (Tab)");
+                                    }
+                                }
+                                crate::input::InputCommand::Debug(crate::input::DebugAction::Help) => {
+                                    println!("{}", state.input_manager.get_guide_text());
+                                }
+                                crate::input::InputCommand::Debug(crate::input::DebugAction::ToggleCollision) => {
+                                    state.show_collision = !state.show_collision;
+                                    println!("Havok コリジョン表示 [F2]: {}", if state.show_collision { "ON" } else { "OFF" });
+                                }
+                                crate::input::InputCommand::Debug(crate::input::DebugAction::ToggleFog) => {
+                                    state.enable_fog = !state.enable_fog;
+                                    println!("セル環境フォグ [F3]: {}", if state.enable_fog { "ON" } else { "OFF" });
+                                }
+                                crate::input::InputCommand::Debug(crate::input::DebugAction::ToggleHeadlight) => {
+                                    state.headlight = !state.headlight;
+                                    println!("ビューア補助ヘッドライト [F4]: {}", if state.headlight { "ON" } else { "OFF" });
+                                }
+                                crate::input::InputCommand::Debug(crate::input::DebugAction::ResetCamera) => {
+                                    state.controller.camera.focus(state.scene.bounds_center, state.scene.bounds_radius);
+                                    state.controller.character_controller.position = state.scene.bounds_center + glam::Vec3::new(0.0, 0.0, 64.0);
+                                    state.controller.vertical_velocity = 0.0;
+                                    println!("カメラ・スポーン位置再フォーカス [F7]");
+                                }
+                                crate::input::InputCommand::Debug(crate::input::DebugAction::ToggleFreeOrbit) => {
+                                    state.controller.camera_mode = match state.controller.camera_mode {
+                                        CameraMode::Standard => {
+                                            println!("\n[カメラモード] F12: フリーオービットカメラ (全体俯瞰・回転周回) に切り替えました。");
+                                            println!("  左ドラッグ: 回転, 右ドラッグ: 平行移動, ホイール: ズーム, F12: 実機カメラへ復帰");
+                                            state.controller.camera.target = state.controller.character_controller.position;
+                                            CameraMode::FreeOrbit
+                                        }
+                                        CameraMode::FreeOrbit => {
+                                            println!("\n[カメラモード] F12: Fallout 3 実機標準プレイヤーカメラに復帰しました。");
+                                            println!("  WASD: 移動, Space: ジャンプ, Ctrl: しゃがみ, E: 調べる, F/V: 視点切替");
+                                            state.controller.character_controller.position = state.controller.initial_spawn_point;
+                                            state.controller.vertical_velocity = 0.0;
+                                            CameraMode::Standard
+                                        }
+                                    };
+                                }
+                                _ => {}
                             }
-                            KeyCode::KeyC => {
-                                state.show_collision = !state.show_collision;
-                                println!(
-                                    "Havok コリジョンワイヤーフレーム表示: {}",
-                                    if state.show_collision { "ON" } else { "OFF" }
-                                );
-                                state.window.request_redraw();
-                            }
-                            KeyCode::KeyF => {
-                                state.enable_fog = !state.enable_fog;
-                                println!(
-                                    "セル環境フォグ表示: {}",
-                                    if state.enable_fog { "ON" } else { "OFF" }
-                                );
-                                state.window.request_redraw();
-                            }
-                            KeyCode::KeyL => {
-                                state.headlight = !state.headlight;
-                                println!(
-                                    "ビューア補助ヘッドライト: {}",
-                                    if state.headlight { "ON" } else { "OFF" }
-                                );
-                                state.window.request_redraw();
-                            }
-                            KeyCode::Escape => {
-                                event_loop.exit();
-                            }
-                            _ => {}
+                        } else if key == KeyCode::Escape {
+                            event_loop.exit();
                         }
                     }
                 }
@@ -818,11 +953,13 @@ fn initialize_master_context(data_dir: &str) -> EsmMasterContext {
         match EsmMasterContext::open_and_load(&esm_path) {
             Ok(ctx) => {
                 println!(
-                    "マスター定義ロード完了: 3Dモデル {} 件, アクター {} 件, 防具 {} 件, 光源 {} 件",
+                    "マスター定義ロード完了: 3Dモデル {} 件, アクター {} 件, 防具 {} 件, 光源 {} 件, クエスト {} 件, スクリプト {} 件",
                     ctx.model_map.len(),
                     ctx.npc_map.len(),
                     ctx.armor_map.len(),
-                    ctx.light_map.len()
+                    ctx.light_map.len(),
+                    ctx.quest_map.len(),
+                    ctx.script_map.len()
                 );
                 ctx
             }

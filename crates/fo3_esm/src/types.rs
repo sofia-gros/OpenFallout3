@@ -84,8 +84,13 @@ pub const REC_LVLI: FourCC = FourCC(*b"LVLI");
 pub const REC_DIAL: FourCC = FourCC(*b"DIAL");
 pub const REC_INFO: FourCC = FourCC(*b"INFO");
 pub const REC_QUST: FourCC = FourCC(*b"QUST");
+pub const REC_PACK: FourCC = FourCC(*b"PACK");
 
 pub const SUB_EDID: FourCC = FourCC(*b"EDID");
+pub const SUB_PKDT: FourCC = FourCC(*b"PKDT");
+pub const SUB_PLDT: FourCC = FourCC(*b"PLDT");
+pub const SUB_PTDT: FourCC = FourCC(*b"PTDT");
+pub const SUB_PSDT: FourCC = FourCC(*b"PSDT");
 pub const SUB_LVLO: FourCC = FourCC(*b"LVLO");
 pub const SUB_LVLD: FourCC = FourCC(*b"LVLD");
 pub const SUB_LVLF: FourCC = FourCC(*b"LVLF");

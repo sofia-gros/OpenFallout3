@@ -13,13 +13,13 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use crate::header::{GroupHeader, RecordHeader};
 use crate::records::{
     ArmorRecord, HairRecord, LightRecord, LtexRecord, LvliRecord, NpcRecord, OtftRecord,
-    QuestRecord, ScptRecord, StatRecord, Tes4Header, TextureSetRecord,
+    PackRecord, QuestRecord, ScptRecord, StatRecord, Tes4Header, TextureSetRecord,
 };
 use crate::subrecord::{parse_subrecords, Subrecord};
 use crate::types::{
     FormId, FourCC, REC_ACTI, REC_ALCH, REC_AMMO, REC_ARMO, REC_BOOK,
     REC_CONT, REC_DOOR, REC_FURN, REC_HAIR, REC_KEYM, REC_LIGH, REC_LTEX, REC_LVLI, REC_MISC,
-    REC_MSTT, REC_NPC_, REC_OTFT, REC_QUST, REC_SCOL, REC_SCPT, REC_STAT, REC_TERM, REC_TES4, REC_TXST,
+    REC_MSTT, REC_NPC_, REC_OTFT, REC_PACK, REC_QUST, REC_SCOL, REC_SCPT, REC_STAT, REC_TERM, REC_TES4, REC_TXST,
     REC_WEAP, SUB_EDID, SUB_MODL, SUB_SCRI,
 };
 
@@ -628,5 +628,49 @@ impl<R: Read + Seek> EsmReader<R> {
         }
 
         Ok(quests)
+    }
+
+    /// 全ての AI パッケージレコード (PACK) を一括走査して FormID -> PackRecord マップを構築する。
+    pub fn read_all_packages_map(&mut self) -> io::Result<HashMap<FormId, PackRecord>> {
+        let mut packages = HashMap::new();
+        let start_pos = 24 + self.header_record.data_size as u64;
+        self.reader.seek(SeekFrom::Start(start_pos))?;
+
+        while let Some(entry) = self.read_next_entry()? {
+            match entry {
+                EsmEntry::Group(group) => {
+                    if group.target_record_type() == Some(REC_PACK) {
+                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        while self.reader.stream_position()? < group_end {
+                            if let Some(inner) = self.read_next_entry()? {
+                                match inner {
+                                    EsmEntry::Record(header, subs) => {
+                                        if header.type_id == REC_PACK {
+                                            if let Ok(pack) = PackRecord::parse(header.form_id, header.flags, &subs) {
+                                                packages.insert(header.form_id, pack);
+                                            }
+                                        }
+                                    }
+                                    EsmEntry::Group(child_group) => {
+                                        let skip = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        self.skip(skip)?;
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+                    let remaining = group.group_size as u64 - GroupHeader::SIZE as u64;
+                    self.skip(remaining)?;
+                }
+                EsmEntry::Record(rec, _) => {
+                    self.skip(rec.data_size as u64)?;
+                }
+            }
+        }
+
+        Ok(packages)
     }
 }

@@ -38,13 +38,16 @@ pub mod functions {
     /// 同一セル存在判定 (`GetInSameCell [Target]`)
     pub const FN_GET_IN_SAME_CELL: u16 = 0x0038;
     /// 対象 Base FormID 判定 (`GetIsID [BaseFormID]`)
-    pub const FN_GET_IS_ID: u16 = 0x0046;
+    /// 参照元: `references/openmw/components/esm4/script.hpp:114` (FUN_GetIsID = 72 = 0x0048)
+    pub const FN_GET_IS_ID: u16 = 0x0048;
     /// クエスト実行中判定 (`GetQuestRunning [QuestFormID]`)
-    pub const FN_GET_QUEST_RUNNING: u16 = 0x0047;
+    /// 参照元: `references/openmw/components/esm4/script.hpp:99` (FUN_GetQuestRunning = 56 = 0x0038)
+    pub const FN_GET_QUEST_RUNNING: u16 = 0x0038;
     /// クエストステージ取得 (`GetStage <QuestID>`)
-    pub const FN_GET_STAGE: u16 = 0x0048;
+    /// 参照元: `references/openmw/components/esm4/script.hpp:100` (FUN_GetStage = 58 = 0x003A)
+    pub const FN_GET_STAGE: u16 = 0x003A;
     /// クエストステージ到達判定 (`GetStageDone <QuestID> <Stage>`)
-    /// 参照元: `references/openmw/components/esm4/script.hpp:101`
+    /// 参照元: `references/openmw/components/esm4/script.hpp:101` (FUN_GetStageDone = 59 = 0x003B)
     pub const FN_GET_STAGE_DONE: u16 = 0x003B;
     /// クエストステージ設定 (`SetStage [QuestFormID] [Stage]`)
     pub const FN_SET_STAGE: u16 = 0x0049;

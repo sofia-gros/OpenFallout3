@@ -157,7 +157,6 @@ impl QuestRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::FourCC;
 
     #[test]
     fn test_parse_quest_record() {

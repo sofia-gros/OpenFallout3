@@ -10,19 +10,68 @@ use fo3_esm::{FormId, QuestRecord};
 #[derive(Debug, Clone, Default)]
 pub struct QuestManager {
     /// 各クエストの現在アクティブなステージ番号 (未開始は 0)
-    current_stages: HashMap<FormId, u16>,
+    pub current_stages: HashMap<FormId, u16>,
     /// 到達済みのステージ履歴 (GetStageDone 用)
     stage_history: HashMap<FormId, HashSet<u16>>,
     /// 各クエストの目標表示状態 ((QuestFormId, ObjectiveIndex) -> Displayed)
     objectives_displayed: HashMap<(FormId, u32), bool>,
     /// クエスト固有のスクリプト変数 (QuestFormId -> VarName -> Value)
     quest_variables: HashMap<FormId, HashMap<String, f64>>,
+    /// 実機 ESM からロードされたクエスト定義レコード群 (FormId -> QuestRecord)
+    pub quests: HashMap<FormId, QuestRecord>,
+    /// EditorID (大文字) -> Quest FormID 逆引きマップ
+    pub edid_map: HashMap<String, FormId>,
+    /// HUD / UI 表示用通知キュー
+    pub notifications: Vec<String>,
 }
 
 impl QuestManager {
     /// 新しい QuestManager を生成する。
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// マスター ESM からロードされた全クエスト定義を一括登録する。
+    pub fn register_all_quests(&mut self, quests: HashMap<FormId, QuestRecord>, edid_map: HashMap<String, FormId>) {
+        self.quests = quests;
+        self.edid_map = edid_map;
+    }
+
+    /// 単一のクエスト定義レコードを登録する。
+    pub fn register_quest(&mut self, record: QuestRecord) {
+        if !record.editor_id.is_empty() {
+            self.edid_map.insert(record.editor_id.to_ascii_uppercase(), record.form_id);
+        }
+        self.quests.insert(record.form_id, record);
+    }
+
+    /// クエスト FormID または EditorID から FormId を解決する。
+    pub fn resolve_quest_id(&self, identifier: &str) -> Option<FormId> {
+        let trimmed = identifier.trim();
+        if let Some(stripped) = trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
+            if let Ok(val) = u32::from_str_radix(stripped, 16) {
+                return Some(FormId(val));
+            }
+        }
+        if let Ok(val) = trimmed.parse::<u32>() {
+            return Some(FormId(val));
+        }
+        self.edid_map.get(&trimmed.to_ascii_uppercase()).copied()
+    }
+
+    /// クエスト定義レコードを取得する。
+    pub fn get_quest(&self, quest: FormId) -> Option<&QuestRecord> {
+        self.quests.get(&quest)
+    }
+
+    /// 指定クエストの目標テキスト (NNAM) を取得する。
+    pub fn get_objective_text(&self, quest: FormId, objective: u32) -> Option<&str> {
+        self.quests.get(&quest).and_then(|q| {
+            q.objectives
+                .iter()
+                .find(|o| o.index == objective)
+                .map(|o| o.text.as_str())
+        })
     }
 
     /// クエストの現在ステージ番号を取得する。未開始の場合は 0 を返す。
@@ -49,7 +98,7 @@ impl QuestManager {
     }
 
     /// クエストのステージを更新し、履歴へ登録する。
-    /// ステージに紐づく Result Script ソースコードが存在する場合はそれを返す。
+    /// 実機レコードにステージ Result Script (SCTX) が定義されている場合はそれを抽出して返す。
     /// 参照元: GECK `SetStage <QuestID> <Stage>`
     pub fn set_stage(
         &mut self,
@@ -64,7 +113,10 @@ impl QuestManager {
             .or_default()
             .insert(stage);
 
-        let quest_name = record
+        // 引数 record が None の場合、内部保持している実機 QuestRecord から自動解決
+        let effective_record = record.or_else(|| self.quests.get(&quest));
+
+        let quest_name = effective_record
             .map(|r| {
                 if !r.name.is_empty() {
                     r.name.as_str()
@@ -79,13 +131,19 @@ impl QuestManager {
             quest_name, quest.0, prev_stage, stage
         );
 
+        // クエスト新規開始時の通知
+        if prev_stage == 0 && stage > 0 {
+            let notif = format!("[Quest Started] {}", quest_name);
+            self.notifications.push(notif);
+        }
+
         // ステージに紐づく Result Script を抽出
-        if let Some(r) = record {
+        if let Some(r) = effective_record {
             for st in &r.stages {
                 if st.index == stage {
                     if let Some(ref script) = st.script_source {
                         println!(
-                            "  - ステージ {} Result Script 実行準備: \"{}\"",
+                            "  - ステージ {} Result Script 自動実行: \"{}\"",
                             stage,
                             script.trim()
                         );
@@ -102,10 +160,16 @@ impl QuestManager {
     /// 参照元: GECK `SetObjectiveDisplayed <QuestID> <ObjectiveIndex> <Flag>`
     pub fn set_objective_displayed(&mut self, quest: FormId, objective: u32, displayed: bool) {
         self.objectives_displayed.insert((quest, objective), displayed);
+        let obj_text = self.get_objective_text(quest, objective).unwrap_or("");
         println!(
-            "[QuestManager] クエスト 0x{:08X} 目標 {} 表示設定: {}",
-            quest.0, objective, displayed
+            "[QuestManager] クエスト 0x{:08X} 目標 {} (\"{}\") 表示設定: {}",
+            quest.0, objective, obj_text, displayed
         );
+
+        if displayed && !obj_text.is_empty() {
+            let notif = format!("[Objective Added] {}", obj_text);
+            self.notifications.push(notif);
+        }
     }
 
     /// クエスト目標が表示中かどうかを取得する。
@@ -167,10 +231,17 @@ mod tests {
         assert_eq!(qm.get_stage(q_id), 10);
         assert!(qm.get_stage_done(q_id, 10));
 
-        qm.set_stage(q_id, 20, Some(&record));
+        // クエスト事前登録による record=None 時の自動解決テスト
+        qm.register_quest(record);
+        let script20 = qm.set_stage(q_id, 20, None);
+        assert_eq!(script20, None);
         assert_eq!(qm.get_stage(q_id), 20);
         assert!(qm.get_stage_done(q_id, 10));
         assert!(qm.get_stage_done(q_id, 20));
+
+        // 通知キューの検証 ([Quest Started] Following in His Footsteps)
+        assert_eq!(qm.notifications.len(), 1);
+        assert_eq!(qm.notifications[0], "[Quest Started] Following in His Footsteps");
 
         // 目標テスト
         qm.set_objective_displayed(q_id, 10, true);

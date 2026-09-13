@@ -20,6 +20,10 @@ pub mod dial;
 pub mod scpt;
 pub mod glob;
 pub mod quest;
+pub mod pack;
+pub mod items;
+pub mod equipment;
+pub mod misc_items;
 
 pub use tes4::Tes4Header;
 pub use stat::StatRecord;
@@ -40,6 +44,10 @@ pub use term::{TermMenuItem, TermRecord};
 pub use dial::{info_flags, DialRecord, InfoRecord, TargetCondition};
 pub use scpt::{ScptRecord, ScriptHeader, ScriptLocalVar, ScriptType};
 pub use glob::GlobRecord;
+pub use items::{ActiRecord, ContRecord, DoorRecord, FurnRecord, GmstRecord, GmstValue, MiscRecord};
+pub use equipment::{AmmoRecord, WeapRecord};
+pub use misc_items::{AlchRecord, BookRecord, KeymRecord};
+pub use pack::{PackLocation, PackRecord, PackSchedule, PackTarget, PackType};
 
 
 

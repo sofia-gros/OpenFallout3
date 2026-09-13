@@ -179,6 +179,13 @@ impl EventDispatcher {
         Ok(instance.suppress_activate || !instance.trigger_default_activate)
     }
 
+    /// マスター ESM の全スクリプトレコードを一括登録する。
+    pub fn register_all_scripts(&mut self, scripts: &HashMap<FormId, ScptRecord>) {
+        for scpt in scripts.values() {
+            self.register_script(scpt.clone());
+        }
+    }
+
     /// キュー内のイベントをすべて順次ディスパッチする。
     pub fn process_queue(&mut self, vm: &mut ScriptVm) -> Result<(), ScriptError> {
         while let Some(event) = self.event_queue.pop_front() {
@@ -186,8 +193,53 @@ impl EventDispatcher {
                 GameEvent::OnActivate { target, actor } => {
                     self.dispatch_activate(target, actor, vm)?;
                 }
+                GameEvent::GameMode => {
+                    // 1. 各アタッチインスタンスの GameMode ブロックを実行
+                    let instance_keys: Vec<FormId> = self.instances.keys().copied().collect();
+                    for target in instance_keys {
+                        if let Some(instance) = self.instances.get_mut(&target) {
+                            let script_id = instance.script_form_id;
+                            if let Some(blocks) = self.parsed_blocks.get(&script_id) {
+                                let gm_blocks: Vec<ScriptBlock> = blocks
+                                    .iter()
+                                    .filter(|b| b.event_type == ScriptEventType::GameMode)
+                                    .cloned()
+                                    .collect();
+                                vm.locals = instance.local_vars.clone();
+                                for block in gm_blocks {
+                                    let _ = vm.execute_block(&block.lines, Some(target));
+                                }
+                                instance.local_vars = vm.locals.clone();
+                            }
+                        }
+                    }
+
+                    // 2. アクティブなクエストスクリプトの GameMode ブロックを実行
+                    let active_quests: Vec<(FormId, FormId)> = vm
+                        .quest_manager
+                        .quests
+                        .iter()
+                        .filter_map(|(&q_id, quest)| {
+                            if vm.quest_manager.current_stages.contains_key(&q_id) {
+                                quest.script_form_id.map(|s_id| (q_id, s_id))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    for (q_id, script_id) in active_quests {
+                        if let Some(blocks) = self.parsed_blocks.get(&script_id) {
+                            for block in blocks {
+                                if block.event_type == ScriptEventType::GameMode {
+                                    let _ = vm.execute_block(&block.lines, Some(q_id));
+                                }
+                            }
+                        }
+                    }
+                }
                 _ => {
-                    // その他のイベント種別（OnAdd, GameMode 等）の処理
+                    // その他のイベント種別（OnAdd 等）
                 }
             }
         }

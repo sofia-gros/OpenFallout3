@@ -58,9 +58,10 @@ impl ViewerMode {
                         state.select_down();
                         true
                     }
-                    KeyCode::KeyE | KeyCode::Enter => {
-                        if state.confirm_selection_with_vm(vm) {
+                    KeyCode::KeyE | KeyCode::Enter | KeyCode::Space => {
+                        if state.advance_with_vm(vm) {
                             *self = ViewerMode::Exploring;
+                            println!("[会話UI] 会話を終了しました。");
                         }
                         true
                     }

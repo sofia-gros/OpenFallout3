@@ -8,6 +8,7 @@ mod app;
 mod camera;
 mod controller;
 mod hud;
+pub mod input;
 mod interact;
 mod interactive_anim;
 mod inventory;
@@ -26,11 +27,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         println!("使用法:");
+        println!("  - 実機ニューゲーム: cargo run -p fo3_viewer -- newgame <DataDir>");
         println!("  - メッシュ単体表示: cargo run -p fo3_viewer -- <DataDir> <RelativeNifPath>");
         println!("  - セル一括表示:     cargo run -p fo3_viewer -- cell <DataDir> <CellEDID>");
         println!("  - ワールド表示:     cargo run -p fo3_viewer -- world <DataDir> <WorldEDID> [GridX] [GridY]");
         println!("  - アニメーション:   cargo run -p fo3_viewer -- anim <DataDir> <RelativeNifPath> <RelativeKfPath>");
         println!("例:");
+        println!("  cargo run -p fo3_viewer -- newgame \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\"");
         println!("  cargo run -p fo3_viewer -- \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" \"meshes\\weapons\\1handpistol\\10mmpistol.nif\"");
         println!("  cargo run -p fo3_viewer -- cell \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" \"Vault101a\"");
         println!("  cargo run -p fo3_viewer -- cell \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" \"Springvale\"");
@@ -41,7 +44,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let (data_dir, target) = if args[1] == "cell" {
+    let (data_dir, target) = if args[1] == "newgame" {
+        (args[2].clone(), ViewerTarget::NewGame)
+    } else if args[1] == "cell" {
         if args.len() < 4 {
             eprintln!("エラー: セル表示モードには <DataDir> と <CellEDID> が必要です。");
             return Ok(());

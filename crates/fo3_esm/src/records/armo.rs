@@ -52,6 +52,8 @@ pub struct ArmorRecord {
     pub female_world_model: String,
     /// 装備スロットフラグ (BMDT / BODT)
     pub armor_flags: u32,
+    /// 全サブレコードをロスレス保持
+    pub unknown_subrecords: Vec<Subrecord>,
 }
 
 impl ArmorRecord {
@@ -114,6 +116,7 @@ impl ArmorRecord {
             female_model,
             female_world_model,
             armor_flags,
+            unknown_subrecords: subrecords.to_vec(),
         })
     }
 

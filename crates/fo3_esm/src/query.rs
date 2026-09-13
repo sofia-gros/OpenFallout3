@@ -639,13 +639,25 @@ impl<R: Read + Seek> EsmReader<R> {
     /// 参照元: `references/openmw/components/esm4/loaddial.hpp`, `loadinfo.hpp`
     pub fn find_npc_dialogue(
         &mut self,
-        npc_form_id: FormId,
+        npc_base_id: FormId,
     ) -> io::Result<(Option<InfoRecord>, Vec<(DialRecord, Vec<InfoRecord>)>)> {
         let start_pos = 24 + self.header_record.data_size as u64;
         self.reader.seek(SeekFrom::Start(start_pos))?;
 
-        let mut greeting_info = None;
+        let mut specific_greeting: Option<InfoRecord> = None;
+        let mut generic_greeting: Option<InfoRecord> = None;
         let mut topics = Vec::new();
+
+        // INFO レコードが該当 NPC に合致するか判定
+        // 参照元: `references/openmw/components/esm4/script.hpp:114` (FUN_GetIsID = 72 = 0x0048)
+        let is_speaker_match = |info: &InfoRecord| -> bool {
+            if info.speaker_npc == Some(npc_base_id) {
+                return true;
+            }
+            info.conditions.iter().any(|c| {
+                c.function_index == 0x0048 && c.param1 == npc_base_id.0 && (c.operator & 0x07) == 0
+            })
+        };
 
         while let Some(entry) = self.read_next_entry()? {
             match entry {
@@ -663,7 +675,7 @@ impl<R: Read + Seek> EsmReader<R> {
                                     EsmEntry::Record(rec_hdr, subs) => {
                                         if rec_hdr.type_id == REC_DIAL {
                                             if let Some(dial) = current_dial.take() {
-                                                if !current_infos.is_empty() || dial.prompt.is_some() {
+                                                if dial.is_topic() && !current_infos.is_empty() {
                                                     topics.push((dial, current_infos));
                                                 }
                                                 current_infos = Vec::new();
@@ -673,20 +685,28 @@ impl<R: Read + Seek> EsmReader<R> {
                                             }
                                         } else if rec_hdr.type_id == REC_INFO {
                                             if let Ok(info) = InfoRecord::parse(&rec_hdr, &subs) {
-                                                let is_match = info.speaker_npc.is_none() || info.speaker_npc == Some(npc_form_id);
-                                                if is_match {
-                                                    if let Some(ref d) = current_dial {
-                                                        if d.edid.eq_ignore_ascii_case("GREETING") && greeting_info.is_none() {
-                                                            greeting_info = Some(info.clone());
+                                                if let Some(ref d) = current_dial {
+                                                    if d.edid.eq_ignore_ascii_case("GREETING") {
+                                                        if is_speaker_match(&info) {
+                                                            if specific_greeting.is_none() {
+                                                                specific_greeting = Some(info.clone());
+                                                            }
+                                                        } else if info.speaker_npc.is_none() && !info.conditions.iter().any(|c| c.function_index == 0x0048) {
+                                                            if generic_greeting.is_none() {
+                                                                generic_greeting = Some(info.clone());
+                                                            }
+                                                        }
+                                                    } else if d.is_topic() {
+                                                        if is_speaker_match(&info) {
+                                                            current_infos.push(info);
                                                         }
                                                     }
-                                                    current_infos.push(info);
                                                 }
                                             }
                                         }
                                     }
                                     EsmEntry::Group(g) => {
-                                        // サブグループ内の INFO レコードを走査
+                                        // Grp_TopicChild (サブグループ) 内の INFO レコードを走査
                                         let sub_size = g.group_size as u64 - GroupHeader::SIZE as u64;
                                         let sub_end = self.reader.stream_position()? + sub_size;
                                         while self.reader.stream_position()? < sub_end {
@@ -694,14 +714,22 @@ impl<R: Read + Seek> EsmReader<R> {
                                                 if let EsmEntry::Record(rec_hdr, subs) = inner_entry {
                                                     if rec_hdr.type_id == REC_INFO {
                                                         if let Ok(info) = InfoRecord::parse(&rec_hdr, &subs) {
-                                                            let is_match = info.speaker_npc.is_none() || info.speaker_npc == Some(npc_form_id);
-                                                            if is_match {
-                                                                if let Some(ref d) = current_dial {
-                                                                    if d.edid.eq_ignore_ascii_case("GREETING") && greeting_info.is_none() {
-                                                                        greeting_info = Some(info.clone());
+                                                            if let Some(ref d) = current_dial {
+                                                                if d.edid.eq_ignore_ascii_case("GREETING") {
+                                                                    if is_speaker_match(&info) {
+                                                                        if specific_greeting.is_none() {
+                                                                            specific_greeting = Some(info.clone());
+                                                                        }
+                                                                    } else if info.speaker_npc.is_none() && !info.conditions.iter().any(|c| c.function_index == 0x0046) {
+                                                                        if generic_greeting.is_none() {
+                                                                            generic_greeting = Some(info.clone());
+                                                                        }
+                                                                    }
+                                                                } else if d.is_topic() {
+                                                                    if is_speaker_match(&info) {
+                                                                        current_infos.push(info);
                                                                     }
                                                                 }
-                                                                current_infos.push(info);
                                                             }
                                                         }
                                                     }
@@ -714,11 +742,13 @@ impl<R: Read + Seek> EsmReader<R> {
                         }
 
                         if let Some(dial) = current_dial {
-                            if !current_infos.is_empty() || dial.prompt.is_some() {
+                            if dial.is_topic() && !current_infos.is_empty() {
                                 topics.push((dial, current_infos));
                             }
                         }
-                        return Ok((greeting_info, topics));
+
+                        let greeting = specific_greeting.or(generic_greeting);
+                        return Ok((greeting, topics));
                     } else {
                         self.skip(group_size)?;
                     }
@@ -729,6 +759,7 @@ impl<R: Read + Seek> EsmReader<R> {
             }
         }
 
-        Ok((greeting_info, topics))
+        let greeting = specific_greeting.or(generic_greeting);
+        Ok((greeting, topics))
     }
 }

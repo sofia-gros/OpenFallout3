@@ -236,15 +236,15 @@ pub fn perform_interact(app: &mut ViewerState) {
             app.interactables.retain(|obj| obj.form_id != focused.form_id);
             app.focused_interactable = None;
         }
-        InteractableKind::Actor { form_id: actor_form_id, is_dead } => {
+        InteractableKind::Actor { form_id: actor_form_id, base_form_id, is_dead } => {
             if *is_dead {
                 println!("  - アクター \"{}\" の所持品を調べます。", focused.name);
                 return;
             }
-            println!("  - アクター \"{}\" (FormID: 0x{:08X}) との会話を開始します...", focused.name, actor_form_id);
+            println!("  - アクター \"{}\" (Base: 0x{:08X}, REFR: 0x{:08X}) との会話を開始します...", focused.name, base_form_id, actor_form_id);
 
             let cond_ctx = ConditionContext {
-                speaker: Some(FormId(*actor_form_id)),
+                speaker: Some(FormId(*base_form_id)),
                 target: Some(FormId(0x00000014)), // Player FormID
                 speaker_pos: focused.position,
                 player_pos: app.controller.camera.target,
@@ -255,7 +255,7 @@ pub fn perform_interact(app: &mut ViewerState) {
 
             let esm_path = std::path::Path::new(&app.data_dir).join("Fallout3.esm");
             if let Ok(mut reader) = fo3_esm::EsmReader::open(&esm_path) {
-                match reader.find_npc_dialogue(FormId(*actor_form_id)) {
+                match reader.find_npc_dialogue(FormId(*base_form_id)) {
                     Ok((greeting_opt, topics)) => {
                         let greeting = greeting_opt
                             .as_ref()
@@ -283,7 +283,39 @@ pub fn perform_interact(app: &mut ViewerState) {
                             })
                             .collect();
 
-                        let dialog_state = DialogState::new(&focused.name, greeting, choices);
+                        let mut dialog_state = DialogState::new(&focused.name, greeting, choices);
+
+                        // VFS から実機 menus/dialog/dialog_menu.xml をロードして MenuRuntime を構築
+                        if let Ok(xml_bytes) = app.vfs.read("menus/dialog/dialog_menu.xml") {
+                            let xml_str = String::from_utf8_lossy(&xml_bytes);
+                            let top_bracket = app.vfs.read("menus/prefabs/top_bracket.xml").ok().map(|b| String::from_utf8_lossy(&b).to_string());
+                            let bottom_bracket = app.vfs.read("menus/prefabs/bottom_bracket.xml").ok().map(|b| String::from_utf8_lossy(&b).to_string());
+                            let list_box = app.vfs.read("menus/prefabs/list_box.xml").ok().map(|b| String::from_utf8_lossy(&b).to_string());
+
+                            let loader = |prefab_name: &str| -> Option<String> {
+                                let clean = prefab_name.to_lowercase();
+                                if clean.contains("top_bracket") {
+                                    top_bracket.clone()
+                                } else if clean.contains("bottom_bracket") {
+                                    bottom_bracket.clone()
+                                } else if clean.contains("list_box") {
+                                    list_box.clone()
+                                } else {
+                                    None
+                                }
+                            };
+                            let parser = fo3_render::MenuXmlParser::new(Some(&loader));
+                            if let Ok(root) = parser.parse(&xml_str) {
+                                let mut runtime = fo3_render::MenuRuntime::new(root);
+                                if let Ok(tai_bytes) = app.vfs.read("textures/interface/interfaceshared.tai") {
+                                    let tai_str = String::from_utf8_lossy(&tai_bytes);
+                                    runtime.atlas = Some(fo3_render::TextureAtlas::parse(&tai_str));
+                                }
+                                dialog_state.menu_runtime = Some(runtime);
+                                println!("  - 実機 Menu XML (menus/dialog/dialog_menu.xml) ランタイム初期化完了");
+                            }
+                        }
+
                         println!("  - 会話UIモードへ遷移: 挨拶「{}」 (有効選択肢: {} 件)", greeting, dialog_state.choices.len());
                         app.mode = ViewerMode::Dialog(dialog_state);
                     }
@@ -317,6 +349,38 @@ pub fn perform_interact(app: &mut ViewerState) {
         }
         InteractableKind::Activator { .. } => {
             println!("  - アクティベーター \"{}\" を作動させました。", focused.name);
+        }
+    }
+}
+
+/// Bink ビデオ (.bik) を全画面再生する。
+/// 参照元: Fallout 3 Gamebryo 2.6 BinkVideo パイプライン, `Video/Fallout INTRO Vsk.bik`
+pub fn play_bink_video(file_path: &str) {
+    let path = std::path::Path::new(file_path);
+    if !path.exists() {
+        eprintln!("[BinkVideo] 指定されたビデオファイルが見つかりません: {:?}", file_path);
+        return;
+    }
+
+    println!("============================================================");
+    println!("★ Bink ムービー全画面再生開始: {:?}", path.file_name().unwrap_or_default());
+    println!("   (再生完了または Esc/q キーでゲーム画面へシームレス復帰)");
+    println!("============================================================");
+
+    let res = std::process::Command::new("ffplay")
+        .arg("-autoexit")
+        .arg("-fs")
+        .arg("-loglevel")
+        .arg("quiet")
+        .arg(file_path)
+        .status();
+
+    match res {
+        Ok(status) => {
+            println!("[BinkVideo] ムービー再生終了: status={:?}", status);
+        }
+        Err(e) => {
+            eprintln!("[BinkVideo] ffplay 起動失敗 (スキップします): {:?}", e);
         }
     }
 }

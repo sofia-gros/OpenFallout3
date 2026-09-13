@@ -15,6 +15,7 @@ use crate::records::npc::NpcRecord;
 use crate::records::otft::OtftRecord;
 use crate::records::hair::HairRecord;
 use crate::records::armo::ArmorRecord;
+use crate::records::pack::PackRecord;
 use crate::records::quest::QuestRecord;
 use crate::records::scpt::ScptRecord;
 use crate::reader::{BaseObjectInfo, EsmReader};
@@ -46,6 +47,8 @@ pub struct EsmMasterContext {
     pub quest_map: HashMap<FormId, QuestRecord>,
     /// EditorID (大文字正規化) から Quest FormID へのインデックス
     pub quest_edid_map: HashMap<String, FormId>,
+    /// FormID から AI パッケージレコードへのマップ (PACK)
+    pub pack_map: HashMap<FormId, PackRecord>,
 }
 
 impl EsmMasterContext {
@@ -64,6 +67,7 @@ impl EsmMasterContext {
         let light_map = reader.read_light_map().unwrap_or_default();
         let script_map = reader.read_all_scripts_map().unwrap_or_default();
         let quest_map = reader.read_all_quests_map().unwrap_or_default();
+        let pack_map = reader.read_all_packages_map().unwrap_or_default();
 
         let mut quest_edid_map = HashMap::new();
         for (form_id, q) in &quest_map {
@@ -83,6 +87,7 @@ impl EsmMasterContext {
             script_map,
             quest_map,
             quest_edid_map,
+            pack_map,
         })
     }
 

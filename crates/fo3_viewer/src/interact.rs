@@ -23,6 +23,7 @@ pub enum InteractableKind {
     /// アクター（`ACHR` / `NPC_` / `CREA`）。
     Actor {
         form_id: u32,
+        base_form_id: u32,
         is_dead: bool,
     },
     /// コンテナ（`CONT`）。
@@ -298,6 +299,7 @@ mod tests {
             radius: 40.0,
             kind: InteractableKind::Actor {
                 form_id: 0x0005,
+                base_form_id: 0x0005,
                 is_dead: false,
             },
         };

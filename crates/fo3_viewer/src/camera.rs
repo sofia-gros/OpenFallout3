@@ -16,6 +16,9 @@ use fo3_render::CameraUniform;
 /// 一人称時のプレイヤー目線高さ (Gamebryo 2.6 GMST: f1stPersonCameraHeight)
 pub const F_1ST_PERSON_CAMERA_HEIGHT: f32 = 124.0;
 
+/// しゃがみ (Sneak) 時のプレイヤー目線高さ (Gamebryo 2.6 GMST: fSneakCameraHeight)
+pub const F_SNEAK_CAMERA_HEIGHT: f32 = 80.0;
+
 /// 三人称追従カメラの最大距離 (Gamebryo 2.6 GMST: fChaseCameraMax)
 pub const F_CHASE_CAMERA_MAX: f32 = 400.0;
 
@@ -76,6 +79,10 @@ pub struct PlayerCamera {
     /// バニティモード時の周回オフセット角 (Yaw, Pitch)
     pub vanity_yaw: f32,
     pub vanity_pitch: f32,
+    /// しゃがみ (Sneak) 状態フラグ
+    pub is_sneaking: bool,
+    /// しゃがみ補間率 (0.0: 直立, 1.0: しゃがみ完了)
+    pub crouch_factor: f32,
 }
 
 impl PlayerCamera {
@@ -93,7 +100,16 @@ impl PlayerCamera {
             z_far: 100000.0,
             vanity_yaw: 0.0,
             vanity_pitch: 0.0,
+            is_sneaking: false,
+            crouch_factor: 0.0,
         }
+    }
+
+    /// しゃがみ状態を設定し、カメラアイレベル遷移を時間補間する。
+    pub fn update_crouch(&mut self, sneaking: bool, dt: f32) {
+        self.is_sneaking = sneaking;
+        let target = if sneaking { 1.0 } else { 0.0 };
+        self.crouch_factor += (target - self.crouch_factor) * (10.0 * dt).min(1.0);
     }
 
     /// マウス移動による視線回転を適用する。
@@ -161,10 +177,13 @@ impl PlayerCamera {
 
     /// カメラの視線注視点 (頭部・目線位置) を取得する。
     /// 引数 `feet_pos` はアクターの足元（地面接地）ワールド座標。
-    /// Gamebryo 2.6 GMST: `f1stPersonCameraHeight` (124.0) を加算して目線位置とする。
+    /// Gamebryo 2.6 GMST: `f1stPersonCameraHeight` (124.0) および `fSneakCameraHeight` (80.0) に基づき
+    /// しゃがみ状態に応じて滑らかにアイレベル高さを補間する。
     #[inline]
     pub fn focal_point(&self, feet_pos: Vec3) -> Vec3 {
-        feet_pos + Vec3::new(0.0, 0.0, F_1ST_PERSON_CAMERA_HEIGHT)
+        let eye_height = F_1ST_PERSON_CAMERA_HEIGHT * (1.0 - self.crouch_factor)
+            + F_SNEAK_CAMERA_HEIGHT * self.crouch_factor;
+        feet_pos + Vec3::new(0.0, 0.0, eye_height)
     }
 
     /// カメラの前方注視単位ベクトルを計算する。

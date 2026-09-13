@@ -27,6 +27,7 @@ pub struct Controller {
     pub key_right: bool,
     pub key_jump: bool,
     pub key_run: bool,
+    pub key_sneak: bool,
     // マウス入力状態
     pub left_mouse_down: bool,
     pub right_mouse_down: bool,
@@ -55,7 +56,7 @@ impl Controller {
         let character_controller = RapierCharacterController::new(spawn_pos);
 
         Self {
-            camera_mode: CameraMode::Orbit,
+            camera_mode: CameraMode::Standard,
             camera,
             player_camera,
             player_actor: None,
@@ -70,6 +71,7 @@ impl Controller {
             key_right: false,
             key_jump: false,
             key_run: true, // Fallout 3 デフォルトは常時Run (ShiftでWalk切替)
+            key_sneak: false,
             left_mouse_down: false,
             right_mouse_down: false,
             last_mouse_pos: None,
@@ -82,8 +84,8 @@ impl Controller {
         let dt = (now - self.last_frame_time).as_secs_f32().clamp(0.001, 0.1);
         self.last_frame_time = now;
 
-        // FPS ウォークスルー歩行モード時の物理シミュレーション
-        if self.camera_mode == CameraMode::Walkthrough {
+        // Fallout 3 実機標準プレイヤーカメラ（物理シミュレーション & KCC）
+        if self.camera_mode == CameraMode::Standard {
             // 水平面上の移動方向（PlayerCamera のヨー角から計算: Z-up 右手系）
             let cam_yaw = self.player_camera.yaw;
             let forward = glam::Vec3::new(cam_yaw.cos(), cam_yaw.sin(), 0.0).normalize();
@@ -106,8 +108,14 @@ impl Controller {
             let is_moving = move_dir.length_squared() > 0.001;
             let normalized_dir = if is_moving { Some(move_dir.normalize()) } else { None };
 
-            // Fallout 3 実機 GMST 移動速度準拠 (Walk: 130.0, Run: 300.0)
-            let move_speed = if self.key_run { 300.0 } else { 130.0 };
+            // Fallout 3 実機 GMST 移動速度準拠 (Sneak: 90.0, Walk: 130.0, Run: 300.0)
+            let move_speed = if self.key_sneak {
+                90.0
+            } else if self.key_run {
+                300.0
+            } else {
+                130.0
+            };
             let horiz_velocity = if let Some(dir) = normalized_dir {
                 dir * move_speed
             } else {
@@ -150,11 +158,13 @@ impl Controller {
                     self.key_right,
                     self.key_run,
                     self.key_jump,
+                    self.key_sneak,
                     self.character_controller.is_grounded,
                 );
             }
 
-            // プレイヤーカメラの更新 (足元接地面基準 & 壁クリッピング回避適用)
+            // プレイヤーカメラの更新 (しゃがみアイレベル補間 & 足元接地面基準 & 壁クリッピング回避適用)
+            self.player_camera.update_crouch(self.key_sneak, dt);
             self.player_camera.update(feet_pos, Some(&self.physics_world));
 
             // OrbitCamera へ視点位置・向きを反映 (レンダリング Uniform 生成用)

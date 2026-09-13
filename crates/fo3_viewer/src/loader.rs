@@ -183,7 +183,7 @@ pub fn load_scene(
                         HashMap::new(),
                     )
                 }
-                ViewerTarget::Cell(..) | ViewerTarget::World(..) => {
+                ViewerTarget::Cell(..) | ViewerTarget::World(..) | ViewerTarget::NewGame => {
                     let esm_path = Path::new(data_dir).join("Fallout3.esm");
                     let mut esm_reader =
                         EsmReader::open(&esm_path).expect("Failed to open Fallout3.esm");
@@ -191,6 +191,12 @@ pub fn load_scene(
                     // セル群の検索
                     let cells: Vec<(CellRecord, Vec<RefrRecord>, Option<LandRecord>)> = match target
                     {
+                        ViewerTarget::NewGame => {
+                            println!("ESM からニューゲーム初期セル \"Vault101d\" を検索中...");
+                            esm_reader.find_cell_and_neighbors("Vault101d", 0)
+                                .expect("find Vault101d")
+                                .unwrap_or_default()
+                        }
                         ViewerTarget::Cell(cell_edid) => {
                             println!("ESM からセル \"{}\" および近傍セルを検索中...", cell_edid);
                             esm_reader
@@ -259,6 +265,7 @@ pub fn load_scene(
 
                     struct CellNpcSpawn {
                         form_id: u32,
+                        base_form_id: u32,
                         name: String,
                         transform: NiTransform,
                         is_female: bool,
@@ -461,6 +468,7 @@ pub fn load_scene(
                                 let name = npc.full_name.clone().unwrap_or_else(|| npc.edid.clone());
                                 cell_npcs.push(CellNpcSpawn {
                                     form_id: refr.form_id.0,
+                                    base_form_id: refr.base_object.0,
                                     name,
                                     transform: world_transform,
                                     is_female: npc.is_female,
@@ -835,16 +843,12 @@ pub fn load_scene(
                                 radius: 45.0,
                                 kind: InteractableKind::Actor {
                                     form_id: npc.form_id,
+                                    base_form_id: npc.base_form_id,
                                     is_dead: false,
                                 },
                             });
-                            println!(
-                                "  - アクター \"{}\" (FormID: 0x{:08X}, 性別: {}) を配置 (パーツ数: {})",
-                                npc.name,
-                                npc.form_id,
-                                if npc.is_female { "女" } else { "男" },
-                                part_paths.len()
-                            );
+                            println!("  - アクター \"{}\" (FormID: 0x{:08X}, Base: 0x{:08X}, 性別: {}) を配置 (パーツ数: {})",
+                                npc.name, npc.form_id, npc.base_form_id, if npc.is_female { "女" } else { "男" }, part_paths.len());
                         }
                     }
 
@@ -969,29 +973,12 @@ pub fn load_scene(
                         );
                     }
                     println!("物理ワールド構築完了: 登録剛体数 {}", total_colliders);
-
-                    (
-                        scene,
-                        primary_lighting,
-                        placed_lights,
-                        clear_color,
-                        physics_world,
-                        door_spawn_point,
-                        interactables,
-                        refr_bindings,
-                    )
+                    (scene, primary_lighting, placed_lights, clear_color, physics_world, door_spawn_point, interactables, refr_bindings)
                 }
             };
 
     println!("GPU シーン構築完了: {} メッシュノード描画準備完了", scene.meshes.len());
     LoadedSceneResult {
-        scene,
-        cell_lighting,
-        placed_lights,
-        clear_color,
-        physics_world,
-        door_spawn_point,
-        interactables,
-        refr_bindings,
+        scene, cell_lighting, placed_lights, clear_color, physics_world, door_spawn_point, interactables, refr_bindings,
     }
 }

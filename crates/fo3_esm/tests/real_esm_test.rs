@@ -163,6 +163,14 @@ fn test_real_lvli_resolution() {
     }
 
     let mut reader = EsmReader::open(esm_path).expect("Failed to open Fallout3.esm");
+    let script_map = reader.read_all_scripts_map().expect("read_all_scripts_map");
+    let cg00_script_id = fo3_esm::types::FormId(0x0003A17C);
+    if let Some(scpt) = script_map.get(&cg00_script_id) {
+        println!("=== CG00 Script: {} ===", scpt.edid);
+        if let Some(ref text) = scpt.source_text {
+            println!("{}", text);
+        }
+    }
     let model_map = reader.read_all_models_map().expect("Failed to read models");
     let (npc_map, armor_map, _outfit_map, _hair_map, lvli_map) = reader
         .read_npc_and_armor_map()
@@ -267,6 +275,81 @@ fn test_real_qust_inspection() {
     }
     println!("Total QUST records found: {}", qust_count);
     assert!(qust_count > 0, "QUST レコードが ESM から取得できること");
+}
+
+#[test]
+fn test_real_pack_inspection() {
+    let esm_path = "A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\\Fallout3.esm";
+    if !std::path::Path::new(esm_path).exists() {
+        eprintln!("Fallout3.esm が見つからないためテストをスキップします");
+        return;
+    }
+
+    let mut reader = EsmReader::open(esm_path).expect("Failed to open Fallout3.esm");
+    let pack_map = reader.read_all_packages_map().expect("read_all_packages_map");
+    println!("Total PACK records found: {}", pack_map.len());
+    assert!(pack_map.len() > 100, "PACK レコードが多数取得できること (実機は1000件以上)");
+
+    let mut cg00_packs = 0;
+    for (form_id, pack) in &pack_map {
+        if let Some(edid) = &pack.editor_id {
+            if edid.starts_with("CG00") {
+                cg00_packs += 1;
+                println!(
+                    "CG00 PACK [0x{:08X}] EDID: \"{}\", Type: {:?}, Flags: 0x{:08X}",
+                    form_id.0, edid, pack.pack_type, pack.flags
+                );
+            }
+        }
+    }
+    println!("Found {} CG00 PACK records", cg00_packs);
+    assert!(cg00_packs > 0, "CG00 関連の AI パッケージが存在すること");
+}
+
+#[test]
+fn test_real_cg00_cell_and_markers() {
+    let esm_path = "A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\\Fallout3.esm";
+    if !std::path::Path::new(esm_path).exists() {
+        return;
+    }
+    let mut reader = EsmReader::open(esm_path).expect("Failed to open Fallout3.esm");
+    // 全 REFR から EDID が CG00 で始まるものを探索
+    let mut cg00_refrs = Vec::new();
+    while let Some(entry) = reader.read_next_entry().expect("read entry") {
+        if let fo3_esm::reader::EsmEntry::Record(record, subs) = entry {
+            if record.type_id == fo3_esm::types::REC_REFR || record.type_id == fo3_esm::types::REC_ACHR {
+                for sub in &subs {
+                    if sub.type_id == fo3_esm::types::SUB_EDID {
+                        let edid = sub.as_string();
+                        if edid.starts_with("CG00") {
+                            cg00_refrs.push((record.form_id, edid, record.type_id));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    println!("Found {} CG00 REFR/ACHR records:", cg00_refrs.len());
+    for (fid, edid, rec_type) in &cg00_refrs {
+        let tag = std::str::from_utf8(&rec_type.0).unwrap_or("????");
+        println!("  [{}] 0x{:08X}: \"{}\"", tag, fid.0, edid);
+    }
+
+    let marker_id = fo3_esm::types::FormId(0x00039562);
+    // cell_map または reader で marker_id の所属セルを逆引き
+    // EsmReader::find_cell_for_refr または CELL レコード走査
+    let marker_ids: std::collections::HashSet<fo3_esm::types::FormId> = cg00_refrs.iter().map(|(id, _, _)| *id).collect();
+    let mut reader2 = EsmReader::open(esm_path).expect("reopen");
+    while let Some(entry) = reader2.read_next_entry().expect("read") {
+        if let fo3_esm::reader::EsmEntry::Record(record, subs) = entry {
+            if marker_ids.contains(&record.form_id) {
+                if let Ok(refr) = fo3_esm::records::refr::RefrRecord::from_record(&record, &subs) {
+                    let edid = cg00_refrs.iter().find(|(id, _, _)| *id == record.form_id).map(|(_, e, _)| e.as_str()).unwrap_or("");
+                    println!("★ CG00 REFR \"{}\" (0x{:08X}): Pos={:?}, Rot={:?}", edid, record.form_id.0, refr.position, refr.rotation);
+                }
+            }
+        }
+    }
 }
 
 

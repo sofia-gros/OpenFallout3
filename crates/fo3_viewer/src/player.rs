@@ -52,6 +52,18 @@ pub enum LocomotionState {
     JumpLoop,
     /// 着地 (mtjumpland.kf)
     JumpLand,
+    /// しゃがみ静止待機 (sneakmtidle.kf)
+    SneakIdle,
+    /// しゃがみ前進歩行 (sneakmtforward.kf)
+    SneakWalkForward,
+    /// しゃがみ前進走行 (sneakmtfastforward.kf)
+    SneakRunForward,
+    /// しゃがみ後退 (sneakmtbackward.kf)
+    SneakBackward,
+    /// しゃがみ左歩行 (sneakmtleft.kf)
+    SneakLeft,
+    /// しゃがみ右歩行 (sneakmtright.kf)
+    SneakRight,
 }
 
 impl LocomotionState {
@@ -72,6 +84,12 @@ impl LocomotionState {
             Self::JumpStart => "meshes\\characters\\_male\\locomotion\\mtjumpstart.kf",
             Self::JumpLoop => "meshes\\characters\\_male\\locomotion\\mtjumploop.kf",
             Self::JumpLand => "meshes\\characters\\_male\\locomotion\\mtjumpland.kf",
+            Self::SneakIdle => "meshes\\characters\\_male\\sneakmtidle.kf",
+            Self::SneakWalkForward => "meshes\\characters\\_male\\sneakmtforward.kf",
+            Self::SneakRunForward => "meshes\\characters\\_male\\sneakmtfastforward.kf",
+            Self::SneakBackward => "meshes\\characters\\_male\\sneakmtbackward.kf",
+            Self::SneakLeft => "meshes\\characters\\_male\\sneakmtleft.kf",
+            Self::SneakRight => "meshes\\characters\\_male\\sneakmtright.kf",
         }
     }
 }
@@ -106,6 +124,12 @@ impl LocomotionStateMachine {
             LocomotionState::JumpStart,
             LocomotionState::JumpLoop,
             LocomotionState::JumpLand,
+            LocomotionState::SneakIdle,
+            LocomotionState::SneakWalkForward,
+            LocomotionState::SneakRunForward,
+            LocomotionState::SneakBackward,
+            LocomotionState::SneakLeft,
+            LocomotionState::SneakRight,
         ];
 
         for state in states {
@@ -137,6 +161,7 @@ impl LocomotionStateMachine {
         right: bool,
         running: bool,
         jumping: bool,
+        sneaking: bool,
         grounded: bool,
     ) {
         let next_state = if !grounded {
@@ -148,6 +173,23 @@ impl LocomotionStateMachine {
             }
         } else if jumping {
             LocomotionState::JumpStart
+        } else if sneaking {
+            // しゃがみ (Sneak) ステート
+            if forward {
+                if running {
+                    LocomotionState::SneakRunForward
+                } else {
+                    LocomotionState::SneakWalkForward
+                }
+            } else if backward {
+                LocomotionState::SneakBackward
+            } else if left {
+                LocomotionState::SneakLeft
+            } else if right {
+                LocomotionState::SneakRight
+            } else {
+                LocomotionState::SneakIdle
+            }
         } else if forward {
             if running {
                 LocomotionState::RunForward
@@ -329,7 +371,11 @@ impl PlayerActor {
         }
 
         // ワールド変換行列の構築 (Z-up, Z軸回転)
-        let world_rot = Quat::from_rotation_z(self.yaw);
+        // 参照元: Gamebryo 2.6 座標系 (Right=+X, Forward=+Y, Up=+Z)
+        // カメラおよび移動方向の基準軸 (+X) とモデルの正面 (+Y) を一致させるため、
+        // 水平向きに -90度 (-π/2) の回転オフセットを合成する。
+        let model_yaw = self.yaw - std::f32::consts::FRAC_PI_2;
+        let world_rot = Quat::from_rotation_z(model_yaw);
         let world_transform = NiTransform {
             rotation: glam::Mat3::from_quat(world_rot),
             translation: self.position,
@@ -340,6 +386,9 @@ impl PlayerActor {
         if self.third_person_actor_idx < actors.len() {
             let actor = &mut actors[self.third_person_actor_idx];
             actor.world_transform = world_transform.clone();
+
+            // 単体 anim_player による姿勢上書きを防止 (ロコモーションステートマシン側で統括管理)
+            actor.anim_player = None;
 
             // ステートマシンからボーン姿勢をサンプリング
             self.state_machine.sample_pose(dt, &mut actor.anim_pose);
@@ -352,9 +401,10 @@ impl PlayerActor {
         if let Some(arm_idx) = self.first_person_arms_actor_idx {
             if arm_idx < actors.len() {
                 let arm_actor = &mut actors[arm_idx];
-                // 一人称腕は常にプレイヤー位置、カメラの Yaw に完全追従
+                // 一人称腕も同様に -90度オフセットを適用してカメラ視線正面に位置合わせ
+                let arm_yaw = camera_yaw - std::f32::consts::FRAC_PI_2;
                 let arm_transform = NiTransform {
-                    rotation: glam::Mat3::from_quat(Quat::from_rotation_z(camera_yaw)),
+                    rotation: glam::Mat3::from_quat(Quat::from_rotation_z(arm_yaw)),
                     translation: self.position,
                     scale: 1.0,
                 };
@@ -411,7 +461,7 @@ pub fn build_player_actor(
 
     let third_mesh_start = scene.meshes.len();
     let initial_transform = NiTransform {
-        rotation: glam::Mat3::from_quat(Quat::from_rotation_z(spawn_yaw)),
+        rotation: glam::Mat3::from_quat(Quat::from_rotation_z(spawn_yaw - std::f32::consts::FRAC_PI_2)),
         translation: spawn_pos,
         scale: 1.0,
     };
@@ -465,11 +515,12 @@ pub fn build_player_actor(
 
         if !first_parts.is_empty() {
             let first_mesh_start = scene.meshes.len();
-            let first_idle_kf = nif_cache.get_or_load("meshes\\characters\\_1stperson\\locomotion\\male\\pipboy.kf", vfs).ok();
+            // 実機 Fallout 3 一人称待機 KF (meshes\characters\_1stperson\mtidle.kf)
+            let first_idle_kf = nif_cache.get_or_load("meshes\\characters\\_1stperson\\mtidle.kf", vfs).ok();
             let first_idle_clip = first_idle_kf.as_ref().and_then(|kf| AnimationClip::from_kf(kf)).map(Arc::new);
 
             let first_transform = NiTransform {
-                rotation: glam::Mat3::from_quat(Quat::from_rotation_z(spawn_yaw)),
+                rotation: glam::Mat3::from_quat(Quat::from_rotation_z(spawn_yaw - std::f32::consts::FRAC_PI_2)),
                 translation: spawn_pos,
                 scale: 1.0,
             };
@@ -534,25 +585,33 @@ mod tests {
         // 初期ステートは Idle
         assert_eq!(sm.current_state, LocomotionState::Idle);
 
-        // 前進歩行 (Wキー、Shiftなし)
-        sm.update_state(true, false, false, false, false, false, true);
+        // 前進歩行 (Wキー、Shiftなし、しゃがみなし)
+        sm.update_state(true, false, false, false, false, false, false, true);
         assert_eq!(sm.current_state, LocomotionState::WalkForward);
 
-        // 前進走行 (Wキー + Shift)
-        sm.update_state(true, false, false, false, true, false, true);
+        // 前進走行 (Wキー + Shift、しゃがみなし)
+        sm.update_state(true, false, false, false, true, false, false, true);
         assert_eq!(sm.current_state, LocomotionState::RunForward);
 
+        // しゃがみ待機 (Ctrlキー、移動なし)
+        sm.update_state(false, false, false, false, false, false, true, true);
+        assert_eq!(sm.current_state, LocomotionState::SneakIdle);
+
+        // しゃがみ前進歩行 (Wキー + Ctrl)
+        sm.update_state(true, false, false, false, false, false, true, true);
+        assert_eq!(sm.current_state, LocomotionState::SneakWalkForward);
+
         // ジャンプ (Space)
-        sm.update_state(true, false, false, false, true, true, true);
+        sm.update_state(true, false, false, false, true, true, false, true);
         assert_eq!(sm.current_state, LocomotionState::JumpStart);
 
         // 空中滞空
         sm.state_elapsed = 0.5;
-        sm.update_state(true, false, false, false, true, false, false);
+        sm.update_state(true, false, false, false, true, false, false, false);
         assert_eq!(sm.current_state, LocomotionState::JumpLoop);
 
         // 着地してキー入力なし -> Idle
-        sm.update_state(false, false, false, false, false, false, true);
+        sm.update_state(false, false, false, false, false, false, false, true);
         assert_eq!(sm.current_state, LocomotionState::Idle);
     }
 }

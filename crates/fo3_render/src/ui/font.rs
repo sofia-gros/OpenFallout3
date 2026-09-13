@@ -129,6 +129,18 @@ impl BitmapFont {
         })
     }
 
+    /// 文字列全体の描画幅（ピクセル）をグリフメトリクスに基づいて厳密に計算する。
+    pub fn measure_text_width(&self, text: &str, scale: f32) -> f32 {
+        let mut width = 0.0;
+        for c in text.chars() {
+            let b = normalize_ui_char(c) as usize;
+            if b < self.glyphs.len() {
+                width += self.glyphs[b].advance_x * scale;
+            }
+        }
+        width
+    }
+
     /// 組み込みのフォールバック・レトロビットマップフォント (8x12 等幅) を生成。
     /// 外部アセット非依存でターミナル・会話テキストを 100% 確実に描画するための安全ネット。
     pub fn create_embedded_fallback() -> Self {
@@ -289,14 +301,26 @@ impl TextBatch {
 
     /// ベタ塗り矩形 (背景バー、カーソル、ボーダー) を追加。
     pub fn add_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) {
-        let base_idx = self.vertices.len() as u32;
-        // UV はダミー白ピクセル (0,0) を参照
-        let uv = [0.0, 0.0];
+        self.add_textured_rect(x, y, w, h, [0.0, 0.0, 0.0, 0.0], color);
+    }
 
-        self.vertices.push(UiVertex { position: [x, y], tex_coord: uv, color });
-        self.vertices.push(UiVertex { position: [x + w, y], tex_coord: uv, color });
-        self.vertices.push(UiVertex { position: [x + w, y + h], tex_coord: uv, color });
-        self.vertices.push(UiVertex { position: [x, y + h], tex_coord: uv, color });
+    /// テクスチャ UV 座標を指定した矩形を追加。
+    pub fn add_textured_rect(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        uv: [f32; 4], // [u0, v0, u1, v1]
+        color: [f32; 4],
+    ) {
+        let base_idx = self.vertices.len() as u32;
+        let [u0, v0, u1, v1] = uv;
+
+        self.vertices.push(UiVertex { position: [x, y], tex_coord: [u0, v0], color });
+        self.vertices.push(UiVertex { position: [x + w, y], tex_coord: [u1, v0], color });
+        self.vertices.push(UiVertex { position: [x + w, y + h], tex_coord: [u1, v1], color });
+        self.vertices.push(UiVertex { position: [x, y + h], tex_coord: [u0, v1], color });
 
         self.indices.extend_from_slice(&[
             base_idx, base_idx + 1, base_idx + 2,
@@ -304,9 +328,10 @@ impl TextBatch {
         ]);
     }
 
-    /// 文字列を指定座標に描画。
+    /// 文字列を指定座標に描画。スマートクォート等の記号を正規化して文字化けを防止する。
     pub fn add_text(&mut self, font: &BitmapFont, text: &str, mut x: f32, y: f32, scale: f32, color: [f32; 4]) {
-        for b in text.bytes() {
+        for c in text.chars() {
+            let b = normalize_ui_char(c);
             let metric = &font.glyphs[b as usize];
             let gw = metric.width * scale;
             let gh = metric.height * scale;
@@ -326,5 +351,19 @@ impl TextBatch {
 
             x += metric.advance_x * scale;
         }
+    }
+}
+
+/// UI テキストに含まれるスマートクォートやダッシュ記号を ASCII グリフへ正規化する。
+/// Fallout 3 ESM 内の Windows-1252 / Unicode 文字列による文字化けを防止する。
+pub fn normalize_ui_char(c: char) -> u8 {
+    match c {
+        '’' | '‘' | '`' | '´' | '\u{91}' | '\u{92}' => b'\'',
+        '“' | '”' | '«' | '»' | '\u{93}' | '\u{94}' => b'"',
+        '–' | '—' | '−' | '\u{96}' | '\u{97}' => b'-',
+        '…' | '\u{85}' => b'.',
+        '•' | '\u{95}' => b'*',
+        c if (c as u32) < 128 => c as u8,
+        _ => b' ',
     }
 }

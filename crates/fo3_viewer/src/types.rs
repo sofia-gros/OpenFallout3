@@ -8,10 +8,10 @@ use winit::window::Window;
 /// カメラの動作モード。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CameraMode {
-    /// オービットカメラ（ターゲット注視・全体周回）
-    Orbit,
-    /// FPS ウォークスルー歩行モード（物理エンジン + キャラクタコントローラー）
-    Walkthrough,
+    /// Fallout 3 実機標準プレイヤーカメラ (1人称 / 3人称 / 物理KCC / しゃがみ等)
+    Standard,
+    /// デバッグ用フリーオービットカメラ (F12 で切替、全体俯瞰・回転周回)
+    FreeOrbit,
 }
 
 /// ビューアーの表示対象。
@@ -30,6 +30,8 @@ pub enum ViewerTarget {
         outfit_or_naked: String,
         kf_path: String,
     },
+    /// 実機完全準拠のニューゲームモード (CG00: Vault 101 Infirmary 〜 CG04)
+    NewGame,
 }
 
 /// ウィンドウタイトルを設定する。
@@ -47,29 +49,15 @@ pub fn update_window_title(window: &Window, target: &ViewerTarget) {
         } => {
             format!("OpenFallout3 - Actor: {} + {}", outfit_or_naked, kf_path)
         }
+        ViewerTarget::NewGame => "OpenFallout3 - New Game (CG00: Vault 101)".to_string(),
     };
     window.set_title(&title);
 }
 
 /// 操作ガイドを標準出力に表示する。
 pub fn print_controls_guide() {
-    println!("\n=== 操作ガイド ===");
-    println!("  Tab / M キー:     カメラモード切替 [オービット周回 ⇔ FPS歩行モード]");
-    println!("  -- オービットモード (Orbit) --");
-    println!("    左ドラッグ:     カメラ回転 (Yaw / Pitch)");
-    println!("    右ドラッグ:     カメラ平行移動 (Pan)");
-    println!("    ホイール:       ズームイン / アウト");
-    println!("    R キー:         カメラ自動再フォーカス (Reset)");
-    println!("  -- FPS歩行モード (Walkthrough / Physics) --");
-    println!("    WASD キー:      前後・左右移動 (コリジョン・階段昇降対応)");
-    println!("    Space キー:     ジャンプ / 上昇");
-    println!("    マウス移動:     視線方向回転 (Look)");
-    println!("  -- 共通 --");
-    println!("    E キー:         オブジェクトを調べる / ドアを開いてテレポート (Interact)");
-    println!("    C キー:         Havok コリジョンワイヤーフレーム表示切替 (Collision ON/OFF)");
-    println!("    F キー:         セル環境フォグ表示切替 (Fog ON/OFF)");
-    println!("    L キー:         ビューア補助ヘッドライト切替 (Light ON/OFF)");
-    println!("    Esc キー:       終了\n");
+    let guide = crate::input::InputManager::new().get_guide_text();
+    println!("{}", guide);
 }
 
 /// エディタ用配置マーカー（矢印、ボックス）や光線エフェクトメッシュ（真っ白な板になる）かどうかを判定。
