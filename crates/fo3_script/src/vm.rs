@@ -287,15 +287,20 @@ impl ScriptVm {
                     let expr = parts[3..].join(" ");
                     let val = self.eval_expr(&expr);
                     let lower_var = var_name.to_ascii_lowercase();
-                    if self.globals.contains_key(var_name) {
-                        self.globals.insert(var_name.to_string(), val);
-                    } else {
-                        self.locals.insert(lower_var.clone(), val);
-                    }
-                    if let Some((_, sub)) = lower_var.split_once('.') {
+                    // グローバル変数 (case-insensitive で検索)
+                    let global_key = self.globals.keys()
+                        .find(|k| k.eq_ignore_ascii_case(var_name))
+                        .cloned();
+                    if let Some(k) = global_key {
+                        self.globals.insert(k, val);
+                    } else if let Some((prefix, sub)) = lower_var.split_once('.') {
+                        // ドット付き変数: "cg00.timer" → locals["cg00.timer"] と locals["timer"] 両方へ格納
+                        // 参照元: GECK スクリプト変数命名規約 (QuestEditorID.VarName 形式)
+                        self.locals.insert(format!("{}.{}", prefix, sub), val);
                         self.locals.insert(sub.to_string(), val);
                     } else {
-                        self.locals.insert(format!("cg00.{}", lower_var), val);
+                        // ベア変数: そのままローカルテーブルへ (cg00. 自動付与は廃止)
+                        self.locals.insert(lower_var, val);
                     }
                 }
             }
@@ -467,9 +472,13 @@ impl ScriptVm {
             }
             "sayto" => {
                 // SayTo <Target> <Topic> [Force]
+                // 参照元: GECK Wiki `SayTo` — Target に発話させる (Speaker は self_id)
                 if parts.len() >= 3 {
                     let topic = parts[2].to_string();
-                    println!("[Script] SayTo (対象指定台詞要求): target={:?}, topic={:?}, speaker={:?}", parts[1], topic, self_id);
+                    // parts[1] = Target (話しかける相手の FormID/EditorID)
+                    // Speaker は自分自身 (self_id) が Target に向かって発話
+                    let _target_id = self.resolve_form_id(parts[1]).ok();
+                    println!("[Script] SayTo (台詞発言要求): topic={:?}, speaker={:?}, target_str={:?}", topic, self_id, parts[1]);
                     self.say_queue.push((self_id, topic));
                 } else if parts.len() == 2 {
                     let topic = parts[1].to_string();
@@ -637,8 +646,9 @@ impl ScriptVm {
             }
         }
 
-        // 4. グローバル変数
-        if let Some(&v) = self.globals.get(trimmed) {
+        // 4. グローバル変数 (case-insensitive 検索)
+        // 参照元: GECK Wiki — スクリプト変数は大文字小文字を区別しない
+        if let Some((_, &v)) = self.globals.iter().find(|(k, _)| k.eq_ignore_ascii_case(trimmed)) {
             return v;
         }
 

@@ -31,7 +31,7 @@ use crate::interactive_anim::{InteractiveAnimator, RefrBinding};
 use crate::inventory::PlayerInventory;
 use crate::loader::load_scene;
 use crate::types::{print_controls_guide, update_window_title, CameraMode, ViewerTarget};
-use crate::ui::ViewerMode;
+pub use crate::ui::ViewerMode;
 
 pub struct ViewerState {
     pub window: Arc<Window>,
@@ -325,7 +325,14 @@ impl ViewerState {
             chargen_menu: crate::chargen_menu::ChargenMenu::new(),
         };
 
-        state.setup_scripts_for_cell();
+        // セル EDID の解決: ターゲット種別に応じてスクリプト登録対象のセルを決定
+        // 参照元: `knowledge/new_game_and_quest_engine_architecture.md:2.1` — CG00 初期セル
+        let cell_edid = match target {
+            ViewerTarget::NewGame => "Vault101Infirmary",
+            ViewerTarget::Cell(edid) => edid.as_str(),
+            _ => "",
+        };
+        state.setup_scripts_for_cell(cell_edid);
 
         if matches!(target, ViewerTarget::NewGame) {
             println!("============================================================");
@@ -347,16 +354,19 @@ impl ViewerState {
     }
 
     /// セル内の配置オブジェクトにアタッチされたスクリプトを抽出し、イベントディスパッチャーへ登録する。
-    pub fn setup_scripts_for_cell(&mut self) {
+    /// `cell_edid`: 現在ロード中のセルの EditorID (例: "Vault101Infirmary", "MegatonSaloon")
+    /// 参照元: `AGENTS.md Rule 1` — ハードコード禁止 / `knowledge/new_game_and_quest_engine_architecture.md`
+    pub fn setup_scripts_for_cell(&mut self, cell_edid: &str) {
         // 0. クエスト EditorID -> FormID マップを VM へ登録
         for (edid, form_id) in &self.master_context.quest_edid_map {
             self.vm.edid_map.insert(edid.clone(), *form_id);
         }
 
         // 0.1 セル内の配置参照 (REFR / ACHR) の EditorID およびスクリプトを登録
+        // 参照元: `references/openmw/components/esm4/loadrefr.cpp` — REFR スクリプトアタッチ
         let esm_path = Path::new(&self.data_dir).join("Fallout3.esm");
         if let Ok(mut reader) = fo3_esm::EsmReader::open(&esm_path) {
-            if let Ok(Some(cells)) = reader.find_cell_and_neighbors("Vault101d", 0) {
+            if let Ok(Some(cells)) = reader.find_cell_and_neighbors(cell_edid, 0) {
                 for (_, refrs, _) in cells {
                     for refr in refrs {
                         if !refr.edid.is_empty() {
@@ -867,3 +877,7 @@ impl ApplicationHandler for App {
         }
     }
 }
+
+/// `window_input.rs` が `crate::app::AppState` としてインポートするための型エイリアス。
+/// 参照元: `AGENTS.md` — モジュール公開 API の互換維持義務
+pub type AppState = ViewerState;

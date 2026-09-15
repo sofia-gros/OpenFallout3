@@ -127,7 +127,12 @@ pub fn perform_interact(app: &mut ViewerState) {
                 app.controller.camera.target = spawn_pos;
 
                 update_window_title(&app.window, &next_target);
-                app.setup_scripts_for_cell();
+                // 遷移先セルの EDID を解決してスクリプト登録
+                let next_cell_edid = match &next_target {
+                    ViewerTarget::Cell(edid) => edid.clone(),
+                    _ => String::new(),
+                };
+                app.setup_scripts_for_cell(&next_cell_edid);
                 println!("  - セル間テレポート完了: プレイヤー座標 {:?}", spawn_pos);
             } else {
                 let currently_open = *is_open;

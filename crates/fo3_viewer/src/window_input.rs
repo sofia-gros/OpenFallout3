@@ -9,7 +9,7 @@ use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
 use crate::app::{AppState, ViewerMode};
-use crate::controller::CameraMode;
+use crate::types::CameraMode;
 
 /// ウィンドウの入力イベント (マウスホイール、キーボード) をディスパッチ処理する。
 pub fn handle_input_event(state: &mut AppState, event: WindowEvent, event_loop: &ActiveEventLoop) {

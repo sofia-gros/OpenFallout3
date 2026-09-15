@@ -50,6 +50,14 @@ pub enum GameEvent {
     MenuMode {
         menu_type: u32,
     },
+    /// アクターの死亡
+    /// 参照元: GECK Wiki `Begin OnDeath [KillerRef]`
+    OnDeath {
+        /// 死亡したアクターの FormID
+        actor: FormId,
+        /// 殺害者の FormID (自殺・環境死の場合は FormId(0))
+        killer: FormId,
+    },
 }
 
 /// 個々のオブジェクトインスタンスに紐づくスクリプト実行コンテキスト。
@@ -238,8 +246,126 @@ impl EventDispatcher {
                         }
                     }
                 }
-                _ => {
-                    // その他のイベント種別（OnAdd 等）
+                GameEvent::OnAdd { item, container } => {
+                    // コンテナに紐づくスクリプトの OnAdd ブロックをディスパッチ
+                    // 参照元: GECK Wiki `Begin OnAdd [ContainerRef]`
+                    if let Some(instance) = self.instances.get(&container) {
+                        let script_id = instance.script_form_id;
+                        if let Some(blocks) = self.parsed_blocks.get(&script_id) {
+                            let target_blocks: Vec<ScriptBlock> = blocks.iter()
+                                .filter(|b| b.event_type == ScriptEventType::OnAdd)
+                                .cloned().collect();
+                            vm.locals = instance.local_vars.clone();
+                            for block in target_blocks {
+                                let _ = vm.execute_block(&block.lines, Some(item));
+                            }
+                            if let Some(inst) = self.instances.get_mut(&container) {
+                                inst.local_vars = vm.locals.clone();
+                            }
+                        }
+                    }
+                }
+                GameEvent::OnEquip { item, actor } => {
+                    // アクターに紐づくスクリプトの OnEquip ブロックをディスパッチ
+                    // 参照元: GECK Wiki `Begin OnEquip [ActorRef]`
+                    if let Some(instance) = self.instances.get(&item) {
+                        let script_id = instance.script_form_id;
+                        if let Some(blocks) = self.parsed_blocks.get(&script_id) {
+                            let target_blocks: Vec<ScriptBlock> = blocks.iter()
+                                .filter(|b| b.event_type == ScriptEventType::OnEquip)
+                                .cloned().collect();
+                            vm.locals = instance.local_vars.clone();
+                            for block in target_blocks {
+                                let _ = vm.execute_block(&block.lines, Some(actor));
+                            }
+                            if let Some(inst) = self.instances.get_mut(&item) {
+                                inst.local_vars = vm.locals.clone();
+                            }
+                        }
+                    }
+                }
+                GameEvent::OnUnequip { item, actor } => {
+                    // 参照元: GECK Wiki `Begin OnUnequip [ActorRef]`
+                    if let Some(instance) = self.instances.get(&item) {
+                        let script_id = instance.script_form_id;
+                        if let Some(blocks) = self.parsed_blocks.get(&script_id) {
+                            let target_blocks: Vec<ScriptBlock> = blocks.iter()
+                                .filter(|b| b.event_type == ScriptEventType::OnUnequip)
+                                .cloned().collect();
+                            vm.locals = instance.local_vars.clone();
+                            for block in target_blocks {
+                                let _ = vm.execute_block(&block.lines, Some(actor));
+                            }
+                            if let Some(inst) = self.instances.get_mut(&item) {
+                                inst.local_vars = vm.locals.clone();
+                            }
+                        }
+                    }
+                }
+                GameEvent::OnDrop { item, dropper } => {
+                    // 参照元: GECK Wiki `Begin OnDrop [ActorRef]`
+                    if let Some(instance) = self.instances.get(&item) {
+                        let script_id = instance.script_form_id;
+                        if let Some(blocks) = self.parsed_blocks.get(&script_id) {
+                            let target_blocks: Vec<ScriptBlock> = blocks.iter()
+                                .filter(|b| b.event_type == ScriptEventType::OnDrop)
+                                .cloned().collect();
+                            vm.locals = instance.local_vars.clone();
+                            for block in target_blocks {
+                                let _ = vm.execute_block(&block.lines, Some(dropper));
+                            }
+                            if let Some(inst) = self.instances.get_mut(&item) {
+                                inst.local_vars = vm.locals.clone();
+                            }
+                        }
+                    }
+                }
+                GameEvent::OnDeath { actor, killer } => {
+                    // アクターに紐づくスクリプトの OnDeath ブロックをディスパッチ
+                    // 参照元: GECK Wiki `Begin OnDeath [KillerRef]`
+                    if let Some(instance) = self.instances.get(&actor) {
+                        let script_id = instance.script_form_id;
+                        if let Some(blocks) = self.parsed_blocks.get(&script_id) {
+                            let target_blocks: Vec<ScriptBlock> = blocks.iter()
+                                .filter(|b| b.event_type == ScriptEventType::OnDeath)
+                                .cloned().collect();
+                            vm.locals = instance.local_vars.clone();
+                            for block in target_blocks {
+                                let _ = vm.execute_block(&block.lines, Some(killer));
+                            }
+                            if let Some(inst) = self.instances.get_mut(&actor) {
+                                inst.local_vars = vm.locals.clone();
+                            }
+                        }
+                    }
+                }
+                GameEvent::MenuMode { menu_type } => {
+                    // MenuMode ブロックを持つスクリプトをディスパッチ
+                    // 参照元: GECK Wiki `Begin MenuMode [MenuType]`
+                    // CG00 で使われる RaceSexMenu (1007), NameMenu (1011) など
+                    let instance_keys: Vec<FormId> = self.instances.keys().copied().collect();
+                    for target in instance_keys {
+                        if let Some(instance) = self.instances.get_mut(&target) {
+                            let script_id = instance.script_form_id;
+                            if let Some(blocks) = self.parsed_blocks.get(&script_id) {
+                                let mm_blocks: Vec<ScriptBlock> = blocks.iter()
+                                    .filter(|b| b.event_type == ScriptEventType::MenuMode)
+                                    .filter(|b| {
+                                        // 引数なしは全 MenuMode に反応、引数ありは menu_type 照合
+                                        b.args.is_empty() || b.args.first()
+                                            .and_then(|a| a.parse::<u32>().ok())
+                                            .map(|t| t == menu_type)
+                                            .unwrap_or(true)
+                                    })
+                                    .cloned().collect();
+                                vm.locals = instance.local_vars.clone();
+                                for block in mm_blocks {
+                                    let _ = vm.execute_block(&block.lines, Some(target));
+                                }
+                                instance.local_vars = vm.locals.clone();
+                            }
+                        }
+                    }
                 }
             }
         }

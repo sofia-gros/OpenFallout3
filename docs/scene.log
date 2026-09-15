@@ -1,0 +1,527 @@
+PS A:\Project\OpenFallout3> cargo run --release -p fo3_viewer -- cell "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data" "MegatonMoriartysSaloon"
+   Compiling fo3_script v0.1.0 (A:\Project\OpenFallout3\crates\fo3_script)
+PS A:\Project\OpenFallout3> cargo run --release -p fo3_viewer -- newgame "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data"                  
+   Compiling fo3_script v0.1.0 (A:\Project\OpenFallout3\crates\fo3_script)
+   Compiling fo3_viewer v0.1.0 (A:\Project\OpenFallout3\crates\fo3_viewer)
+warning: unused import: `MouseScrollDelta`
+  --> crates\fo3_viewer\src\app.rs:17:47
+   |
+17 | use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+   |                                               ^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `KeyCode` and `PhysicalKey`
+  --> crates\fo3_viewer\src\app.rs:19:23
+   |
+19 | use winit::keyboard::{KeyCode, PhysicalKey};
+   |                       ^^^^^^^  ^^^^^^^^^^^
+
+warning: field `last_processed_stages` is never read
+  --> crates\fo3_viewer\src\audio.rs:55:5
+   |
+45 | pub struct SoundEngine {
+   |            ----------- field in this struct
+...
+55 |     last_processed_stages: HashMap<FormId, u32>,
+   |     ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `Vanity` is never constructed
+  --> crates\fo3_viewer\src\camera.rs:55:5
+   |
+49 | pub enum CameraViewMode {
+   |          -------------- variant in this enum
+...
+55 |     Vanity,
+   |     ^^^^^^
+   |
+   = note: `CameraViewMode` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis  
+
+warning: fields `fov_y`, `aspect`, `z_near`, and `z_far` are never read
+  --> crates\fo3_viewer\src\camera.rs:72:9
+   |
+60 | pub struct PlayerCamera {
+   |            ------------ fields in this struct
+...
+72 |     pub fov_y: f32,
+   |         ^^^^^
+73 |     /// 画面アスペクト比 (Width / Height)
+74 |     pub aspect: f32,
+   |         ^^^^^^
+75 |     /// 前方クリップ距離
+76 |     pub z_near: f32,
+   |         ^^^^^^
+77 |     /// 後方クリップ距離
+78 |     pub z_far: f32,
+   |         ^^^^^
+   |
+   = note: `PlayerCamera` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis    
+
+warning: methods `view_matrix`, `projection_matrix`, `view_proj_matrix`, and `build_uniform` are never used
+   --> crates\fo3_viewer\src\camera.rs:265:12
+    |
+ 88 | impl PlayerCamera {
+    | ----------------- methods in this implementation
+...
+265 |     pub fn view_matrix(&self, player_pos: Vec3) -> Mat4 {
+    |            ^^^^^^^^^^^
+...
+286 |     pub fn projection_matrix(&self) -> Mat4 {
+    |            ^^^^^^^^^^^^^^^^^
+...
+291 |     pub fn view_proj_matrix(&self, player_pos: Vec3) -> Mat4 {
+    |            ^^^^^^^^^^^^^^^^
+...
+296 |     pub fn build_uniform(&self, player_pos: Vec3) -> CameraUniform {
+    |            ^^^^^^^^^^^^^
+
+warning: field `selected_button` is never read
+  --> crates\fo3_viewer\src\chargen_menu.rs:33:9
+   |
+31 | pub struct ChargenMenu {
+   |            ----------- field in this struct
+32 |     pub mode: ChargenMode,
+33 |     pub selected_button: usize,
+   |         ^^^^^^^^^^^^^^^
+
+warning: methods `render_dialog_overlay` and `render_terminal_overlay` are never used
+   --> crates\fo3_viewer\src\hud.rs:415:12
+    |
+ 50 | impl HudRenderer {
+    | ---------------- methods in this implementation
+...
+415 |     pub fn render_dialog_overlay<'rpass>(
+    |            ^^^^^^^^^^^^^^^^^^^^^
+...
+442 |     pub fn render_terminal_overlay<'rpass>(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: variants `TurnLeft` and `TurnRight` are never constructed
+  --> crates\fo3_viewer\src\player.rs:46:5
+   |
+26 | pub enum LocomotionState {
+   |          --------------- variants in this enum
+...
+46 |     TurnLeft,
+   |     ^^^^^^^^
+47 |     /// 右旋回 (mtturnright.kf)
+48 |     TurnRight,
+   |     ^^^^^^^^^
+   |
+   = note: `LocomotionState` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis 
+
+warning: `fo3_viewer` (bin "fo3_viewer") generated 9 warnings (run `cargo fix --bin "fo3_viewer" -p fo3_viewer` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 13.81s
+     Running `target\release\fo3_viewer.exe newgame "A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data"`
+マスター ESM ""A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\\Fallout3.esm"" から静的定義を一括ロード中...
+マスター静的定義常駐完了: モデル=8823, NPC=1647, 防具=237, 光源=368, クエスト=192, AIパッケージ=3266
+ESM からニューゲーム初期セル "Vault101d" を検索中...
+取得セル総数: 1 件
+  - セル "Vault101d" (Grid: None, REFR: 1610, LAND: なし)
+全セル配置メッシュロード完了: 1191 件 (マーカー/エフェクト除外: 231 件), 点光源: 88 灯。GPU シーン構築中...
+地形テクスチャセット解決: 51 件
+セル内配置アクター (ACHR / NPC_) を生成中: 37 体...
+  - アクター "Stanley" (FormID: 0x0006B23B, Base: 0x0006B236, 性別: 男) を配置 (パーツ数: 10)
+  - アクター "Officer Gomez" (FormID: 0x00064914, Base: 0x00064911, 性別: 男) を配置 (パーツ数: 10)
+  - アクター "Amata" (FormID: 0x000230E4, Base: 0x000230DD, 性別: 女) を配置 (パーツ数: 10)
+  - アクター "Butch" (FormID: 0x000230E3, Base: 0x000230DC, 性別: 男) を配置 (パーツ数: 10)
+  - アクター "Ellen DeLoria" (FormID: 0x000230E2, Base: 0x000230DF, 性別: 女) を配置 (パーツ数: 9)
+  - アクター "Susie Mack" (FormID: 0x0009550C, Base: 0x0009550A, 性別: 女) を配置 (パーツ数: 9)
+  - アクター "Christine Kendall" (FormID: 0x0009550B, Base: 0x00095501, 性別: 女) を配置 (パーツ数: 10)
+  - アクター "Officer Kendall" (FormID: 0x00064912, Base: 0x0006490F, 性別: 男) を配置 (パーツ数: 10)
+  - アクター "Stanley" (FormID: 0x0006FFDA, Base: 0x0006F543, 性別: 男) を配置 (パーツ数: 9)
+  - アクター "Catherine" (FormID: 0x0005EDE0, Base: 0x0005EDDF, 性別: 女) を配置 (パーツ数: 10)
+  - アクター "Christine Kendall" (FormID: 0x0002B795, Base: 0x00034202, 性別: 女) を配置 (パーツ数: 9)
+  - アクター "Susie Mack" (FormID: 0x00034203, Base: 0x0001CFDD, 性別: 女) を配置 (パーツ数: 9)
+  - アクター "Dad" (FormID: 0x0002EA4D, Base: 0x0002EA46, 性別: 男) を配置 (パーツ数: 9)
+  - アクター "Dad" (FormID: 0x000290A7, Base: 0x000290A6, 性別: 男) を配置 (パーツ数: 11)
+  - アクター "Doctor Li" (FormID: 0x000290A5, Base: 0x000290A3, 性別: 女) を配置 (パーツ数: 10)
+  - アクター "Freddie Gomez" (FormID: 0x0001D029, Base: 0x0001D019, 性別: 男) を配置 (パーツ数: 9)
+  - アクター "Jonas" (FormID: 0x0001CFBE, Base: 0x0001CFBC, 性別: 男) を配置 (パーツ数: 11)
+  - アクター "Mr. Brotch" (FormID: 0x0001CFB8, Base: 0x0001CFB7, 性別: 男) を配置 (パーツ数: 9)
+  - アクター "Dad" (FormID: 0x0001CE3A, Base: 0x0001CE38, 性別: 男) を配置 (パーツ数: 9)
+  - アクター "Wally Mack" (FormID: 0x0001CE2B, Base: 0x0001CE2A, 性別: 男) を配置 (パーツ数: 9)
+  - アクター "Paul Hannon" (FormID: 0x0001CE29, Base: 0x0001CE28, 性別: 男) を配置 (パーツ数: 9)
+  - アクター "Butch" (FormID: 0x0001CE27, Base: 0x0001CE26, 性別: 男) を配置 (パーツ数: 9)
+  - アクター "Amata" (FormID: 0x0001CE25, Base: 0x0001CE24, 性別: 女) を配置 (パーツ数: 10)
+  - アクター "Stanley" (FormID: 0x00031649, Base: 0x00031648, 性別: 男) を配置 (パーツ数: 9)
+  - アクター "Stevie Mack" (FormID: 0x000309B1, Base: 0x000309B0, 性別: 男) を配置 (パーツ数: 9)
+  - アクター "Officer Gomez" (FormID: 0x000309AF, Base: 0x000309AE, 性別: 男) を配置 (パーツ数: 10)
+  - アクター "Beatrice" (FormID: 0x000309AD, Base: 0x000309AC, 性別: 女) を配置 (パーツ数: 9)
+  - アクター "Old Lady Palmer" (FormID: 0x000309A8, Base: 0x000309A7, 性別: 女) を配置 (パーツ数: 9)
+  - アクター "Wally Mack" (FormID: 0x000300F5, Base: 0x000300EC, 性別: 男) を配置 (パーツ数: 10)
+  - アクター "Paul Hannon" (FormID: 0x000300F4, Base: 0x000300EB, 性別: 男) を配置 (パーツ数: 10)
+  - アクター "Butch" (FormID: 0x000300F3, Base: 0x000300EA, 性別: 男) を配置 (パーツ数: 9)
+  - アクター "Amata" (FormID: 0x000300F2, Base: 0x000300E9, 性別: 女) を配置 (パーツ数: 10)
+  - アクター "The Overseer" (FormID: 0x000300F1, Base: 0x000300F0, 性別: 男) を配置 (パーツ数: 9)
+  - アクター "Dad" (FormID: 0x000300EF, Base: 0x0002FDCF, 性別: 男) を配置 (パーツ数: 9)
+  - アクター "Jonas" (FormID: 0x000300E8, Base: 0x000300E7, 性別: 男) を配置 (パーツ数: 11)
+  - アクター "Officer Kendall" (FormID: 0x0009B177, Base: 0x0009B171, 性別: 男) を配置 (パーツ数: 10)
+  - アクター "Grandma Taylor" (FormID: 0x00054398, Base: 0x00054397, 性別: 女) を配置 (パーツ数: 9)
+セル内の Havok コリジョン情報を物理ワールドに登録中...
+物理ワールド構築完了: 登録剛体数 1138
+GPU シーン構築完了: 3897 メッシュノード描画準備完了
+★ ニューゲーム開始: CG00PlayerStartMarker へ配置 Vec3(-5275.8867, -7148.175, 7542.536)
+カメラ自動フォーカス: 注視点 Vec3(-94.95801, -5296.0, 7795.451), 距離 30770.5
+プレイヤーアクター生成完了: 三人称メッシュ 17 件, 一人称メッシュ 15 件
+HUD 実機アセットを VFS からロード中: textures\interface\hud\crosshair.dds
+  - HUD テクスチャロード成功: textures\interface\hud\crosshair.dds
+HUD 実機アセットを VFS からロード中: textures\interface\hud\glow_crosshair.dds
+  - HUD テクスチャロード成功: textures\interface\hud\glow_crosshair.dds
+[ScriptVm] マスター定義同期完了: クエスト 192 件, スクリプト 1257 件
+
+============================================================
+★ Fallout 3 実機標準操作体系 (InputManager)
+============================================================
+  [ゲーム操作 (Fallout 3 実機準拠)]
+    W, A, S, D / 矢印 : 移動 (前後・左右平行移動)
+    Space             : ジャンプ
+    Ctrl              : しゃがみ / スニーク (カメラアイレベル追従)
+    Shift             : 歩き / 走り切替
+    E                 : 調べる / 話す / 扉を開ける (Activate)
+    R                 : 武器構え / リロード
+    F / V             : 1人称 ⇔ 3人称 視点切替 (POV Toggle)
+    Tab               : Pip-Boy / 会話終了 / キャンセル
+    T                 : 待機 (Wait)
+    マウス移動        : 視線変更 (Look)
+    マウスホイール    : 1人称/3人称 ズームイン・アウト
+  [デバッグ・検証操作 (F1 〜 F12)]
+    F1                : この操作ガイドを表示
+    F2                : Havok コリジョンワイヤーフレーム表示切替
+    F3                : セル環境フォグ ON/OFF 切替
+    F4                : ビューア補助ヘッドライト ON/OFF 切替
+    F7                : カメラ・スポーン位置の自動再フォーカス (Reset)
+    F12               : 俯瞰フリーオービットカメラ切替 (Orbit ⇔ Standard)
+    Esc               : 終了
+============================================================
+
+============================================================
+★ 実機ニューゲームシーケンス開始: CG00 (FormID: 0x0001F388)
+============================================================
+============================================================
+★ Bink ムービー全画面再生開始: "Fallout INTRO Vsk.bik"
+   (再生完了または Esc/q キーでゲーム画面へシームレス復帰)
+============================================================
+
+[BinkVideo] ムービー再生終了: status=ExitStatus(ExitStatus(0))
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 0 -> 0
+  - ステージ 0 Result Script 自動実行: "SetLocationSpecificLoadScreensOnly 1
+SetInCharGen 1 ; no leveling during chargen
+CG00DadREF.moveto CG00DadStartMarker
+CG00DoctorLiREF.moveto CG00DoctorLiStartMarker
+CG00MomREF.moveto CG00MomStartMarker
+setstage CG00 5
+player.moveto CG00PlayerStartMarker"
+[Script] SetInCharGen: 1 (in_chargen=true)
+[Script] MoveTo 要求: subject=None, target=CG00DadStartMarker
+[Script] MoveTo 要求: subject=None, target=CG00DoctorLiStartMarker
+[Script] MoveTo 要求: subject=None, target=CG00MomStartMarker
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 0 -> 5
+  - ステージ 5 Result Script 自動実行: "set CG00.timer to .01
+set CG00.runTimer to 1
+disableplayercontrols 1 1 1 1 1
+imod CG00BlackScreenISFX
+player.addscriptpackage CG00PlayerSection0"
+[Script] DisablePlayerControls: プレイヤー操作無効化 (flags: PlayerControlFlags { movement: false, looking: false, pipboy: false, fight: false, pov: false, cam_switch: true })
+[Script] imod (ImageSpaceModifier 適用): CG00BlackScreenISFX
+[Script] AddScriptPackage: CG00PlayerSection0 (target=FormId(0x0001F388))
+[Script] MoveTo 要求: subject=Some(FormId(0x00000014)), target=CG00PlayerStartMarker
+[MoveTo] アクター 0x000290A7 をマーカー "CG00DadStartMarker" (pos=Vec3(-5360.3623, -7332.082, 7542.536)) へ配置完了
+[MoveTo] アクター 0x000290A5 をマーカー "CG00DoctorLiStartMarker" (pos=Vec3(-5190.0, -7330.0, 7542.536)) へ配置完了
+[MoveTo] アクター 0x0005EDE0 をマーカー "CG00MomStartMarker" (pos=Vec3(-5275.8867, -7250.0, 7542.536)) へ配置完了
+[HUD通知] [Quest Started] CG00
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 5 -> 6
+  - ステージ 6 Result Script 自動実行: "; we've loaded in -- play sound and run timer
+playSound QSTBirthStart
+set CG00.timer to 10
+set CG00.runTimer to 1"
+[Script] PlaySound: QSTBirthStart
+[SoundEngine] PlaySound: EDID="QSTBirthStart" -> File="fx\qst\birth\qst_birth_start.wav"
+[SoundEngine] 音声データ再生開始: "sound\fx\qst\birth\qst_birth_start.wav" (1611668 bytes, is_voice=false)
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 6 -> 8
+  - ステージ 8 Result Script 自動実行: "; begin animations
+CG00DadREF.evp
+CG00MomREF.evp
+CG00DoctorLiREF.evp
+;imod FadeInFromWhiteISFX
+imod CG00BirthISFX
+imod CG00BirthBaseISFX
+player.addscriptpackage CG00PlayerSection0
+set CG00.timer to 2
+set CG00.runTimer to 1
+TriggerScreenBlood 10
+; add baby crying sound
+playSound QSTBabyCry"
+[Script] EvaluatePackage (AI パッケージ再評価要求): subject=None
+[Script] EvaluatePackage (AI パッケージ再評価要求): subject=None
+[Script] EvaluatePackage (AI パッケージ再評価要求): subject=None
+[Script] imod (ImageSpaceModifier 適用): CG00BirthISFX
+[Script] imod (ImageSpaceModifier 適用): CG00BirthBaseISFX
+[Script] AddScriptPackage: CG00PlayerSection0 (target=FormId(0x0001F388))
+[Script] TriggerScreenBlood: 10
+[Script] PlaySound: QSTBabyCry
+[AI/EVP] プレイヤーにアニメーション "meshes\characters\_male\idleanims\cg00playersection00.kf" を適用
+[AI/EVP] プレイヤーにアニメーション "meshes\characters\_male\idleanims\cg00playersection00.kf" を適用
+[AI/EVP] プレイヤーにアニメーション "meshes\characters\_male\idleanims\cg00playersection00.kf" を適用
+[SoundEngine] PlaySound: EDID="QSTBabyCry" -> File="fx\qst\baby\cry\"
+[SoundEngine] 音声データ再生開始: "sound\fx\qst\baby\cry\qst_babycry_01.wav" (177966 bytes, is_voice=false)
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 8 -> 9
+  - ステージ 9 Result Script 自動実行: "set CG00.timer to 7.5 ; + 2 from stage 8 = 9.5 seconds total
+SetNoActivationSound QSTBabyCry ; cry on activation failure"
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 9 -> 10
+  - ステージ 10 Result Script 自動実行: "; Dad starts talking
+set CG00DadREF.doTalk to 1
+set CG00DadREF.timer to 0  ; for now to synch with animation
+player.addScriptPackage CG00PlayerSection1"
+[Script] AddScriptPackage: CG00PlayerSection1 (target=FormId(0x0001F388))
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0001F387, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_0001f387_1.ogg" (30657 bytes, is_voice=true)        
+[SoundEngine] 台詞終了: FormID=0x0001F387
+[SoundEngine] ResultScript 自動実行: "setstage CG00 18"
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 10 -> 18
+  - ステージ 18 Result Script 自動実行: "set CG00DadREF.doTalk to 0
+; run timer to choose sex
+set CG00.runTimer to 1
+set CG00.timer to 1"
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 18 -> 20
+  - ステージ 20 Result Script 自動実行: "; player chooses gender
+player.addScriptPackage CG00PlayerSection2
+; run timer before starting dialogue again
+set CG00.runTimer to 1
+set CG00.timer to 1"
+[Script] AddScriptPackage: CG00PlayerSection2 (target=FormId(0x0001F388))
+[Script] ShowMessage: CG00ChooseSexMessage
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 20 -> 22
+  - ステージ 22 Result Script 自動実行: "set CG00.runTimer to 0
+; dad starts speaking again
+set CG00DadREF.doTalk to 1"
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0001F386, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_0001f386_1.ogg" (62964 bytes, is_voice=true)        
+[SoundEngine] 台詞終了: FormID=0x0001F386
+[SoundEngine] ResultScript 自動実行: "set CG00DadREF.doTalk to 0
+set CG00MomREF.doTalk to 1"
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0005EDD7, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\femaleuniquemom\cg00_cg00momspeech_0005edd7_1.ogg" (90921 bytes, is_voice=true)      
+[SoundEngine] 台詞終了: FormID=0x0005EDD7
+[SoundEngine] ResultScript 自動実行: "set CG00DadREF.doTalk to 1
+"
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0001F37E, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_0001f37e_1.ogg" (30504 bytes, is_voice=true)
+[SoundEngine] 台詞終了: FormID=0x0001F37E
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0001F384, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_0001f384_1.ogg" (89154 bytes, is_voice=true)        
+[SoundEngine] 台詞終了: FormID=0x0001F384
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0001F382, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_0001f382_1.ogg" (28492 bytes, is_voice=true)        
+[SoundEngine] 台詞終了: FormID=0x0001F382
+[SoundEngine] ResultScript 自動実行: "setstage CG00 38"
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 22 -> 38
+  - ステージ 38 Result Script 自動実行: "set CG00DadREF.doTalk to 0
+; run timer to choose name
+set CG00.runTimer to 1
+set CG00.timer to 1"
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0005EDD9, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\femaleuniquemom\cg00_cg00momspeech_0005edd9_1.ogg" (60798 bytes, is_voice=true)
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 38 -> 40
+  - ステージ 40 Result Script 自動実行: "; player chooses name
+GetPlayerName
+player.addScriptPackage CG00PlayerSection3
+; run timer before starting dialogue again
+set CG00.runTimer to 1
+set CG00.timer to 1"
+[Script] GetPlayerName: プレイヤー名入力ダイアログ要求
+[Script] AddScriptPackage: CG00PlayerSection3 (target=FormId(0x0001F388))
+[ChargenMenu] 名前入力ダイアログ開始: default="James"
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 40 -> 42
+  - ステージ 42 Result Script 自動実行: "set CG00.runTimer to 0
+; dad starts speaking again
+set CG00DadREF.doTalk to 1"
+[SoundEngine] 台詞終了: FormID=0x0005EDD9
+[SoundEngine] ResultScript 自動実行: "set CG00DadREF.doTalk to 1
+"
+[SoundEngine] 実機 INFO 選択成功: FormID=0x000202C2, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_000202c2_1.ogg" (34353 bytes, is_voice=true)        
+[SoundEngine] 台詞終了: FormID=0x000202C2
+[SoundEngine] 実機 INFO 選択成功: FormID=0x000202C3, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_000202c3_1.ogg" (45056 bytes, is_voice=true)        
+[ChargenMenu] プレイヤー名決定: "James"
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 42 -> 42
+  - ステージ 42 Result Script 自動実行: "set CG00.runTimer to 0
+; dad starts speaking again
+set CG00DadREF.doTalk to 1"
+[SoundEngine] 台詞終了: FormID=0x000202C3
+[SoundEngine] ResultScript 自動実行: "setstage CG00 60"
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 42 -> 60
+  - ステージ 60 Result Script 自動実行: "; player chooses face/body
+ShowRaceMenu
+set CG00.runTimer to 1"
+[Script] ShowRaceMenu: プレイヤー容姿・性別カスタマイズ要求
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0001F381, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_0001f381_1.ogg" (23210 bytes, is_voice=true)        
+[ChargenMenu] キャラメイク画面 (RaceSexMenu) 開始
+[SoundEngine] 台詞終了: FormID=0x0001F381
+[SoundEngine] ResultScript 自動実行: "CG00GeneProjectorREF.playgroup backward 0"
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0005EDD6, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_0005edd6_1.ogg" (11522 bytes, is_voice=true)        
+[SoundEngine] 台詞終了: FormID=0x0005EDD6
+[SoundEngine] ResultScript 自動実行: "set CG00DadREF.doTalk to 0
+set CG00MomREF.doTalk to 1"
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0005EDD9, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\femaleuniquemom\cg00_cg00momspeech_0005edd9_1.ogg" (60798 bytes, is_voice=true)      
+[SoundEngine] 台詞終了: FormID=0x0005EDD9
+[SoundEngine] ResultScript 自動実行: "set CG00DadREF.doTalk to 1
+"
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0001F380, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_0001f380_1.ogg" (58647 bytes, is_voice=true)        
+[ChargenMenu] キャラメイク完了: sex=Female, race=Caucasian, hair=Default
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 60 -> 62
+  - ステージ 62 Result Script 自動実行: "; set when player exits menu mode
+player.addScriptPackage CG00PlayerSection4"
+[Script] AddScriptPackage: CG00PlayerSection4 (target=FormId(0x0001F388))
+[Script] AddScriptPackage: CG00PlayerSection4 (target=FormId(0x00000014))
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 62 -> 65
+  - ステージ 65 Result Script 自動実行: "; dad matches player's race and face
+CG01DadREF.MatchRace player
+CG02DadREF.MatchRace player
+CG03DadREF.MatchRace player
+MQDadREF.MatchRace player
+; match face
+CG01DadREF.MatchFaceGeometry player CGMatchFace
+CG02DadREF.MatchFaceGeometry player CGMatchFace
+CG03DadREF.MatchFaceGeometry player CGMatchFace
+MQDadREF.MatchFaceGeometry player CGMatchFace"
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 65 -> 80
+  - ステージ 80 Result Script 自動実行: "player.addScriptPackage CG00PlayerSection5
+; Both start talking in this section
+set CG00DadREF.doTalk to 1
+set CG00MomREF.doTalk to 1
+; try evp-ing everybody to synch animations better
+CG00DadREF.evp
+CG00MomREF.evp
+CG00DoctorLiREF.evp
+; enable next Dad
+CG01DadRef.enable"
+[Script] AddScriptPackage: CG00PlayerSection5 (target=FormId(0x0001F388))
+[Script] EvaluatePackage (AI パッケージ再評価要求): subject=None
+[Script] EvaluatePackage (AI パッケージ再評価要求): subject=None
+[Script] EvaluatePackage (AI パッケージ再評価要求): subject=None
+[Package] プレイヤーにアニメーション "meshes\characters\_male\idleanims\cg00playersection04.kf" を適用
+[AI/EVP] プレイヤーにアニメーション "meshes\characters\_male\idleanims\cg00playersection01.kf" を適用
+[AI/EVP] プレイヤーにアニメーション "meshes\characters\_male\idleanims\cg00playersection01.kf" を適用
+[AI/EVP] プレイヤーにアニメーション "meshes\characters\_male\idleanims\cg00playersection01.kf" を適用
+[SoundEngine] 台詞終了: FormID=0x0001F380
+[SoundEngine] ResultScript 自動実行: "setstage CG00 80"
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 80 -> 80
+  - ステージ 80 Result Script 自動実行: "player.addScriptPackage CG00PlayerSection5
+; Both start talking in this section
+set CG00DadREF.doTalk to 1
+set CG00MomREF.doTalk to 1
+; try evp-ing everybody to synch animations better
+CG00DadREF.evp
+CG00MomREF.evp
+CG00DoctorLiREF.evp
+; enable next Dad
+CG01DadRef.enable"
+[Script] AddScriptPackage: CG00PlayerSection5 (target=FormId(0x0001F388))
+[Script] EvaluatePackage (AI パッケージ再評価要求): subject=None
+[Script] EvaluatePackage (AI パッケージ再評価要求): subject=None
+[Script] EvaluatePackage (AI パッケージ再評価要求): subject=None
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0001F37C, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_0001f37c_1.ogg" (9548 bytes, is_voice=true)
+[AI/EVP] プレイヤーにアニメーション "meshes\characters\_male\idleanims\cg00playersection01.kf" を適用
+[AI/EVP] プレイヤーにアニメーション "meshes\characters\_male\idleanims\cg00playersection01.kf" を適用
+[AI/EVP] プレイヤーにアニメーション "meshes\characters\_male\idleanims\cg00playersection01.kf" を適用
+[SoundEngine] 台詞終了: FormID=0x0001F37C
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0001F37B, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_0001f37b_1.ogg" (55708 bytes, is_voice=true)        
+[SoundEngine] 台詞終了: FormID=0x0001F37B
+[SoundEngine] ResultScript 自動実行: "setstage CG00 85"
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 80 -> 85
+  - ステージ 85 Result Script 自動実行: "; beginning of emergency"
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0001F37A, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_0001f37a_1.ogg" (30655 bytes, is_voice=true)        
+[SoundEngine] 台詞終了: FormID=0x0001F37A
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0001F379, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_0001f379_1.ogg" (15928 bytes, is_voice=true)        
+[SoundEngine] 台詞終了: FormID=0x0001F379
+[SoundEngine] ResultScript 自動実行: "setstage CG00 90"
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 85 -> 90
+  - ステージ 90 Result Script 自動実行: "set CG00.timer to 2.2
+set CG00.runTimer to 1
+imod FadeToWhiteAndBackISFX
+playSound QSTFadeToWhiteA"
+[Script] imod (ImageSpaceModifier 適用): FadeToWhiteAndBackISFX
+[Script] PlaySound: QSTFadeToWhiteA
+[SoundEngine] PlaySound: EDID="QSTFadeToWhiteA" -> File="fx\qst\qst_fadetowhite_a.wav"
+[SoundEngine] 音声データ再生開始: "sound\fx\qst\qst_fadetowhite_a.wav" (2634944 bytes, is_voice=false)
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0001F37C, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_0001f37c_1.ogg" (9548 bytes, is_voice=true)
+[SoundEngine] 台詞終了: FormID=0x0001F37C
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0001F37C, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_0001f37c_1.ogg" (9548 bytes, is_voice=true)
+[SoundEngine] 台詞終了: FormID=0x0001F37C
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0001F37C, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_0001f37c_1.ogg" (9548 bytes, is_voice=true)
+[SoundEngine] 台詞終了: FormID=0x0001F37C
+[SoundEngine] 実機 INFO 選択成功: FormID=0x0001F37C, Speaker="NPC"
+[SoundEngine] 音声データ再生開始: "sound\voice\fallout3.esm\maleuniquedad\cg00_cg00dadspeech_0001f37c_1.ogg" (9548 bytes, is_voice=true)
+[QuestManager] クエスト "CG00" (0x0001F388) ステージ更新: 90 -> 100
+  - ステージ 100 Result Script 自動実行: "player.removescriptpackage
+set CG00MomREF.doTalk to 0
+set CG00DadREF.doTalk to 0
+rimod CG00BirthBaseISFX
+CG00DadREF.disable
+stopQuest CG00
+; set this now to avoid double 3D reset in CG02
+SetPCYoung  1       ; default hair
+; do this last as it contains player.moveto:
+setstage CG01 0"
+[Script] RemoveScriptPackage
+[Script] rimod (ImageSpaceModifier 解除): CG00BirthBaseISFX
+[Script] CompleteQuest: 0x0001F388
+[Script] Player Age/Young 変更要求: ["SetPCYoung", "1"]
+[QuestManager] クエスト "Baby Steps" (0x00014E83) ステージ更新: 0 -> 0
+  - ステージ 0 Result Script 自動実行: "CG01DadREF.moveto CG01DadStartMarker
+setstage CG01 5
+player.setscale .4
+player.moveto CG01PlayerStartMarker"
+[Script] MoveTo 要求: subject=None, target=CG01DadStartMarker
+[QuestManager] クエスト "Baby Steps" (0x00014E83) ステージ更新: 0 -> 5
+  - ステージ 5 Result Script 自動実行: "SetLocationSpecificLoadScreensOnly 1
+SetInCharGen 1 ; no leveling during chargen
+; enable NPCs
+CG01DadRef.enable
+; enable CG02 NPCs now so they can get in position
+CG02DadRef.enable
+; start scene
+set CG01DadREF.doTalk to 1
+set CG01DadREF.talking to 0
+EnablePlayerControls 0 0 0 0 1 ; enable looking
+DisablePlayerControls 1 1 1 1 0 0 1 ; disable everything but looking
+AutoDisplayObjectives 1
+SetNoActivationSound QSTBabyBabble ; cry on activation failure
+SetPCToddler 1  ; make PC use toddler walk animation
+SetPCYoung  1       ; default hair
+playBink "1 year later.bik" 0 0 1 0; don't interrupt, don't mute audio"
+[Script] SetInCharGen: 1 (in_chargen=true)
+[Script] EnablePlayerControls: プレイヤー操作有効化 (flags: PlayerControlFlags { movement: false, looking: false, pipboy: false, fight: false, pov: true, cam_switch: true })
+[Script] DisablePlayerControls: プレイヤー操作無効化 (flags: PlayerControlFlags { movement: false, looking: false, pipboy: false, fight: false, pov: true, cam_switch: true })
+[Script] Player Age/Young 変更要求: ["SetPCYoung", "1"]
+[Script] PlayBink ムービー再生要求: "1 year later.bik"
+[Script] MoveTo 要求: subject=Some(FormId(0x00000014)), target=CG01PlayerStartMarker
+[HUD通知] [Quest Started] Baby Steps
+[BinkVideo] 指定されたビデオファイルが見つかりません: "1 year later.bik"
+[MoveTo] 未知のマーカー "CG01DadStartMarker" への配置要求 (スキップ)
+[MoveTo] 未知のマーカー "CG01PlayerStartMarker" への配置要求 (スキップ)
+[QuestManager] クエスト "Baby Steps" (0x00014E83) ステージ更新: 5 -> 70
+  - ステージ 70 Result Script 自動実行: "set CG01.runTimer to 0
+CG01DadREF.evp"
+[Script] EvaluatePackage (AI パッケージ再評価要求): subject=None
+[AI/EVP] プレイヤーにアニメーション "meshes\characters\_male\idleanims\cg00playersection01.kf" を適用
+[SoundEngine] 台詞終了: FormID=0x0001F37C
+[Chargen] プレイヤー性別決定: is_female=false
+[MessageMenu] ボタン選択: 0 -> GetButtonPressed
+[視点切替] 現在の視点モード: ThirdPerson
+PS A:\Project\OpenFallout3> 
