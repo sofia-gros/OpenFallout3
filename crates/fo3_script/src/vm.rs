@@ -111,6 +111,10 @@ pub struct ScriptVm {
     pub player_is_female: bool,
     /// フレームデルタタイム秒 (GetSecondsPassed 評価用)
     pub delta_time: f32,
+    /// ステージ Result Script の遅延実行キュー: (QuestFormID, Stage, ScriptSource)
+    /// 実機の setstage は同フレームで連鎖せず、次フレームの GameMode ループで処理される。
+    /// 参照元: Fallout 3 実機ゲームループ — SetStage の遅延実行仕様
+    pub pending_stage_scripts: std::collections::VecDeque<(FormId, u16, String)>,
 }
 
 impl Default for ScriptVm {
@@ -145,6 +149,7 @@ impl Default for ScriptVm {
             evaluate_package_requests: Vec::new(),
             player_is_female: false,
             delta_time: 0.016,
+            pending_stage_scripts: std::collections::VecDeque::new(),
         }
     }
 }
@@ -191,14 +196,16 @@ impl ScriptVm {
         }
     }
 
-    /// クエストのステージを設定し、ステージに紐づく Result Script (SCTX) を即座に自動実行する。
+    /// クエストのステージを設定し、ステージに紐づく Result Script (SCTX) を遅延実行キューへ積む。
+    /// 実機 Fallout 3 では setstage は次フレームの GameMode ループ開始時に実行される。
+    /// 同フレーム内での setstage 連鎖 (ステージ 5→6→8→9→10 の一気連鎖) を防ぐため、
+    /// Result Script は pending_stage_scripts キューへ積み、app.rs で 1件/フレームで消化する。
+    /// 参照元: Fallout 3 実機ゲームループ仕様 — SetStage 遅延実行
     pub fn set_stage(&mut self, quest_id: FormId, stage: u32) {
         self.quest_stages.insert(quest_id, stage);
         if let Some(script) = self.quest_manager.set_stage(quest_id, stage as u16, None) {
-            let lines: Vec<String> = script.lines().map(|s| s.to_string()).collect();
-            if let Err(e) = self.execute_block(&lines, Some(quest_id)) {
-                eprintln!("警告: クエスト 0x{:08X} ステージ {} スクリプト実行エラー: {:?}", quest_id.0, stage, e);
-            }
+            // Result Script を即時実行せず遅延キューへ積む
+            self.pending_stage_scripts.push_back((quest_id, stage as u16, script));
         }
     }
 
@@ -244,6 +251,7 @@ impl ScriptVm {
     /// - `SetStage 0x00012345 10`
     /// - `set bOpen to 1`
     /// - `player.additem 0x000abcde 1`
+    /// - `CG00DadREF.evp` (dot 記法: prefix が subject EDID)
     /// - `Unlock`
     pub fn execute_statement(&mut self, line: &str, self_id: Option<FormId>) -> Result<(), ScriptError> {
         let no_comment = if let Some(pos) = line.find(';') {
@@ -261,9 +269,31 @@ impl ScriptVm {
             return Ok(());
         }
 
-        let cmd = parts[0].to_lowercase();
+        // dot 記法 subject 解決: `CG00DadREF.evp` や `player.additem` などの
+        // `<ObjectRef>.<Command> [args...]` 形式を検出し、prefix を subject FormID に解決する。
+        // 参照元: GECK スクリプトリファレンス — "Dot Notation (Object Reference)"
+        let (effective_self_id, cmd, cmd_parts) = if let Some(dot_pos) = parts[0].find('.') {
+            let prefix = &parts[0][..dot_pos];
+            let cmd_after_dot = parts[0][dot_pos + 1..].to_lowercase();
+            // prefix を EditorID または特殊キーワードとして解決
+            let resolved = if prefix.eq_ignore_ascii_case("player") {
+                Some(FormId(0x00000014)) // プレイヤーの固定 FormID
+            } else if let Some(&fid) = self.edid_map.get(&prefix.to_ascii_uppercase()) {
+                Some(fid)
+            } else {
+                // グローバル変数名などの場合は prefix スキップ (例: CG00.timer は set コマンドで処理)
+                self_id
+            };
+            // コマンド引数を再構築: dot 後のコマンドと残りの parts
+            let mut new_parts = vec![parts[0][dot_pos + 1..].as_ref()];
+            new_parts.extend_from_slice(&parts[1..]);
+            (resolved, cmd_after_dot, new_parts)
+        } else {
+            (self_id, parts[0].to_lowercase(), parts.to_vec())
+        };
 
-        match cmd.as_str() {
+        let cmd = cmd.as_str();
+        let parts = cmd_parts;
             "setstage" => {
                 if parts.len() >= 3 {
                     let q_id = self.resolve_form_id(parts[1])?;
@@ -885,9 +915,16 @@ mod tests {
         vm.quest_manager.register_quest(test_quest);
         vm.edid_map.insert("MQ01".to_string(), q_mq01);
 
-        // SetStage MQ01 20 を実行 -> ステージスクリプトが自動実行されてアイテムと目標が更新されること！
+        // SetStage MQ01 20 を実行 → Result Script は pending_stage_scripts へ積まれる (遅延実行)
         vm.execute_statement("SetStage MQ01 20", None).unwrap();
         assert_eq!(vm.get_stage(q_mq01), 20);
+
+        // pending_stage_scripts を手動で消化 (app.rs の update() が行う処理を模倣)
+        while let Some((_quest_id, _stage, script)) = vm.pending_stage_scripts.pop_front() {
+            let lines: Vec<String> = script.lines().map(|s| s.to_string()).collect();
+            let _ = vm.execute_block(&lines, Some(q_mq01));
+        }
+
         assert_eq!(vm.get_item_count(item_id), 175); // 150 + 25
         assert!(vm.quest_manager.is_objective_displayed(q_mq01, 20));
         assert!(vm.quest_manager.notifications.iter().any(|n| n.contains("Speak to Colin Moriarty")));

@@ -99,13 +99,33 @@ impl QuestManager {
 
     /// クエストのステージを更新し、履歴へ登録する。
     /// 実機レコードにステージ Result Script (SCTX) が定義されている場合はそれを抽出して返す。
-    /// 参照元: GECK `SetStage <QuestID> <Stage>`
+    /// ステージ 0 以外は同ステージに既に到達済みの場合は重複実行をスキップする。
+    /// 参照元: GECK `SetStage <QuestID> <Stage>`, `GetStageDone <QuestID> <Stage>`
     pub fn set_stage(
         &mut self,
         quest: FormId,
         stage: u16,
         record: Option<&QuestRecord>,
     ) -> Option<String> {
+        // ステージ 0 以外は重複実行をガード (実機の GetStageDone チェックに相当)
+        // 参照元: Fallout 3 実機スクリプト — setstage は履歴済みステージを再実行しない
+        if stage > 0 {
+            let already_done = self.stage_history
+                .get(&quest)
+                .map(|h| h.contains(&stage))
+                .unwrap_or(false);
+            if already_done {
+                let quest_name = self.quests.get(&quest)
+                    .map(|r| if !r.name.is_empty() { r.name.as_str() } else { r.editor_id.as_str() })
+                    .unwrap_or("Unknown Quest");
+                println!(
+                    "[QuestManager] クエスト \"{}\" (0x{:08X}) ステージ {} は既に実行済み — スキップ",
+                    quest_name, quest.0, stage
+                );
+                return None;
+            }
+        }
+
         let prev_stage = self.get_stage(quest);
         self.current_stages.insert(quest, stage);
         self.stage_history

@@ -223,12 +223,17 @@ impl SoundEngine {
             if dad_talking {
                 let dad_id = FormId(0x000290A7);
                 vm.say_queue.push((Some(dad_id), "CG00DadSpeech".to_string()));
+                // push 後に doTalk フラグを即座にリセット (次フレームで再 push されるループを防ぐ)
+                // 参照元: Fallout 3 実機 CG00 スクリプト — doTalk は 1 フレームのトリガー
+                vm.locals.insert("cg00dadref.dotalk".to_string(), 0.0);
             } else if mom_talking {
                 let mom_id = FormId(0x0005EDE0);
                 vm.say_queue.push((Some(mom_id), "CG00MomSpeech".to_string()));
+                vm.locals.insert("cg00momref.dotalk".to_string(), 0.0);
             } else if drli_talking {
                 let drli_id = FormId(0x000290A5);
                 vm.say_queue.push((Some(drli_id), "CG00DoctorLiSpeech".to_string()));
+                vm.locals.insert("cg00doctorliref.dotalk".to_string(), 0.0);
             }
         }
 

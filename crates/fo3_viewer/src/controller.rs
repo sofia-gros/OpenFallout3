@@ -81,7 +81,14 @@ impl Controller {
     /// フレームごとの物理・キャラクタ位置更新を行い、dt (秒) を返す。
     pub fn update(&mut self) -> f32 {
         let now = Instant::now();
-        let dt = (now - self.last_frame_time).as_secs_f32().clamp(0.001, 0.1);
+        // Fallout 3 実機のゲームロジックは 30fps 基準のタイマーで設計されている。
+        // 高 FPS 環境 (100fps 以上) では `dt` が短すぎてタイマーが即刻消費され、
+        // ステージ連鎖が 1 フレームで全部発火するバグが発生する。
+        // ゲームロジック dt を 1/60 秒 (≒16.67ms) 以下に制限する。
+        // 参照元: Fallout 3 実機ゲームループ仕様 (GameMode 30fps 更新周期)
+        const MAX_LOGIC_DT: f32 = 1.0 / 60.0;
+        let raw_dt = (now - self.last_frame_time).as_secs_f32().clamp(0.001, 0.5);
+        let dt = raw_dt.min(MAX_LOGIC_DT);
         self.last_frame_time = now;
 
         // Fallout 3 実機標準プレイヤーカメラ（物理シミュレーション & KCC）

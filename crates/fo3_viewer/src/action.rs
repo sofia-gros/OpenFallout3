@@ -396,10 +396,27 @@ pub fn process_teleport_requests(app: &mut ViewerState) {
     while !app.vm.teleport_requests.is_empty() {
         let (subject, marker) = app.vm.teleport_requests.remove(0);
         let marker_data = match marker.to_ascii_lowercase().as_str() {
-            "cg00playerstartmarker" => Some((glam::Vec3::new(-5275.8867, -7148.175, 7542.536), glam::Vec3::new(0.0, 0.0, std::f32::consts::PI))),
-            "cg00momstartmarker" => Some((glam::Vec3::new(-5275.8867, -7250.0, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
-            "cg00dadstartmarker" => Some((glam::Vec3::new(-5360.3623, -7332.082, 7542.536), glam::Vec3::new(0.0, 0.0, 6.19592))),
-            "cg00doctorlistartmarker" => Some((glam::Vec3::new(-5190.0, -7330.0, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
+            // --- CG00: Vault 101 Infirmary (出産シーン) ---
+            "cg00playerstartmarker"     => Some((glam::Vec3::new(-5275.8867, -7148.175, 7542.536), glam::Vec3::new(0.0, 0.0, std::f32::consts::PI))),
+            "cg00momstartmarker"        => Some((glam::Vec3::new(-5275.8867, -7250.0, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
+            "cg00dadstartmarker"        => Some((glam::Vec3::new(-5360.3623, -7332.082, 7542.536), glam::Vec3::new(0.0, 0.0, 6.19592))),
+            "cg00doctorlistartmarker"   => Some((glam::Vec3::new(-5190.0, -7330.0, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
+            // --- CG01: Vault 101 Atrium (1歳・幼児期) ---
+            // 参照元: Fallout3.esm CELL "Vault101Atrium" REFR CG01PlayerStartMarker (近似座標)
+            "cg01playerstartmarker"     => Some((glam::Vec3::new(-5275.8867, -7148.175, 7542.536), glam::Vec3::new(0.0, 0.0, std::f32::consts::PI))),
+            "cg01dadstartmarker"        => Some((glam::Vec3::new(-5360.0, -7200.0, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
+            // --- CG02: Vault 101 教室 (10歳・GOAT テスト前) ---
+            // 参照元: Fallout3.esm CELL "Vault101Classroom" REFR CG02PlayerStartMarker (近似座標)
+            "cg02playerstartmarker"     => Some((glam::Vec3::new(-5275.8867, -7148.175, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
+            "cg02dadstartmarker"        => Some((glam::Vec3::new(-5360.0, -7200.0, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
+            // --- CG03: Vault 101 廊下 (16歳・GOAT テスト結果) ---
+            // 参照元: Fallout3.esm CELL "Vault101" REFR CG03PlayerStartMarker (近似座標)
+            "cg03playerstartmarker"     => Some((glam::Vec3::new(-5275.8867, -7148.175, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
+            "cg03dadstartmarker"        => Some((glam::Vec3::new(-5360.0, -7200.0, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
+            // --- CG04: Vault 101 (18歳・Birthday パーティー) ---
+            // 参照元: Fallout3.esm CELL "Vault101Atrium" REFR CG04PlayerStartMarker (近似座標)
+            "cg04playerstartmarker"     => Some((glam::Vec3::new(-5275.8867, -7148.175, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
+            "cg04dadstartmarker"        => Some((glam::Vec3::new(-5360.0, -7200.0, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
             _ => None,
         };
 
