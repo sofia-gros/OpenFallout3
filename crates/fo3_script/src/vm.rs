@@ -320,7 +320,7 @@ impl ScriptVm {
                 if parts.len() >= 4 && parts[2].eq_ignore_ascii_case("to") {
                     let var_name = parts[1];
                     let expr = parts[3..].join(" ");
-                    let val = self.eval_expr(&expr);
+                    let val = self.eval_expr(&expr, self_id);
                     let lower_var = var_name.to_ascii_lowercase();
                     // グローバル変数                    // 変数解決 (case-insensitive 検索)
                     let global_key = self.globals.keys()
@@ -589,7 +589,7 @@ impl ScriptVm {
     }
 
     /// GECK スクリプトの単純な二項比較条件式 (例: `bLocked == 1`, `timer > 0`) を評価する。
-    pub fn eval_condition_str(&self, expr: &str) -> bool {
+    pub fn eval_condition_str(&self, expr: &str, self_id: Option<FormId>) -> bool {
         // 前後のカッコや空白を除去
         let clean = expr.trim().trim_matches(|c| c == '(' || c == ')').trim();
         if clean.is_empty() {
@@ -617,9 +617,9 @@ impl ScriptVm {
             let left_str = clean[..pos].trim();
             let right_str = clean[pos + len..].trim();
 
-            let left_val = self.eval_expr(left_str);
-            let right_val = self.eval_expr(right_str);
-
+            let left_val = self.eval_expr(left_str, self_id);
+            let right_val = self.eval_expr(right_str, self_id);
+            
             match op {
                 "==" => (left_val - right_val).abs() < 1e-4,
                 "!=" => (left_val - right_val).abs() >= 1e-4,
@@ -630,25 +630,25 @@ impl ScriptVm {
                 _ => true,
             }
         } else {
-            // 演算子なし (単一変数または数値): 0 でなければ true
-            self.eval_expr(clean).abs() > 1e-4
+            // 単一値 (ブール評価): 0 以外なら true
+            self.eval_expr(clean, self_id).abs() > 1e-4
         }
     }
 
     /// 算術式 (加算・減算) または単一トークンを評価して float 値を算出する。
-    pub fn eval_expr(&self, expr: &str) -> f32 {
+    pub fn eval_expr(&self, expr: &str, self_id: Option<FormId>) -> f32 {
         let clean = expr.trim();
         if let Some((left, right)) = clean.split_once(" - ") {
-            return self.eval_expr(left) - self.eval_expr(right);
+            return self.eval_expr(left, self_id) - self.eval_expr(right, self_id);
         }
         if let Some((left, right)) = clean.split_once(" + ") {
-            return self.eval_expr(left) + self.eval_expr(right);
+            return self.eval_expr(left, self_id) + self.eval_expr(right, self_id);
         }
-        self.resolve_value(clean)
+        self.resolve_value(clean, self_id)
     }
 
     /// 変数名、関数式、または数値リテラルから float 値を解決する。
-    pub fn resolve_value(&self, token: &str) -> f32 {
+    pub fn resolve_value(&self, token: &str, self_id: Option<FormId>) -> f32 {
         let trimmed = token.trim();
         let lower = trimmed.to_ascii_lowercase();
 
@@ -684,15 +684,35 @@ impl ScriptVm {
             return v;
         }
 
-        // 3. ローカル変数
-        if let Some(&v) = self.locals.get(&lower) {
-            return v;
-        }
-        if let Some((_, sub)) = lower.split_once('.') {
+        // 3. ローカル変数 / クエスト変数
+        if let Some((prefix, sub)) = lower.split_once('.') {
+            // "QuestID.var" の形式
+            let mut target_q_id = None;
+            if let Some(q_id) = self.edid_map.get(prefix).or_else(|| self.edid_map.get(&prefix.to_ascii_uppercase())) {
+                if self.quest_manager.quests.contains_key(q_id) {
+                    target_q_id = Some(*q_id);
+                }
+            }
+            if let Some(q_id) = target_q_id {
+                if let Some(v) = self.quest_manager.get_quest_variable(q_id, sub) {
+                    return v as f32;
+                }
+            }
             if let Some(&v) = self.locals.get(sub) {
                 return v;
             }
         } else {
+            // プレフィックスなし変数 (timer等) -> self_id のクエスト変数を優先確認
+            if let Some(q_id) = self_id {
+                if self.quest_manager.quests.contains_key(&q_id) {
+                    if let Some(v) = self.quest_manager.get_quest_variable(q_id, &lower) {
+                        return v as f32;
+                    }
+                }
+            }
+            if let Some(&v) = self.locals.get(&lower) {
+                return v;
+            }
             let prefixed = format!("cg00.{}", lower);
             if let Some(&v) = self.locals.get(&prefixed) {
                 return v;
@@ -738,7 +758,7 @@ impl ScriptVm {
 
                 let parent_active = if_stack.last().map(|&(active, _)| active).unwrap_or(true);
                 if parent_active {
-                    let cond = self.eval_condition_str(cond_str);
+                    let cond = self.eval_condition_str(cond_str, self_id);
                     if_stack.push((cond, cond));
                 } else {
                     if_stack.push((false, true)); // 親が無効なら自身も無効
@@ -755,7 +775,7 @@ impl ScriptVm {
                 let parent_active = if len > 1 { if_stack[len - 2].0 } else { true };
                 if let Some((ref mut active, ref mut matched)) = if_stack.last_mut() {
                     if parent_active && !*matched {
-                        let cond = self.eval_condition_str(cond_str);
+                        let cond = self.eval_condition_str(cond_str, self_id);
                         *active = cond;
                         if cond {
                             *matched = true;

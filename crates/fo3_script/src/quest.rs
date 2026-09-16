@@ -201,18 +201,19 @@ impl QuestManager {
     }
 
     /// クエスト変数を設定する。
+    /// クエスト変数を取得する。
+    pub fn get_quest_variable(&self, quest: FormId, name: &str) -> Option<f64> {
+        self.quest_variables
+            .get(&quest)
+            .and_then(|vars| vars.get(&name.to_ascii_lowercase()).copied())
+    }
+
+    /// クエスト変数を設定
     pub fn set_quest_variable(&mut self, quest: FormId, name: &str, value: f64) {
         self.quest_variables
             .entry(quest)
             .or_default()
             .insert(name.to_ascii_lowercase(), value);
-    }
-
-    /// クエスト変数を取得
-    pub fn get_quest_variable(&self, quest: FormId, name: &str) -> Option<f64> {
-        self.quest_variables
-            .get(&quest)
-            .and_then(|vars| vars.get(&name.to_ascii_lowercase()).copied())
     }
 }
 

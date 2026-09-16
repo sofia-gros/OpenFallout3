@@ -60,8 +60,11 @@ fn setup() -> Option<(ScriptVm, EventDispatcher)> {
     let pack_map   = reader.read_all_packages_map().ok()?;
 
     let mut vm = ScriptVm::new();
-    for (_, q) in &quest_map {
+    for (id, q) in &quest_map {
         vm.quest_manager.register_quest(q.clone());
+        if !q.editor_id.is_empty() {
+            vm.edid_map.insert(q.editor_id.to_ascii_uppercase(), *id);
+        }
     }
     for (id, scpt) in &script_map {
         vm.scripts.insert(*id, scpt.clone());
