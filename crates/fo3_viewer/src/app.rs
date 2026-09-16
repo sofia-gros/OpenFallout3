@@ -68,6 +68,7 @@ pub struct ViewerState {
     pub nif_cache: NifCache,
     pub texture_cache: HashMap<String, GpuTexture>,
     pub vm: fo3_script::ScriptVm,
+    pub ai: crate::ai::AiManager,
     pub dispatcher: fo3_script::EventDispatcher,
     pub ui_renderer: fo3_render::UiRenderer,
     /// キーバインド・入力管理マネージャー (Fallout 3 実機標準 + F1-F12 デバッグ)
@@ -320,6 +321,7 @@ impl ViewerState {
             nif_cache,
             texture_cache,
             vm,
+            ai: crate::ai::AiManager::new(),
             dispatcher,
             ui_renderer,
             input_manager: crate::input::InputManager::new(),
@@ -339,6 +341,13 @@ impl ViewerState {
             _ => "",
         };
         state.setup_scripts_for_cell(cell_edid);
+
+        let interactables = state.interactables.clone();
+        for obj in interactables {
+            if let crate::interact::InteractableKind::Actor { form_id, base_form_id, .. } = obj.kind {
+                state.ai.register_actor(fo3_esm::types::FormId(form_id), fo3_esm::types::FormId(base_form_id), &state.master_context);
+            }
+        }
 
         if matches!(target, ViewerTarget::NewGame) {
             println!("============================================================");
@@ -493,11 +502,14 @@ impl ViewerState {
         // 0.1 スクリプトからのテレポート移動要求 (MoveTo) の消化
         crate::action::process_teleport_requests(self);
 
-        // 0.2 スクリプトからの AI パッケージ・アニメーション要求 (AddScriptPackage / evp) の消化
+        // 0.2 スクリプトからの AI パッケージ操作要求 (AddScriptPackage / evp) を処理
         crate::action::process_package_requests(self);
         crate::action::process_playgroup_requests(self);
 
-        // 0.3 オーディオ・会話シーケンスの進行更新 (実機 DIAL/INFO/SOUN 連動)
+        // AI Package Evaluator を更新
+        self.ai.update(&mut self.vm, &self.master_context);
+
+        // 0.3 サウンドエンジンを更新 (音声 DIAL/INFO/SOUN 再生)
         self.vm.chargen_menu_active = self.chargen_menu.is_active();
         self.sound_engine.update(dt, &mut self.vm, &self.master_context, &mut self.vfs);
 

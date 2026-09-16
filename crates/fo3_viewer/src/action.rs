@@ -527,6 +527,12 @@ pub fn process_package_requests(app: &mut ViewerState) {
             .values()
             .find(|p| p.editor_id.as_deref().map(|e| e.eq_ignore_ascii_case(&pkg_name)).unwrap_or(false))
         {
+            if let Some(actor_state) = app.ai.actors.get_mut(&target_fid) {
+                if !actor_state.script_packages.contains(&pkg.form_id) {
+                    actor_state.script_packages.insert(0, pkg.form_id); // 高優先度
+                }
+            }
+
             kf_paths.extend(resolve_idle_kf_from_pack(&app.master_context, pkg));
         }
 

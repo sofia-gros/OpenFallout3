@@ -126,7 +126,8 @@ pub struct PackRecord {
     pub idle_collection: Option<PackIdleCollection>,
     pub quest_form_id: Option<FormId>,
     pub combat_style_form_id: Option<FormId>,
-    /// パッケージ適用条件式リスト (CTDA)。全条件が成立した場合のみパッケージ適用。
+    pub topic_id: Option<FormId>,
+    /// パッケージに付随する条件 (CTDA)（複数可）。すべて満たした時のみ有効
     pub conditions: Vec<TargetCondition>,
 }
 
@@ -150,6 +151,7 @@ impl PackRecord {
         let mut idle_form_ids: Vec<FormId> = Vec::new();
         let mut quest_form_id = None;
         let mut combat_style_form_id = None;
+        let mut topic_id = None;
         let mut conditions: Vec<TargetCondition> = Vec::new();
 
         for sub in subrecords {
@@ -222,15 +224,15 @@ impl PackRecord {
                         combat_style_form_id = Some(FormId(LittleEndian::read_u32(&sub.data[0..4])));
                     }
                 }
-                // Idle Collection サブレコード (IDLF/IDLC/IDLT/IDLA)
-                // 参照元: `actor_support.rs:decode_package_idle_collection` (L659-745)
+                // Idle Collection 関連 (IDLF/IDLC/IDLT/IDLA)
+                // 参照: `actor_support.rs:decode_package_idle_collection` (L659-745)
                 SUB_IDLF => {
                     if let Some(&b0) = sub.data.first() {
                         idle_flags = b0;
                     }
                 }
                 SUB_IDLC => {
-                    // 宣言アニメーション数 (1 または 4 バイト) — カウント不一致は不採用
+                    // 数値情報 (1 または 4 バイト) – 今回は使わない
                 }
                 SUB_IDLT => {
                     if sub.data.len() >= 4 {
@@ -238,7 +240,7 @@ impl PackRecord {
                     }
                 }
                 SUB_IDLA => {
-                    // 4 バイト境界で区切られた IDLE FormID リスト
+                    // 4 バイトずつ切り出して IDLE FormID 抽出
                     let complete_len = sub.data.len() / 4 * 4;
                     for chunk in sub.data[..complete_len].chunks_exact(4) {
                         let raw = LittleEndian::read_u32(chunk);
@@ -253,9 +255,12 @@ impl PackRecord {
                     }
                 }
                 _ => {
-                    // QSTI サブレコード等
+                    // QSTI 等その他
                     if sub.type_id.0 == *b"QSTI" && sub.data.len() >= 4 {
                         quest_form_id = Some(FormId(LittleEndian::read_u32(&sub.data[0..4])));
+                    }
+                    if sub.type_id.0 == *b"TNAM" && sub.data.len() >= 4 {
+                        topic_id = Some(FormId(LittleEndian::read_u32(&sub.data[0..4])));
                     }
                 }
             }
@@ -284,6 +289,7 @@ impl PackRecord {
             idle_collection,
             quest_form_id,
             combat_style_form_id,
+            topic_id,
             conditions,
         })
     }

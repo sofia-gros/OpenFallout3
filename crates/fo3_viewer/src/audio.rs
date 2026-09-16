@@ -212,39 +212,6 @@ impl SoundEngine {
             }
         }
 
-        // 3. doTalk フラグに基づく自律的トピックトリガー (CG00 等の実機 AI 会話進行)
-        // 参照元: Fallout 3 実機スクリプト `CG00DadREF.doTalk`, `CG00MomREF.doTalk`, `CG00DoctorLiREF.doTalk`
-        //
-        // doTalk はラッチ変数: Quest Script / INFO ResultScript が明示的に 0/1 を切り替えるまで
-        // 1 を保持し続ける (例: CG00SCRIPT stage 10/22/42/80 で `set ...doTalk to 1`,
-        // INFO 0x0001F386 の ResultScript で `set CG00DadREF.doTalk to 0` 等)。
-        // 参照元: references 実機 ESM — CG00SCRIPT (SCPT 0x0003A17C), INFO 0x0001F386/0x0005EDD7 等
-        //
-        // `in_chargen` は stage 0 の `SetInCharGen 1` の実行により 1 になる
-        // ダイアログ UI 中 (chargen_menu_active) は自律発言を抑制
-        // app.rs が `chargen_menu.is_active()` を VM に同期している想定
-        if self.active_subtitles.is_empty()
-            && vm.say_queue.is_empty()
-            && !line_ended_this_frame
-            && !vm.chargen_menu_active
-        {
-            let dad_talking = vm.globals.get("cg00dadref.dotalk").copied().unwrap_or(0.0) == 1.0;
-            let mom_talking = vm.globals.get("cg00momref.dotalk").copied().unwrap_or(0.0) == 1.0;
-            let drli_talking = vm.globals.get("cg00doctorliref.dotalk").copied().unwrap_or(0.0) == 1.0;
-
-            // Dad の発言が終わってから Mom が発言する等、順序制御
-            if dad_talking {
-                let dad_id = FormId(0x000290A7);
-                vm.say_queue.push((Some(dad_id), "CG00DadSpeech".to_string()));
-            } else if mom_talking {
-                let mom_id = FormId(0x0005EDE0);
-                vm.say_queue.push((Some(mom_id), "CG00MomSpeech".to_string()));
-            } else if drli_talking {
-                let drli_id = FormId(0x000290A5);
-                vm.say_queue.push((Some(drli_id), "CG00DoctorLiSpeech".to_string()));
-            }
-        }
-
         // 4. Say キューの消費 (実機 `DIAL` & `INFO` レコード連動)
         let say_requests: Vec<(Option<FormId>, String)> = vm.say_queue.drain(..).collect();
         for (speaker_id, topic_name) in say_requests {

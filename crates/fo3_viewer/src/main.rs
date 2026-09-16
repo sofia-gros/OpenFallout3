@@ -3,6 +3,7 @@
 //! Fallout 3 メッシュ & セルシーンビューアー (winit + wgpu)。
 
 mod action;
+pub mod ai;
 mod anim;
 mod app;
 pub mod audio;
