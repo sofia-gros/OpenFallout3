@@ -114,6 +114,15 @@ crates/fo3_script/
 2. `QUST` (Quest) レコードのパースを強化し、クエスト目標、ステージ進行状態、ログエントリーを管理する `QuestManager` を構築。
 3. 会話終了フラグ（`Goodbye`）処理により、会話完了後のスクリプト連動（NPC移動やアイテム付与）を完遂。
 
+#### Phase 10-D 実証結果 (2026-09-16, CG00 通過) — 台詞連鎖とステージ連動の確定事項
+- **doTalk はラッチ変数**: SoundEngine が台詞開始直後に自動リセットしない。書き込み主体は CG00SCRIPT の `set ...doTalk to 1` と INFO ResultScript の `set ...doTalk to 0/1` のみ (`knowledge/phase11_ai_package_and_quest_progression.md` 3.1 節参照)。
+- **Result Script の遅延実行**: `vm.set_stage` は Result Script を `pending_stage_scripts` へ積み、app.rs 実機ループが 1 件/フレームで消化する。`new_game_simulation_test` はテスト内で同処理を `digest_pending` クロージャ (1件/フレーム) として模擬。
+- **会話連鎖の検証済み INFO**:
+  - 0x0001F387「Let's see... Are you a boy or a girl?」(Stage 10→父 → ResultScript `setstage CG00 18`)
+  - 0x0001F385 (Stage 22→父の性別認知 → `set dad.doTalk 0; set mom.doTalk 1`)
+  - 0x0005EDD8 (母の台詞 → `set dad.doTalk 1`)
+- **フレーム休止**: 台詞終了フレーム (`line_ended_this_frame`) は次台词を 1 フレーム休止し、ResultScript の setstage 確定を保証。
+
 ### QUST レコードのバイナリ構造仕様 (実機 ESM 検証済)
 - `EDID`: クエスト EditorID (例: `"MQ01"`, `"MS11"`)
 - `FULL`: クエスト表示名称 (例: `"Following in His Footsteps"`)

@@ -368,3 +368,48 @@ impl NiBSplineCompTransformInterpolator {
 }
 
 
+
+/// 参照元: 
+/// 参照元: `references/nifskope/build/nif.xml:L3592` (`NiTransformController`)
+/// 継承元: NiSingleInterpController -> NiInterpController -> NiTimeController
+#[derive(Debug, Clone, PartialEq)]
+pub struct NiTransformController {
+    // --- NiTimeController ---
+    pub next_controller: i32,
+    pub flags: u16,
+    pub frequency: f32,
+    pub phase: f32,
+    pub start_time: f32,
+    pub stop_time: f32,
+    pub target: i32,
+    // --- NiInterpController ---
+    // (None for v20.2.0.7)
+    // --- NiSingleInterpController ---
+    pub interpolator: i32,
+    // --- NiKeyframeController / NiTransformController ---
+    // (None)
+}
+
+impl NiTransformController {
+    pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let next_controller = reader.read_i32::<LittleEndian>()?;
+        let flags = reader.read_u16::<LittleEndian>()?;
+        let frequency = reader.read_f32::<LittleEndian>()?;
+        let phase = reader.read_f32::<LittleEndian>()?;
+        let start_time = reader.read_f32::<LittleEndian>()?;
+        let stop_time = reader.read_f32::<LittleEndian>()?;
+        let target = reader.read_i32::<LittleEndian>()?;
+        let interpolator = reader.read_i32::<LittleEndian>()?;
+
+        Ok(NiTransformController {
+            next_controller,
+            flags,
+            frequency,
+            phase,
+            start_time,
+            stop_time,
+            target,
+            interpolator,
+        })
+    }
+}

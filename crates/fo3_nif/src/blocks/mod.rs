@@ -10,7 +10,7 @@ pub mod skin;
 
 pub use animation::{
     ControlledBlock, NiBSplineBasisData, NiBSplineCompTransformInterpolator,
-    NiBSplineData, NiControllerSequence, NiStringPalette, NiTransformData,
+    NiBSplineData, NiControllerSequence, NiStringPalette, NiTransformData, NiTransformController,
     NiTransformInterpolator,
 };
 pub use bhk::{
@@ -62,6 +62,7 @@ pub enum NifBlock {
     NiStringPalette(NiStringPalette),
     NiTransformInterpolator(NiTransformInterpolator),
     NiTransformData(NiTransformData),
+    NiTransformController(NiTransformController),
     NiControllerSequence(NiControllerSequence),
     NiBSplineBasisData(NiBSplineBasisData),
     NiBSplineData(NiBSplineData),

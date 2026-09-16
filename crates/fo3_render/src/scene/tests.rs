@@ -914,6 +914,8 @@
             anim_player: None,
             kf_nif: None,
             sequence_manager: None,
+            blend_from: None,
+            blend_total: 0.3,
             anim_pose: crate::animation::SkeletonPose::default(),
             anim_skin_meshes: Vec::new(),
             anim_rigid_meshes: vec![

@@ -6,6 +6,7 @@ mod action;
 mod anim;
 mod app;
 pub mod audio;
+mod bink_player;
 mod camera;
 mod chargen_menu;
 mod controller;

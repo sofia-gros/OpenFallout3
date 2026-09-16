@@ -61,12 +61,12 @@ impl QuestRecord {
         for sub in subrecords {
             match sub.type_id {
                 SUB_EDID => {
-                    record.editor_id = String::from_utf8_lossy(&sub.data)
+                    record.editor_id = sub.as_string()
                         .trim_end_matches('\0')
                         .to_string();
                 }
                 SUB_FULL => {
-                    record.name = String::from_utf8_lossy(&sub.data)
+                    record.name = sub.as_string()
                         .trim_end_matches('\0')
                         .to_string();
                 }
@@ -110,7 +110,7 @@ impl QuestRecord {
                     }
                 }
                 SUB_SCTX => {
-                    let source = String::from_utf8_lossy(&sub.data)
+                    let source = sub.as_string()
                         .trim_end_matches('\0')
                         .to_string();
                     if let Some(ref mut st) = current_stage {
@@ -132,7 +132,7 @@ impl QuestRecord {
                     }
                 }
                 SUB_NNAM => {
-                    let text = String::from_utf8_lossy(&sub.data)
+                    let text = sub.as_string()
                         .trim_end_matches('\0')
                         .to_string();
                     if let Some(ref mut obj) = current_objective {
@@ -227,3 +227,4 @@ mod tests {
         assert_eq!(quest.objectives[0].text, "Speak to Colin Moriarty");
     }
 }
+

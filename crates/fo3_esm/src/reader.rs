@@ -12,14 +12,14 @@ use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::header::{GroupHeader, RecordHeader};
 use crate::records::{
-    ArmorRecord, DialRecord, HairRecord, InfoRecord, LightRecord, LtexRecord, LvliRecord,
-    MesgRecord, NpcRecord, OtftRecord, PackRecord, QuestRecord, ScptRecord, SounRecord,
+    ArmorRecord, DialRecord, HairRecord, IdleRecord, InfoRecord, LightRecord, LtexRecord,
+    LvliRecord, MesgRecord, NpcRecord, OtftRecord, PackRecord, QuestRecord, ScptRecord, SounRecord,
     StatRecord, Tes4Header, TextureSetRecord,
 };
 use crate::subrecord::{parse_subrecords, Subrecord};
 use crate::types::{
     FormId, FourCC, REC_ACTI, REC_ALCH, REC_AMMO, REC_ARMO, REC_BOOK,
-    REC_CONT, REC_DIAL, REC_DOOR, REC_FURN, REC_HAIR, REC_INFO, REC_KEYM, REC_LIGH, REC_LTEX, REC_LVLI, REC_MESG, REC_MISC,
+    REC_CONT, REC_DIAL, REC_DOOR, REC_FURN, REC_HAIR, REC_IDLE, REC_INFO, REC_KEYM, REC_LIGH, REC_LTEX, REC_LVLI, REC_MESG, REC_MISC,
     REC_MSTT, REC_NPC_, REC_OTFT, REC_PACK, REC_QUST, REC_SCOL, REC_SCPT, REC_SOUN, REC_STAT, REC_TERM, REC_TES4, REC_TXST,
     REC_WEAP, SUB_EDID, SUB_MODL, SUB_SCRI,
 };
@@ -673,6 +673,51 @@ impl<R: Read + Seek> EsmReader<R> {
         }
 
         Ok(packages)
+    }
+
+    /// 全ての Idle アニメーションレコード (IDLE) を一括走査して FormID -> IdleRecord マップを構築する。
+    /// PACK の `IDLA` (Idle Collection) から参照されるレコード群。
+    pub fn read_all_idles_map(&mut self) -> io::Result<HashMap<FormId, IdleRecord>> {
+        let mut idles = HashMap::new();
+        let start_pos = 24 + self.header_record.data_size as u64;
+        self.reader.seek(SeekFrom::Start(start_pos))?;
+
+        while let Some(entry) = self.read_next_entry()? {
+            match entry {
+                EsmEntry::Group(group) => {
+                    if group.target_record_type() == Some(REC_IDLE) {
+                        let group_end =
+                            self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        while self.reader.stream_position()? < group_end {
+                            if let Some(inner) = self.read_next_entry()? {
+                                match inner {
+                                    EsmEntry::Record(header, subs) => {
+                                        if header.type_id == REC_IDLE {
+                                            let rec = IdleRecord::parse(header.form_id, header.flags, &subs)?;
+                                            idles.insert(header.form_id, rec);
+                                        }
+                                    }
+                                    EsmEntry::Group(child_group) => {
+                                        let skip = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        self.skip(skip)?;
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+                    let remaining = group.group_size as u64 - GroupHeader::SIZE as u64;
+                    self.skip(remaining)?;
+                }
+                EsmEntry::Record(rec, _) => {
+                    self.skip(rec.data_size as u64)?;
+                }
+            }
+        }
+
+        Ok(idles)
     }
 
     /// 全てのメッセージレコード (MESG) を一括走査して FormID -> MesgRecord マップを構築する。

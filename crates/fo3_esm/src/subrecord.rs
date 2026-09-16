@@ -23,7 +23,13 @@ impl Subrecord {
         if let Some(&0) = slice.last() {
             slice = &slice[..slice.len() - 1];
         }
-        String::from_utf8_lossy(slice).to_string()
+        
+        let (cow, _, had_errors) = encoding_rs::SHIFT_JIS.decode(slice);
+        if !had_errors {
+            cow.into_owned()
+        } else {
+            String::from_utf8_lossy(slice).into_owned()
+        }
     }
 
     /// u32 値として解釈。
@@ -138,3 +144,4 @@ pub fn parse_subrecords<R: Read>(reader: &mut R, total_size: usize) -> io::Resul
 
     Ok(subrecords)
 }
+

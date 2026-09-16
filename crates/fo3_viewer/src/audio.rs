@@ -220,14 +220,9 @@ impl SoundEngine {
         // INFO 0x0001F386 の ResultScript で `set CG00DadREF.doTalk to 0` 等)。
         // 参照元: references 実機 ESM — CG00SCRIPT (SCPT 0x0003A17C), INFO 0x0001F386/0x0005EDD7 等
         //
-        // `in_chargen` は stage 0 で `SetInCharGen 1` が実行され出生シーン全体で 1 のため、
-        // ダイアログ抑止は UI 表示状態 (chargen_menu_active) で判断する。
-        // app.rs の `chargen_menu.is_active()` が VM 経由で各フレーム同期される。
-        println!("[SoundEngine DEBUG] active={}, say_queue={}, line_ended={}, menu={}",
-            self.active_subtitles.is_empty(),
-            vm.say_queue.is_empty(),
-            line_ended_this_frame,
-            vm.chargen_menu_active);
+        // `in_chargen` は stage 0 の `SetInCharGen 1` の実行により 1 になる
+        // ダイアログ UI 中 (chargen_menu_active) は自律発言を抑制
+        // app.rs が `chargen_menu.is_active()` を VM に同期している想定
         if self.active_subtitles.is_empty()
             && vm.say_queue.is_empty()
             && !line_ended_this_frame
@@ -236,9 +231,8 @@ impl SoundEngine {
             let dad_talking = vm.locals.get("cg00dadref.dotalk").copied().unwrap_or(0.0) == 1.0;
             let mom_talking = vm.locals.get("cg00momref.dotalk").copied().unwrap_or(0.0) == 1.0;
             let drli_talking = vm.locals.get("cg00doctorliref.dotalk").copied().unwrap_or(0.0) == 1.0;
-            println!("[SoundEngine] Autonomous check! dad={}, mom={}, drli={}", dad_talking, mom_talking, drli_talking);
 
-            // Dad が話すターンになった場合は Mom の発話を終了とみなす
+            // Dad の発言が終わってから Mom が発言する等、順序制御
             if dad_talking {
                 let dad_id = FormId(0x000290A7);
                 vm.say_queue.push((Some(dad_id), "CG00DadSpeech".to_string()));

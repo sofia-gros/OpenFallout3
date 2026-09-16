@@ -292,6 +292,7 @@ impl RenderScene {
                         world_transform,
                         None,
                         None,
+                        None, // parent_bone_name
                         nif,
                         vfs,
                         device,

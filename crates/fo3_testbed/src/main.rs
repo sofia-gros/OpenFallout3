@@ -9,12 +9,14 @@
 //! - VFS 統合読み込み検証: `fo3_testbed vfs-test <data_dir> <relative/path>`
 
 use std::env;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufReader, Cursor};
 use std::path::Path;
 use fo3_bsa::BsaArchive;
 use fo3_esm::EsmReader;
+use fo3_esm::records::dial::InfoRecord;
+use fo3_esm::types::FormId;
 use fo3_gamebryo_core::Vec3;
 use fo3_nif::{NifBlock, NifFile, NifHeader};
 use fo3_vfs::VfsManager;
@@ -32,6 +34,8 @@ fn print_usage() {
     println!("  cargo run -p fo3_testbed -- esm-stat <path/to/file.esm> [limit]");
     println!("  cargo run -p fo3_testbed -- esm-ltex <path/to/file.esm> [limit]");
     println!("  cargo run -p fo3_testbed -- esm-cell <path/to/file.esm> <cell_edid>");
+    println!("  cargo run -p fo3_testbed -- esm-ai-packs <path/to/file.esm>");
+    println!("  cargo run -p fo3_testbed -- esm-quest <path/to/file.esm> <quest_edid>");
     println!("  cargo run -p fo3_testbed -- collision-batch <data_dir> [limit]");
     println!("  cargo run -p fo3_testbed -- collision-lines <data_dir> <relative/path>");
     println!("  cargo run -p fo3_testbed -- skin-test <data_dir> <relative/path>");
@@ -332,14 +336,13 @@ fn dump_nif<R: std::io::BufRead>(reader: &mut R, title: &str) -> Result<(), Box<
                     d.compact_control_points.len()
                 );
             }
-            NifBlock::NiBSplineCompTransformInterpolator(interp) => {
-                println!(
-                    "時間: {:.2}s - {:.2}s, SplineData: {}, Basis: {}, Trans: {:?}",
-                    interp.start_time, interp.stop_time, interp.spline_data, interp.basis_data, interp.transform.translation
-                );
+            NifBlock::NiTransformController(ctrl) => {
+                println!("  Type: NiTransformController");
+                println!("  Target: {}", ctrl.target);
+                println!("  Interpolator: {}", ctrl.interpolator);
+                println!("  Next Controller: {}", ctrl.next_controller);
             }
-            NifBlock::Unknown { type_name: _, data } => {
-                println!("(未対応/スキップ - {} バイト)", data.len());
+            _ => {
             }
 
 
@@ -1718,6 +1721,271 @@ fn test_anim(data_dir: &str, relative_path: &str, kf_path: &str) -> Result<(), B
     Ok(())
 }
 
+/// OpenAI 実機データ検証: NPC PKID (AI パッケージリスト) → PACK → IDLE → KF の連鎖をダンプする。
+///
+/// ハードコードされた CG00 ステージ→KF マッピング (action.rs のモック) を廃し、
+/// 実 ESM データから「NPC がどのパッケージを参照し、その IDLE コレクションがどの KF を
+/// 指すか」を検証するための診断コマンド。PACK の CTDA 条件 (GetStage 等) は生バイトで表示する。
+/// 一時診断: INFO (ダイアログ応答) レコードを FormID 整数またはトピック EDID で指定してダンプする。
+fn test_esm_info(esm_path: &str, selectors: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== ESM INFO レコードダンプ: {} ===", esm_path);
+
+    let mut reader = EsmReader::open(esm_path)?;
+    let (topic_map, info_map) = reader.read_all_dialogues_map()?;
+
+    // トピック EDID 逆引き (INFO FormID -> 親 DIAL EDID)
+    let mut topic_edid: HashMap<u32, String> = HashMap::new();
+    let mut topic_infos: HashMap<String, Vec<InfoRecord>> = HashMap::new();
+    for (edid, (dial, infos)) in &topic_map {
+        for info in infos {
+            topic_edid.insert(info.form_id.0, format!("{} ({:#010X} flags={:#04X})", edid, dial.form_id.0, dial.dial_flags));
+            topic_infos.entry(edid.to_ascii_uppercase()).or_default().push(info.clone());
+        }
+    }
+
+    let print_info = |info: &InfoRecord| {
+        println!("  親トピック: {}", topic_edid.get(&info.form_id.0).cloned().unwrap_or("(不明)".into()));
+        println!("  フラグ:     {:#06X}{}", info.flags, {
+            let mut s = String::new();
+            if (info.flags & 0x01) != 0 { s.push_str(" Goodbye"); }
+            if (info.flags & 0x02) != 0 { s.push_str(" Random"); }
+            if (info.flags & 0x04) != 0 { s.push_str(" SayOnce"); }
+            s
+        });
+        println!("  話者NPC:    {:?}", info.speaker_npc);
+        println!("  応答文:     \"{}\"", info.response_text.trim());
+        if !info.conditions.is_empty() {
+            println!("  条件式:");
+            for c in &info.conditions {
+                println!(
+                    "    fn={:#06X} op={:#04X} val={} p1={:#010X} p2={:#010X} ref={:#010X}",
+                    c.function_index, c.operator, c.comparison_value, c.param1, c.param2, c.reference.0
+                );
+            }
+        } else {
+            println!("  条件式:     (なし)");
+        }
+        match &info.result_script_source {
+            Some(src) => println!("  ResultScript: {:?}", src),
+            None => println!("  ResultScript: (なし)"),
+        }
+        if !info.choices.is_empty() {
+            println!("  分岐先:     {:?}", info.choices);
+        }
+    };
+
+    for sel in selectors {
+        if let Ok(fid) = sel.parse::<u32>() {
+            match info_map.get(&FormId(fid)) {
+                Some(info) => {
+                    println!("\n--- INFO {:#010X} ---", info.form_id.0);
+                    print_info(info);
+                }
+                None => println!("\n--- INFO {:#010X} (未発見) ---", fid),
+            }
+        } else {
+            // トピック EDID 指定: 所属する全 INFO を順序どおり表示
+            match topic_infos.get(&sel.to_ascii_uppercase()) {
+                Some(infos) => {
+                    println!("\n=== トピック \"{}\" (INFO {} 件) ===", sel.to_ascii_uppercase(), infos.len());
+                    for info in infos {
+                        println!("\n--- INFO {:#010X} ---", info.form_id.0);
+                        print_info(info);
+                    }
+                }
+                None => println!("\n=== トピック \"{}\" (未発見) ===", sel.to_ascii_uppercase()),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 一時診断: QUST (クエスト) レコードを EDID 指定でダンプする。
+fn test_esm_quest(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== ESM QUST レコードダンプ: {} ===", esm_path);
+
+    let mut reader = EsmReader::open(esm_path)?;
+    let quests = reader.read_all_quests_map()?;
+
+    let target = target_edid.to_ascii_uppercase();
+    for (fid, q) in &quests {
+        if q.editor_id.to_ascii_uppercase() != target {
+            continue;
+        }
+        println!(
+            "\n=== QUES {:#010X} \"{}\" name=\"{}\" script={:?} flags={:#02X} ===",
+            fid.0, q.editor_id, q.name, q.script_form_id, q.flags
+        );
+        let mut stages: Vec<_> = q.stages.iter().collect();
+        stages.sort_by_key(|s| s.index);
+        for st in stages {
+            println!("  stage {:>3}: {:?}", st.index, st.script_source);
+        }
+    }
+    Ok(())
+}
+
+/// 一時診断: SCPT スクリプトレコードを EDID 指定でダンプする。
+fn test_esm_script(esm_path: &str, target_edid: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== ESM SCPT レコードダンプ: {} ===", esm_path);
+
+    let mut reader = EsmReader::open(esm_path)?;
+    let scripts = reader.read_all_scripts_map()?;
+
+    let target = target_edid.to_ascii_uppercase();
+    for (fid, s) in &scripts {
+        if s.edid.to_ascii_uppercase() != target {
+            continue;
+        }
+        println!("\n=== SCPT {:#010X} \"{}\" ===", fid.0, s.edid);
+        println!("--- ソーステキスト ---");
+        println!("{}", s.source_text.clone().unwrap_or_default());
+    }
+    Ok(())
+}
+
+fn test_esm_ai_packs(esm_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== ESM AI パッケージ連鎖検証 (NPC PKID -> PACK -> IDLE -> KF): {} ===", esm_path);
+
+    let mut reader = EsmReader::open(esm_path)?;
+    let (npcs, _, _, _, _) = reader.read_npc_and_armor_map()?;
+    let packs = reader.read_all_packages_map()?;
+    let idles = reader.read_all_idles_map()?;
+
+    // CG00 出産シーン出演者 (Dad / Mom / Dr. Li) と、AI パッケージを持つ全 NPC の件数
+    let cg00_forms = [FormId(0x000290A7), FormId(0x0005EDE0), FormId(0x000290A5)];
+    let cg00_named: Vec<&fo3_esm::records::npc::NpcRecord> = npcs
+        .values()
+        .filter(|n| n.edid.to_ascii_uppercase().starts_with("CG00"))
+        .collect();
+
+    println!("\n-- PKID を持つ NPC 総数: {} / {} --", npcs.values().filter(|n| !n.ai_packages.is_empty()).count(), npcs.len());
+    println!("\n-- CG00 関係 NPC (EDID 先頭: CG00) --");
+    for npc in &cg00_named {
+        println!(
+            "[NPC] {:#010X} \"{}\" full=\"{}\" 女性:{} PKID: {:?}",
+            npc.form_id.0,
+            npc.edid,
+            npc.full_name.as_deref().unwrap_or(""),
+            npc.is_female,
+            npc.ai_packages
+        );
+    }
+    println!("\n-- CG00 固定出演者 (Dad/Mom/DrLi) --");
+    for fid in &cg00_forms {
+        if let Some(npc) = npcs.get(fid) {
+            println!(
+                "[NPC] {:#010X} \"{}\" PKID: {:?}",
+                fid.0, npc.edid, npc.ai_packages
+            );
+        } else {
+            println!("[NPC] {:#010X} (NPC_{} レコード未発見)", fid.0, fid);
+        }
+    }
+
+    // 参照されるパッケージの FormID 集合 (CG00 系 NPC の PKID)
+    let mut referenced_pack_fids: HashSet<FormId> = HashSet::new();
+    for npc in &cg00_named {
+        for fid in &npc.ai_packages {
+            referenced_pack_fids.insert(*fid);
+        }
+    }
+    for fid in &cg00_forms {
+        if let Some(npc) = npcs.get(fid) {
+            for pack_fid in &npc.ai_packages {
+                referenced_pack_fids.insert(*pack_fid);
+            }
+        }
+    }
+
+    println!("\n-- 参照 PACK レコード ({} 件) --", referenced_pack_fids.len());
+    for pack_fid in &referenced_pack_fids {
+        if let Some(p) = packs.get(pack_fid) {
+            println!(
+                "[PACK] {:#010X} EDID=\"{}\" type={:?} quest={:?} idle_collection={:?}",
+                pack_fid.0,
+                p.editor_id.as_deref().unwrap_or(""),
+                p.pack_type,
+                p.quest_form_id,
+                p.idle_collection.as_ref().map(|c| (c.flags, c.timer_seconds, c.animation_form_ids.clone()))
+            );
+        } else {
+            println!("[PACK] {:#010X} (未発見)", pack_fid.0);
+        }
+    }
+
+    // IDLE -> KF パス解決
+    println!("\n-- IDLE -> KF パス解決 --");
+    let mut idle_fids: HashSet<FormId> = HashSet::new();
+    for pack_fid in &referenced_pack_fids {
+        if let Some(p) = packs.get(pack_fid) {
+            if let Some(col) = &p.idle_collection {
+                for fid in &col.animation_form_ids {
+                    idle_fids.insert(*fid);
+                }
+            }
+        }
+    }
+    for fid in &idle_fids {
+        if let Some(idle) = idles.get(fid) {
+            println!(
+                "[IDLE] {:#010X} EDID=\"{}\" MODL=\"{}\" conds={}",
+                fid.0,
+                idle.editor_id.as_deref().unwrap_or(""),
+                idle.model_path.as_deref().unwrap_or(""),
+                idle.conditions.len()
+            );
+        } else {
+            println!("[IDLE] {:#010X} (未発見)", fid.0);
+        }
+    }
+
+    // PACK の生サブレコード (CTDA 含む) を第 2 パスでダンプ
+    println!("\n-- PACK 生サブレコード (EDID/CTDA/QSTI/IDLF/IDLC/IDLT/IDLA) --");
+    let mut reader = EsmReader::open(esm_path)?;
+    while let Some(entry) = reader.read_next_entry()? {
+        if let fo3_esm::EsmEntry::Group(g) = entry {
+            if g.target_record_type() == Some(fo3_esm::REC_PACK) {
+                while let Some(inner) = reader.read_next_entry()? {
+                    if let fo3_esm::EsmEntry::Record(hdr, subs) = inner {
+                        if !referenced_pack_fids.contains(&hdr.form_id) {
+                            continue;
+                        }
+                        println!("[RAW-PACK] FormID: {:#010X}", hdr.form_id.0);
+                        for s in &subs {
+                            let ascii = s.as_string();
+                            match s.type_id.0 {
+                                x if x == *b"EDID" => println!("    EDID \"{}\"", ascii.trim_end_matches('\0')),
+                                x if x == *b"CTDA" => {
+                                    let hexs: Vec<String> = s.data.iter().map(|b| format!("{:02X}", b)).collect();
+                                    println!("    CTDA ({}bytes) {}", s.data.len(), hexs.join(" "));
+                                }
+                                x if x == *b"QSTI" => {
+                                    if s.data.len() >= 4 {
+                                        let fid = u32::from_le_bytes([s.data[0], s.data[1], s.data[2], s.data[3]]);
+                                        println!("    QSTI {:#010X}", fid);
+                                    }
+                                }
+                                x if x == *b"IDLA" => {
+                                    let hexs: Vec<String> = s.data.iter().map(|b| format!("{:02X}", b)).collect();
+                                    println!("    IDLA ({}bytes) {}", s.data.len(), hexs.join(" "));
+                                }
+                                _ => {
+                                    println!("    {} ({}bytes)", s.type_id, s.data.len());
+                                }
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    println!("\nAI パッケージ連鎖検証完了。");
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
@@ -1806,6 +2074,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             test_esm_cell(&args[2], &args[3])?;
         }
+        "esm-ai-packs" => {
+            if args.len() < 3 {
+                print_usage();
+                return Ok(());
+            }
+            test_esm_ai_packs(&args[2])?;
+        }
+        "esm-info" => {
+            if args.len() < 3 {
+                println!("使用法: esm-info <path/to/file.esm> <formid:int|topic_edid> [...]");
+                return Ok(());
+            }
+            let sels: Vec<String> = args[3..].to_vec();
+            test_esm_info(&args[2], &sels)?;
+        }
         "esm-worlds" => {
             if args.len() < 3 {
                 print_usage();
@@ -1819,6 +2102,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
             test_esm_world_dump(&args[2], &args[3])?;
+        }
+        "esm-script" => {
+            if args.len() < 4 {
+                println!("使用法: esm-script <path/to/file.esm> <script_edid>");
+                return Ok(());
+            }
+            test_esm_script(&args[2], &args[3])?;
+        }
+        "esm-quest" => {
+            if args.len() < 4 {
+                println!("使用法: esm-quest <path/to/file.esm> <quest_edid>");
+                return Ok(());
+            }
+            test_esm_quest(&args[2], &args[3])?;
         }
         "collision-batch" => {
             if args.len() < 3 {

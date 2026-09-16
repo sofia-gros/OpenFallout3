@@ -9,6 +9,7 @@
 pub mod opcodes;
 pub mod conditions;
 pub mod vm;
+pub mod parser;
 pub mod event;
 pub mod quest;
 

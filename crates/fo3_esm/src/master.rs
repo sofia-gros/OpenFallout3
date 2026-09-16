@@ -16,6 +16,7 @@ use crate::records::otft::OtftRecord;
 use crate::records::hair::HairRecord;
 use crate::records::armo::ArmorRecord;
 use crate::records::pack::PackRecord;
+use crate::records::idle::IdleRecord;
 use crate::records::quest::QuestRecord;
 use crate::records::scpt::ScptRecord;
 use crate::records::mesg::MesgRecord;
@@ -52,6 +53,9 @@ pub struct EsmMasterContext {
     pub quest_edid_map: HashMap<String, FormId>,
     /// FormID から AI パッケージレコードへのマップ (PACK)
     pub pack_map: HashMap<FormId, PackRecord>,
+    /// FormID から Idle アニメーションレコードへのマップ (IDLE)
+    /// PACK の `IDLA` (Idle Collection) が参照し、`MODL` に KF ファイルパスを持つ
+    pub idle_map: HashMap<FormId, IdleRecord>,
     /// FormID からメッセージレコードへのマップ (MESG)
     pub mesg_map: HashMap<FormId, MesgRecord>,
     /// EditorID (大文字正規化) から Message FormID へのインデックス
@@ -83,6 +87,7 @@ impl EsmMasterContext {
         let script_map = reader.read_all_scripts_map().unwrap_or_default();
         let quest_map = reader.read_all_quests_map().unwrap_or_default();
         let pack_map = reader.read_all_packages_map().unwrap_or_default();
+        let idle_map = reader.read_all_idles_map().unwrap_or_default();
         let mesg_map = reader.read_all_messages_map().unwrap_or_default();
         let soun_map = reader.read_all_sounds_map().unwrap_or_default();
         let (topic_map, info_map) = reader.read_all_dialogues_map().unwrap_or_default();
@@ -120,6 +125,7 @@ impl EsmMasterContext {
             quest_map,
             quest_edid_map,
             pack_map,
+            idle_map,
             mesg_map,
             mesg_edid_map,
             soun_map,

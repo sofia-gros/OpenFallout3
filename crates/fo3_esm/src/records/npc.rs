@@ -8,7 +8,7 @@ use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{
     FormId, FourCC, ObjectBounds, SUB_CNTO, SUB_DOFT, SUB_EDID, SUB_ENAM, SUB_FGGA, SUB_FGGS,
-    SUB_FGTS, SUB_FULL, SUB_HCLR, SUB_HNAM, SUB_OBND,
+    SUB_FGTS, SUB_FULL, SUB_HCLR, SUB_HNAM, SUB_OBND, SUB_PKID,
 };
 
 pub const SUB_ACBS: FourCC = FourCC(*b"ACBS");
@@ -63,6 +63,11 @@ pub struct NpcRecord {
     /// FaceGen 対称テクスチャ係数 (FGTS: 50 float = 200 bytes, 化粧・肌色モーフィング用)
     /// 参照元: `references/openmw/components/esm4/loadnpc.cpp:L208-215`, `references/bevyout/crates/bevyout-core/src/facegen.rs`
     pub facegen_texture_symmetric: Option<Vec<f32>>,
+    /// AI パッケージ FormID リスト (PKID)。
+    /// NPC のデフォルト AI パッケージ。Fallout 3 では各 NPC が条件付きパッケージを
+    /// リストで持ち、エンジンが CTDA 条件を評価して適用中のパッケージを決定する。
+    /// 参照元: `references/openmw/components/esm4/loadnpc.cpp:L71-73`
+    pub ai_packages: Vec<FormId>,
 }
 
 impl NpcRecord {
@@ -81,6 +86,7 @@ impl NpcRecord {
         let mut facegen_geometry_symmetric = None;
         let mut facegen_geometry_asymmetric = None;
         let mut facegen_texture_symmetric = None;
+        let mut ai_packages = Vec::new();
 
         for sub in subrecords {
             match sub.type_id {
@@ -189,6 +195,15 @@ impl NpcRecord {
                     }
                     facegen_texture_symmetric = Some(coeffs);
                 }
+                SUB_PKID => {
+                    // AI パッケージ FormID リスト (4 バイト × N)
+                    // 参照元: `references/openmw/components/esm4/loadnpc.cpp:L71-73`
+                    if sub.data.len() >= 4 {
+                        if let Ok(fid) = sub.as_form_id() {
+                            ai_packages.push(fid);
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -209,6 +224,7 @@ impl NpcRecord {
             facegen_geometry_symmetric,
             facegen_geometry_asymmetric,
             facegen_texture_symmetric,
+            ai_packages,
         })
     }
 }
@@ -252,6 +268,14 @@ mod tests {
                 type_id: crate::types::SUB_CNTO,
                 data: [0x44, 0x44, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00].to_vec(),
             },
+            Subrecord {
+                type_id: SUB_PKID,
+                data: 0x00055555u32.to_le_bytes().to_vec(),
+            },
+            Subrecord {
+                type_id: SUB_PKID,
+                data: 0x00066666u32.to_le_bytes().to_vec(),
+            },
         ];
 
         let npc = NpcRecord::from_record(&header, &subrecords).unwrap();
@@ -262,6 +286,10 @@ mod tests {
         assert_eq!(npc.inventory.len(), 1);
         assert_eq!(npc.inventory[0].item, FormId(0x00044444));
         assert_eq!(npc.inventory[0].count, 1);
+        assert_eq!(
+            npc.ai_packages,
+            vec![FormId(0x00055555), FormId(0x00066666)]
+        );
     }
 
     #[test]

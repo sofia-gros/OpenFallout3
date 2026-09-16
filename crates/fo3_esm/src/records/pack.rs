@@ -2,12 +2,17 @@
 //!
 //! 参照元: `references/openmw/components/esm4/loadpack.hpp`,
 //! `references/bevyout/src/vsa/openmw_esm4/actor_support.rs:L534-L600` (Fallout 3 PACK 仕様),
+//! `references/bevyout/src/vsa/openmw_esm4/actor_support.rs:L503-511, L659-745` (Idle Collection),
 //! `knowledge/phase11_ai_package_and_quest_progression.md`
 
 use std::io;
 use byteorder::{ByteOrder, LittleEndian};
 use crate::subrecord::Subrecord;
-use crate::types::{FormId, SUB_CNAM, SUB_EDID, SUB_PKDT, SUB_PLDT, SUB_PSDT, SUB_PTDT};
+use crate::types::{
+    FormId, SUB_CNAM, SUB_CTDA, SUB_EDID, SUB_IDLA, SUB_IDLC, SUB_IDLF, SUB_IDLT, SUB_PKDT,
+    SUB_PLDT, SUB_PSDT, SUB_PTDT,
+};
+use crate::records::TargetCondition;
 
 /// パッケージの動作種別 (AI Package Type)。
 /// 参照元: `references/openmw/components/esm4/loadpack.hpp:PKDT`, `actor_support.rs:L570`
@@ -88,8 +93,25 @@ pub struct PackSchedule {
     pub duration: u32,
 }
 
+/// パッケージに紐づく Idle アニメーションコレクション (IDLF/IDLC/IDLT/IDLA)。
+/// NPC がこのパッケージ適用中に再生する Idle アニメーションの IDLE レコード FormID 列表。
+/// 参照元: `references/bevyout/src/vsa/openmw_esm4/actor_support.rs:L503-511` (PackageIdleCollection),
+///         `references/bevyout/src/vsa/openmw_esm4/actor_support.rs:L659-745` (decode_package_idle_collection)
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PackIdleCollection {
+    /// アニメーションコレクションフラグ (IDLF, 先頭 1 バイト)
+    pub flags: u8,
+    /// アニメーション切替タイマー秒数 (IDLT, 4 バイト f32)
+    pub timer_seconds: f32,
+    /// 参照する IDLE レコード FormID リスト (IDLA, 4 バイト×N)
+    pub animation_form_ids: Vec<FormId>,
+}
+
 /// PACK (AI Package) レコード。
 /// NPC の自律動作・目的地移動・会話・追従パターンを規定する。
+///
+/// CTDA 条件式 (`conditions`) は FO3 では固定 20 バイト (`fnIndex`/`param1`/`param2` を含む)。
+/// 参照元: `references/openmw/components/esm4/loadinfo.cpp:81-105` (CTDA サイズ分岐), `loadpack.cpp`
 #[derive(Debug, Clone)]
 pub struct PackRecord {
     pub form_id: FormId,
@@ -101,8 +123,11 @@ pub struct PackRecord {
     pub location: Option<PackLocation>,
     pub target: Option<PackTarget>,
     pub schedule: Option<PackSchedule>,
+    pub idle_collection: Option<PackIdleCollection>,
     pub quest_form_id: Option<FormId>,
     pub combat_style_form_id: Option<FormId>,
+    /// パッケージ適用条件式リスト (CTDA)。全条件が成立した場合のみパッケージ適用。
+    pub conditions: Vec<TargetCondition>,
 }
 
 impl PackRecord {
@@ -120,8 +145,12 @@ impl PackRecord {
         let mut location = None;
         let mut target = None;
         let mut schedule = None;
+        let mut idle_flags = 0u8;
+        let mut idle_timer = 0.0f32;
+        let mut idle_form_ids: Vec<FormId> = Vec::new();
         let mut quest_form_id = None;
         let mut combat_style_form_id = None;
+        let mut conditions: Vec<TargetCondition> = Vec::new();
 
         for sub in subrecords {
             match sub.type_id {
@@ -193,6 +222,36 @@ impl PackRecord {
                         combat_style_form_id = Some(FormId(LittleEndian::read_u32(&sub.data[0..4])));
                     }
                 }
+                // Idle Collection サブレコード (IDLF/IDLC/IDLT/IDLA)
+                // 参照元: `actor_support.rs:decode_package_idle_collection` (L659-745)
+                SUB_IDLF => {
+                    if let Some(&b0) = sub.data.first() {
+                        idle_flags = b0;
+                    }
+                }
+                SUB_IDLC => {
+                    // 宣言アニメーション数 (1 または 4 バイト) — カウント不一致は不採用
+                }
+                SUB_IDLT => {
+                    if sub.data.len() >= 4 {
+                        idle_timer = LittleEndian::read_f32(&sub.data[0..4]);
+                    }
+                }
+                SUB_IDLA => {
+                    // 4 バイト境界で区切られた IDLE FormID リスト
+                    let complete_len = sub.data.len() / 4 * 4;
+                    for chunk in sub.data[..complete_len].chunks_exact(4) {
+                        let raw = LittleEndian::read_u32(chunk);
+                        if raw != 0 {
+                            idle_form_ids.push(FormId(raw));
+                        }
+                    }
+                }
+                SUB_CTDA => {
+                    if let Some(cond) = TargetCondition::parse(&sub.data) {
+                        conditions.push(cond);
+                    }
+                }
                 _ => {
                     // QSTI サブレコード等
                     if sub.type_id.0 == *b"QSTI" && sub.data.len() >= 4 {
@@ -201,6 +260,16 @@ impl PackRecord {
                 }
             }
         }
+
+        let idle_collection = if idle_form_ids.is_empty() {
+            None
+        } else {
+            Some(PackIdleCollection {
+                flags: idle_flags,
+                timer_seconds: idle_timer,
+                animation_form_ids: idle_form_ids,
+            })
+        };
 
         Ok(Self {
             form_id,
@@ -212,8 +281,10 @@ impl PackRecord {
             location,
             target,
             schedule,
+            idle_collection,
             quest_form_id,
             combat_style_form_id,
+            conditions,
         })
     }
 }

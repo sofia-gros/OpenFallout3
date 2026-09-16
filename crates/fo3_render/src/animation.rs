@@ -454,6 +454,55 @@ impl AnimationClip {
     }
 
     /// `NiControllerSequence` ブロックから `AnimationClip` を構築する。
+    
+    /// NIF 内のすべての NiTransformController から、デフォルトのアニメーションクリップを生成する
+    pub fn from_transform_controllers(nif: &NifFile) -> Option<Self> {
+        let mut channels = HashMap::new();
+        let mut min_start = f32::MAX;
+        let mut max_stop = f32::MIN;
+
+        for block in &nif.blocks {
+            if let NifBlock::NiTransformController(ctrl) = block {
+                if ctrl.target >= 0 && (ctrl.target as usize) < nif.blocks.len() {
+                    let target_name = match &nif.blocks[ctrl.target as usize] {
+                        NifBlock::NiNode(n) => nif.get_string(n.av.net.name_index as u32).unwrap_or(""),
+                        NifBlock::NiTriShape(t) => nif.get_string(t.geom.av.net.name_index as u32).unwrap_or(""),
+                        _ => "",
+                    };
+                    if !target_name.is_empty() {
+                        channels.insert(
+                            target_name.to_string(),
+                            BoneChannel {
+                                bone_name: target_name.to_string(),
+                                interpolator_index: ctrl.interpolator,
+                            },
+                        );
+                        if ctrl.start_time < min_start {
+                            min_start = ctrl.start_time;
+                        }
+                        if ctrl.stop_time > max_stop {
+                            max_stop = ctrl.stop_time;
+                        }
+                    }
+                }
+            }
+        }
+
+        if channels.is_empty() {
+            return None;
+        }
+
+        Some(AnimationClip {
+            name: "Default".to_string(),
+            start_time: min_start,
+            stop_time: max_stop,
+            duration: (max_stop - min_start).max(0.0),
+            cycle_type: 0,
+            frequency: 1.0,
+            channels,
+        })
+    }
+
     pub fn from_controller_sequence(nif: &NifFile, seq: &fo3_nif::NiControllerSequence) -> Option<Self> {
         let name = nif.get_string(seq.name_index as u32).unwrap_or("").to_string();
         let duration = (seq.stop_time - seq.start_time).max(0.0);
@@ -571,6 +620,9 @@ pub struct AnimationPlayer {
     pub current_time: f32,
     /// `CycleType::Clamp` で終端に達したか (再生が完了したか)。
     pub finished: bool,
+    /// 完了イベント (`OnAnimationEnd`) を発行済みか (1 回のみ通知するためのラッチ)。
+    /// 参照元: `references/openmw/apps/openmw/mwlua/engineevents.hpp:63` (OnAnimationEnded)
+    pub end_dispatched: bool,
 }
 
 impl AnimationPlayer {
@@ -585,6 +637,7 @@ impl AnimationPlayer {
             elapsed: 0.0,
             current_time,
             finished: false,
+            end_dispatched: false,
         }
     }
 
@@ -593,11 +646,18 @@ impl AnimationPlayer {
         self.elapsed = elapsed_seconds.max(0.0);
         self.current_time = self.clip.evaluate_time(self.elapsed);
         self.finished = false;
+        self.end_dispatched = false;
     }
 
     /// 一時停止／再開を切り替える。
     pub fn set_playing(&mut self, playing: bool) {
         self.playing = playing;
+    }
+
+    /// 再生が完了したか (`CycleType::Clamp` で終端に到達済みか) を返す。
+    /// `update()` が `finished` フィールドを設定するため、それをそのまま返す。
+    pub fn is_finished(&self) -> bool {
+        self.finished
     }
 
     /// フレーム毎の経過時間 `dt` (秒) で時間を進行させ、`pose` を更新する。

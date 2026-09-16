@@ -21,6 +21,7 @@ pub mod scpt;
 pub mod glob;
 pub mod quest;
 pub mod pack;
+pub mod idle;
 pub mod items;
 pub mod equipment;
 pub mod misc_items;
@@ -49,7 +50,8 @@ pub use glob::GlobRecord;
 pub use items::{ActiRecord, ContRecord, DoorRecord, FurnRecord, GmstRecord, GmstValue, MiscRecord};
 pub use equipment::{AmmoRecord, WeapRecord};
 pub use misc_items::{AlchRecord, BookRecord, KeymRecord};
-pub use pack::{PackLocation, PackRecord, PackSchedule, PackTarget, PackType};
+pub use pack::{PackIdleCollection, PackLocation, PackRecord, PackSchedule, PackTarget, PackType};
+pub use idle::IdleRecord;
 pub use mesg::MesgRecord;
 pub use soun::SounRecord;
 

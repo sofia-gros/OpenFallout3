@@ -91,6 +91,7 @@ impl RenderScene {
                 &root_transform,
                 None,
                 None,
+                None,
                 nif,
                 vfs,
                 device,
@@ -211,6 +212,7 @@ impl RenderScene {
             traverse_block(
                 0,
                 &root_transform,
+                None,
                 None,
                 None,
                 part_nif,

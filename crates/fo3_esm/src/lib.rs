@@ -18,16 +18,17 @@ pub mod master;
 
 pub use types::{
     FormId, FourCC, ObjectBounds, REC_ACHR, REC_ACRE, REC_DIAL, REC_GLOB, REC_INFO, REC_LTEX,
-    REC_LVLI, REC_REFR, REC_SCPT, REC_TERM, REC_TXST,
+    REC_LVLI, REC_PACK, REC_REFR, REC_SCPT, REC_TERM, REC_TXST,
 };
 pub use header::{GroupHeader, RecordHeader, SubrecordHeader};
 pub use subrecord::Subrecord;
 pub use records::{
     info_flags, ActiRecord, AlchRecord, AmmoRecord, ArmorRecord, BookRecord, CellLighting,
     CellRecord, ContRecord, DialRecord, DoorRecord, EnableParent, FurnRecord, GlobRecord,
-    GmstRecord, GmstValue, HairRecord, InfoRecord, InventoryItem, KeymRecord, LandRecord,
+    GmstRecord, GmstValue, HairRecord, IdleRecord, InfoRecord, InventoryItem, KeymRecord, LandRecord,
     LandTextureLayer, LightRecord, LockData, LtexRecord, LvliRecord, LvloEntry, MiscRecord,
-    NpcRecord, OtftRecord, QuestObjective, QuestRecord, QuestStage, RefrRecord, ScptRecord,
+    NpcRecord, OtftRecord, PackIdleCollection, PackRecord, QuestObjective, QuestRecord,
+    QuestStage, RefrRecord, ScptRecord,
     ScriptHeader, ScriptLocalVar, ScriptType, StatRecord, TargetCondition, TeleportDoor,
     TermMenuItem, TermRecord, Tes4Header, TextureSetRecord, WeapRecord, WorldRecord,
     LAND_HEIGHT_SCALE, LAND_NUM_VERTS, LAND_REAL_SIZE, LAND_VERTS_PER_SIDE,

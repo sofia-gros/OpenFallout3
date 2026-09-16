@@ -88,6 +88,7 @@ pub fn traverse_block(
     parent_world: &NiTransform,
     parent_alpha: Option<&fo3_nif::NiAlphaProperty>,
     parent_material: Option<&fo3_nif::NiMaterialProperty>,
+    parent_bone_name: Option<&str>,
     nif: &NifFile,
     vfs: &mut VfsManager,
     device: &wgpu::Device,
@@ -119,12 +120,16 @@ pub fn traverse_block(
             bone_world_map.insert(block_index, world_transform.to_mat4());
             let current_alpha = find_alpha_property(&node.av.properties, nif).or(parent_alpha);
             let current_material = find_material_property(&node.av.properties, nif).or(parent_material);
+            let node_name = nif.get_string(node.av.net.name_index as u32).unwrap_or("");
+            let current_bone_name = if !node_name.is_empty() { Some(node_name) } else { parent_bone_name };
+            
             for &child in &node.children {
                 traverse_block(
                     child,
                     &world_transform,
                     current_alpha,
                     current_material,
+                    current_bone_name,
                     nif,
                     vfs,
                     device,
@@ -151,12 +156,16 @@ pub fn traverse_block(
             bone_world_map.insert(block_index, world_transform.to_mat4());
             let current_alpha = find_alpha_property(&fade.node.av.properties, nif).or(parent_alpha);
             let current_material = find_material_property(&fade.node.av.properties, nif).or(parent_material);
+            let node_name = nif.get_string(fade.node.av.net.name_index as u32).unwrap_or("");
+            let current_bone_name = if !node_name.is_empty() { Some(node_name) } else { parent_bone_name };
+
             for &child in &fade.node.children {
                 traverse_block(
                     child,
                     &world_transform,
                     current_alpha,
                     current_material,
+                    current_bone_name,
                     nif,
                     vfs,
                     device,
@@ -417,7 +426,7 @@ pub fn traverse_block(
                             // 剛体パーツ (目・歯・舌・髪) のダイレクト登録
                             if let Some(ref mut collector) = anim_collector {
                                 let mesh_index = out_meshes.len() - 1;
-                                if let Some(bone_name) = collector.attach_bone {
+                                if let Some(bone_name) = collector.attach_bone.or(parent_bone_name) {
                                     let local_transform = compute_rigid_part_local_transform(
                                         block_index as usize,
                                         bone_name,

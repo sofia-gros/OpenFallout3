@@ -401,6 +401,16 @@ impl NifFile {
                         }
                     }
                 }
+                                "NiTransformController" => match NiTransformController::read(&mut cursor) {
+                    Ok(ctrl) => NifBlock::NiTransformController(ctrl),
+                    Err(e) => {
+                        eprintln!("[WARN] NiTransformControllerパース失敗: {:?}", e);
+                        NifBlock::Unknown {
+                            type_name: block_type_name.clone(),
+                            data: block_bytes,
+                        }
+                    }
+                },
                 "NiTransformData" => match NiTransformData::read(&mut cursor) {
                     Ok(data) => NifBlock::NiTransformData(data),
                     Err(e) => {

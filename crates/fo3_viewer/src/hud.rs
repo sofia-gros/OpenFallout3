@@ -45,6 +45,10 @@ pub struct HudRenderer {
     crosshair_bind_group: Option<wgpu::BindGroup>,
     glow_bind_group: Option<wgpu::BindGroup>,
     white_bind_group: wgpu::BindGroup,
+    /// Bink 動画フレーム描画用パイプライン (テクスチャ RGB をそのまま出力する専用シェーダー)
+    video_pipeline: wgpu::RenderPipeline,
+    /// 動画テクスチャ用バインドグループ生成のために保持するレイアウト
+    pub bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl HudRenderer {
@@ -197,6 +201,111 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             cache: None,
         });
 
+        // Bink 動画用パイプライン。
+        // HUD シェーダーは「アルファ焼き込み・RGB は白固定」の Gamebryo UI 仕様のため、
+        // 動画フレームをそのまま描画すると全面白 (1,1,1) になる。動画はテクスチャの RGB を
+        // そのまま出力する専用シェーダーとパイプラインを別途用意する。
+        // 参照元: Gamebryo 2.6 BinkVideo — ゲームウィンドウ内描画
+        let video_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Bink Video Shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                r#"
+struct HudUniform {
+    color: vec4<f32>,
+    screen_size: vec2<f32>,
+    _pad: vec2<f32>,
+};
+
+@group(0) @binding(0) var<uniform> u_hud: HudUniform;
+@group(0) @binding(1) var t_diffuse: texture_2d<f32>;
+@group(0) @binding(2) var s_diffuse: sampler;
+
+struct VertexInput {
+    @location(0) position: vec2<f32>,
+    @location(1) uv: vec2<f32>,
+};
+
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    let ndc_x = (in.position.x / u_hud.screen_size.x) * 2.0;
+    let ndc_y = (in.position.y / u_hud.screen_size.y) * 2.0;
+    out.clip_position = vec4<f32>(ndc_x, -ndc_y, 0.0, 1.0);
+    out.uv = in.uv;
+    return out;
+}
+
+@fragment
+fn fs_video_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    let tex = textureSample(t_diffuse, s_diffuse, in.uv);
+    // 動画はアルファ焼き込みではなくテクスチャ RGB をそのまま表示する (不透明)。
+    return vec4<f32>(tex.rgb * u_hud.color.rgb, 1.0);
+}
+"#
+                .into(),
+            ),
+        });
+
+        let video_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Bink Video Render Pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &video_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<HudVertex>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: 8,
+                            shader_location: 1,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                    ],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &video_shader,
+                entry_point: Some("fs_video_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("HUD Uniform Buffer"),
             size: std::mem::size_of::<HudUniform>() as u64,
@@ -287,6 +396,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             crosshair_bind_group,
             glow_bind_group,
             white_bind_group,
+            video_pipeline,
+            bind_group_layout,
         }
     }
 
@@ -411,7 +522,87 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         rpass.draw(0..6, 0..1);
     }
 
+    /// Bink 動画フレームテクスチャをゲームウィンドウ全面に描画する。
+    ///
+    /// `video_bind_group` は `HudRenderer::create_video_bind_group()` で作成したもの。
+    /// カラーは `[1.0, 1.0, 1.0, 1.0]`（テクスチャの色をそのまま表示）。
+    ///
+    /// 参照元: Gamebryo 2.6 BinkVideo — ゲームウィンドウ内描画仕様
+    pub fn render_video_frame<'rpass>(
+        &'rpass self,
+        rpass: &mut wgpu::RenderPass<'rpass>,
+        queue: &wgpu::Queue,
+        video_bind_group: &'rpass wgpu::BindGroup,
+        screen_width: f32,
+        screen_height: f32,
+    ) {
+        let half_w = screen_width * 0.5;
+        let half_h = screen_height * 0.5;
+        let vertices = [
+            HudVertex { position: [0.0 - half_w, 0.0 - half_h], uv: [0.0, 0.0] },
+            HudVertex { position: [0.0 + half_w, 0.0 - half_h], uv: [1.0, 0.0] },
+            HudVertex { position: [0.0 + half_w, 0.0 + half_h], uv: [1.0, 1.0] },
+            HudVertex { position: [0.0 - half_w, 0.0 - half_h], uv: [0.0, 0.0] },
+            HudVertex { position: [0.0 + half_w, 0.0 + half_h], uv: [1.0, 1.0] },
+            HudVertex { position: [0.0 - half_w, 0.0 + half_h], uv: [0.0, 1.0] },
+        ];
+        queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
+
+        // カラーは白 (1,1,1,1) → テクスチャ色をそのまま出力
+        let uniform = HudUniform {
+            color: [1.0, 1.0, 1.0, 1.0],
+            screen_size: [screen_width, screen_height],
+            _pad: [0.0, 0.0],
+        };
+        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
+
+        rpass.set_pipeline(&self.video_pipeline);
+        rpass.set_bind_group(0, video_bind_group, &[]);
+        rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        rpass.draw(0..6, 0..1);
+    }
+
+    /// 動画テクスチャ用のバインドグループを生成する。
+    ///
+    /// `BinkPlayer` が持つ `texture_view` とサンプラーを HUD パイプラインに結合する。
+    /// `render_video_frame()` に渡して動画フレームを描画する。
+    pub fn create_video_bind_group(
+        &self,
+        device: &wgpu::Device,
+        texture_view: &wgpu::TextureView,
+    ) -> wgpu::BindGroup {
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("BinkPlayer Video Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("BinkPlayer Video Bind Group"),
+            layout: &self.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        })
+    }
+
     /// NPC 会話ダイアログのフレームおよび選択肢オーバーレイを描画する。
+
     pub fn render_dialog_overlay<'rpass>(
         &'rpass self,
         rpass: &mut wgpu::RenderPass<'rpass>,

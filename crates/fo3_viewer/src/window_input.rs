@@ -98,10 +98,28 @@ pub fn handle_input_event(state: &mut AppState, event: WindowEvent, event_loop: 
                 state.controller.key_run = !state.input_manager.is_action_down(crate::input::GameAction::Run);
 
                 if pressed {
+                    // Bink ムービー再生中: Esc / Space でスキップ (実機 BinkVideo は任意キーでスキップ可能)
+                    if state.bink_player.is_some() {
+                        if key == KeyCode::Escape || key == KeyCode::Space {
+                            // BinkPlayer Drop が映像・音声 ffmpeg プロセスを終了する
+                            state.bink_player = None;
+                            state.bink_video_bind_group = None;
+                            println!("[BinkPlayer] ムービーをスキップしました (Esc / Space)");
+                            state.window.request_redraw();
+                            return;
+                        }
+                    }
+
                     if let Some(action) = state.input_manager.get_action(key) {
                         match action {
                             crate::input::InputCommand::Game(crate::input::GameAction::Activate) => {
-                                if state.vm.player_controls.movement && !state.vm.in_chargen {
+                                // Bink ムービー再生中はワールド操作 (OnActivate 発火 / テレポート) を禁止する。
+                                // ムービーは update() のシミュレーションと独立してウィンドウイベントで処理されるため、
+                                // 再生中に E キーでゲーム状態が進むのを防ぐ。
+                                if state.bink_player.is_none()
+                                    && state.vm.player_controls.movement
+                                    && !state.vm.in_chargen
+                                {
                                     state.interact_or_teleport();
                                 }
                             }
