@@ -613,20 +613,42 @@ pub fn process_playgroup_requests(app: &mut ViewerState) {
 
     for (target_fid, anim_name) in requests {
         if let Some(actor) = app.scene.actors.iter_mut().find(|a| a.form_id == target_fid.0) {
-            // Actorの場合はそのままkfを適用
-            let kf_path = format!("meshes/characters/_male/{}", anim_name);
-            if let Ok(buf) = app.vfs.read(&kf_path) {
-                if let Ok(kf) = fo3_nif::NifFile::read(&mut std::io::Cursor::new(&buf)) {
-                    let kf_arc = std::sync::Arc::new(kf);
-                    if let Some(clip) = fo3_render::animation::AnimationClip::from_kf(&kf_arc) {
-                        actor.set_animation(kf_arc, std::sync::Arc::new(clip));
-                        println!("[Action] Actor {:08X} に PlayGroup: {} (KF: {}) を適用しました", target_fid.0, anim_name, kf_path);
+            let mut kf_paths = vec![
+                format!("meshes/characters/_male/{}", anim_name), // Actor default
+            ];
+            
+            // If actor's name is a model path ending in .nif, add a KF path in its directory
+            if actor.name.to_lowercase().ends_with(".nif") {
+                let path = std::path::Path::new(&actor.name);
+                if let Some(parent) = path.parent() {
+                    let parent_str = parent.to_string_lossy().replace("\\", "/");
+                    kf_paths.push(format!("{}/{}", parent_str, anim_name));
+                    
+                    // Also try lowercase anim_name
+                    kf_paths.push(format!("{}/{}", parent_str, anim_name.to_lowercase()));
+                }
+            }
+            
+            let mut kf_loaded = false;
+            for kf_path in kf_paths {
+                if let Ok(buf) = app.vfs.read(&kf_path) {
+                    if let Ok(kf) = fo3_nif::NifFile::read(&mut std::io::Cursor::new(&buf)) {
+                        let kf_arc = std::sync::Arc::new(kf);
+                        if let Some(clip) = fo3_render::animation::AnimationClip::from_kf(&kf_arc) {
+                            actor.set_animation(kf_arc, std::sync::Arc::new(clip));
+                            println!("[Action] Actor {:08X} の PlayGroup: {} (KF: {}) を再生します", target_fid.0, anim_name, kf_path);
+                            kf_loaded = true;
+                            break;
+                        }
                     }
                 }
             }
+            if !kf_loaded {
+                println!("[Action] [stub] 3Dオブジェクト {:08X} の PlayGroup: {} の KF が見つかりません (モデル: {})", target_fid.0, anim_name, actor.name);
+            }
         } else {
             // 非Actorのアニメーション (gene_projector等) は stub
-            println!("[Action] [stub] 3Dオブジェクト {:08X} のアニメーション再生 PlayGroup: {}", target_fid.0, anim_name);
+            println!("[Action] [stub] 3Dオブジェクト {:08X} が存在しないため PlayGroup: {} は失敗しました", target_fid.0, anim_name);
         }
     }
 }

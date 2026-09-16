@@ -51,7 +51,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let (data_dir, target) = if args[1] == "newgame" {
-        (args[2].clone(), ViewerTarget::NewGame)
+        (args[2].clone(), ViewerTarget::NewGame {
+            intro_movie: Some("Video/Fallout INTRO Vsk.bik".to_string()),
+            start_quest: 0x0001F388,
+            start_stage: 0,
+        })
     } else if args[1] == "cell" {
         if args.len() < 4 {
             eprintln!("エラー: セル表示モードには <DataDir> と <CellEDID> が必要です。");

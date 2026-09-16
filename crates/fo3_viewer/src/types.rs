@@ -31,7 +31,11 @@ pub enum ViewerTarget {
         kf_path: String,
     },
     /// 実機完全準拠のニューゲームモード (CG00: Vault 101 Infirmary 〜 CG04)
-    NewGame,
+    NewGame {
+        intro_movie: Option<String>,
+        start_quest: u32,
+        start_stage: u32,
+    },
 }
 
 /// ウィンドウタイトルを設定する。
@@ -49,7 +53,7 @@ pub fn update_window_title(window: &Window, target: &ViewerTarget) {
         } => {
             format!("OpenFallout3 - Actor: {} + {}", outfit_or_naked, kf_path)
         }
-        ViewerTarget::NewGame => "OpenFallout3 - New Game (CG00: Vault 101)".to_string(),
+        ViewerTarget::NewGame { .. } => "OpenFallout3 - New Game (CG00: Vault 101)".to_string(),
     };
     window.set_title(&title);
 }

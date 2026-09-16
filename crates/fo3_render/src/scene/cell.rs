@@ -93,7 +93,7 @@ impl RenderScene {
                             if let Some(tex_map) = landscape_texture_map {
                                 if let Some((diff, norm)) = tex_map.get(&form_id) {
                                     (
-                                        normalize_texture_path(diff),
+                                        Some(normalize_texture_path(diff)),
                                         if norm.is_empty() {
                                             None
                                         } else {
@@ -101,19 +101,22 @@ impl RenderScene {
                                         },
                                     )
                                 } else {
-                                    ("textures\\landscape\\dirtwasteland01.dds".to_string(), None)
+                                    (None, None)
                                 }
                             } else {
-                                ("textures\\landscape\\dirtwasteland01.dds".to_string(), None)
+                                (None, None)
                             }
                         } else {
-                            ("textures\\landscape\\dirtwasteland01.dds".to_string(), None)
+                            (None, None)
                         };
 
-                        ensure_texture_cached(&Some(diff_name.clone()), vfs, device, queue, texture_cache);
+                        ensure_texture_cached(&diff_name, vfs, device, queue, texture_cache);
                         ensure_texture_cached(&norm_name, vfs, device, queue, texture_cache);
 
-                        let diffuse_tex = texture_cache.get(&diff_name).unwrap_or(&default_texture);
+                        let diffuse_tex = diff_name
+                            .as_ref()
+                            .and_then(|p| texture_cache.get(p))
+                            .unwrap_or(&default_texture);
                         let normal_tex = norm_name
                             .as_ref()
                             .and_then(|p| texture_cache.get(p))
@@ -184,7 +187,7 @@ impl RenderScene {
                             if let Some(tex_map) = landscape_texture_map {
                                 if let Some((diff, norm)) = tex_map.get(&layer.form_id) {
                                     (
-                                        normalize_texture_path(diff),
+                                        Some(normalize_texture_path(diff)),
                                         if norm.is_empty() {
                                             None
                                         } else {
@@ -192,19 +195,22 @@ impl RenderScene {
                                         },
                                     )
                                 } else {
-                                    ("textures\\landscape\\dirtwasteland01.dds".to_string(), None)
+                                    (None, None)
                                 }
                             } else {
-                                ("textures\\landscape\\dirtwasteland01.dds".to_string(), None)
+                                (None, None)
                             }
                         } else {
-                            ("textures\\landscape\\dirtwasteland01.dds".to_string(), None)
+                            (None, None)
                         };
 
-                        ensure_texture_cached(&Some(diff_name.clone()), vfs, device, queue, texture_cache);
+                        ensure_texture_cached(&diff_name, vfs, device, queue, texture_cache);
                         ensure_texture_cached(&norm_name, vfs, device, queue, texture_cache);
 
-                        let diffuse_tex = texture_cache.get(&diff_name).unwrap_or(&default_texture);
+                        let diffuse_tex = diff_name
+                            .as_ref()
+                            .and_then(|p| texture_cache.get(p))
+                            .unwrap_or(&default_texture);
                         let normal_tex = norm_name
                             .as_ref()
                             .and_then(|p| texture_cache.get(p))

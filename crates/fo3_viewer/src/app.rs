@@ -174,7 +174,7 @@ impl ViewerState {
         // カメラ・物理コントローラーの初期化
         let aspect = width as f32 / height as f32;
 
-        let (spawn_pos, initial_yaw) = if matches!(target, ViewerTarget::NewGame) {
+        let (spawn_pos, initial_yaw) = if matches!(target, ViewerTarget::NewGame { .. }) {
             // 実機 CG00PlayerStartMarker (0x00039562): Pos=[-5275.8867, -7148.175, 7542.536], Rot=[0.0, 0.0, PI]
             let marker_pos = glam::Vec3::new(-5275.8867, -7148.175, 7542.536);
             println!("★ ニューゲーム開始: CG00PlayerStartMarker へ配置 {:?}", marker_pos);
@@ -326,7 +326,7 @@ impl ViewerState {
             ui_renderer,
             input_manager: crate::input::InputManager::new(),
             screen_fade_color: [0.0, 0.0, 0.0, 1.0],
-            screen_fade_alpha: if matches!(target, ViewerTarget::NewGame) { 1.0 } else { 0.0 },
+            screen_fade_alpha: if matches!(target, ViewerTarget::NewGame { .. }) { 1.0 } else { 0.0 },
             sound_engine: crate::audio::SoundEngine::new(),
             chargen_menu: crate::chargen_menu::ChargenMenu::new(),
             bink_player: None,
@@ -336,7 +336,7 @@ impl ViewerState {
         // セル EDID の解決: ターゲット種別に応じてスクリプト登録対象のセルを決定
         // 参照元: `knowledge/new_game_and_quest_engine_architecture.md:2.1` — CG00 初期セル
         let cell_edid = match target {
-            ViewerTarget::NewGame => "Vault101Infirmary",
+            ViewerTarget::NewGame { .. } => "Vault101Infirmary",
             ViewerTarget::Cell(edid) => edid.as_str(),
             _ => "",
         };
@@ -349,23 +349,20 @@ impl ViewerState {
             }
         }
 
-        if matches!(target, ViewerTarget::NewGame) {
+        if let ViewerTarget::NewGame { intro_movie, start_quest, start_stage } = &target {
             println!("============================================================");
-            println!("★ 実機ニューゲームシーケンス開始: CG00 (FormID: 0x0001F388)");
+            println!("⚙ ニューゲーム初期化: Quest (FormID: 0x{:08X}), Stage: {}", start_quest, start_stage);
             println!("============================================================");
 
-            // 1. 実機オープニングムービー (Fallout INTRO Vsk.bik) の再生要求を積む。
-            //    別ウィンドウ・別全画面を生成せず、update() の play_bink_queue 消化が
-            //    ゲームウィンドウ内の BinkPlayer (テクスチャ描画) で再生する。
-            //    参照元: Gamebryo 2.6 BinkVideo パイプライン (ゲームウィンドウ内描画)
-            let intro_bik = Path::new(data_dir).join("Video").join("Fallout INTRO Vsk.bik");
-            if intro_bik.exists() {
-                state.vm.play_bink_queue.push(intro_bik.to_string_lossy().to_string());
+            if let Some(intro) = intro_movie {
+                let intro_bik = Path::new(data_dir).join(intro);
+                if intro_bik.exists() {
+                    state.vm.play_bink_queue.push(intro_bik.to_string_lossy().to_string());
+                }
             }
 
-            // 2. CG00 クエスト Stage 0 開始
-            let cg00_id = fo3_esm::types::FormId(0x0001F388);
-            state.vm.set_stage(cg00_id, 0);
+            let quest_id = fo3_esm::types::FormId(*start_quest);
+            state.vm.set_stage(quest_id, *start_stage);
         }
 
         state

@@ -184,7 +184,7 @@ pub fn load_scene(
                         HashMap::new(),
                     )
                 }
-                ViewerTarget::Cell(..) | ViewerTarget::World(..) | ViewerTarget::NewGame => {
+                ViewerTarget::Cell(..) | ViewerTarget::World(..) | ViewerTarget::NewGame { .. } => {
                     let esm_path = Path::new(data_dir).join("Fallout3.esm");
                     let mut esm_reader =
                         EsmReader::open(&esm_path).expect("Failed to open Fallout3.esm");
@@ -192,7 +192,7 @@ pub fn load_scene(
                     // セル群の検索
                     let cells: Vec<(CellRecord, Vec<RefrRecord>, Option<LandRecord>)> = match target
                     {
-                        ViewerTarget::NewGame => {
+                        ViewerTarget::NewGame { .. } => {
                             println!("ESM からニューゲーム初期セル \"Vault101d\" を検索中...");
                             esm_reader.find_cell_and_neighbors("Vault101d", 0)
                                 .expect("find Vault101d")
@@ -284,7 +284,7 @@ pub fn load_scene(
                         facegen_geometry_asymmetric: Option<Vec<f32>>,
                     }
                     let mut cell_npcs: Vec<CellNpcSpawn> = Vec::new();
-                    let mut all_cell_items: Vec<Vec<(u32, Arc<NifFile>, NiTransform)>> = Vec::new();
+                    let mut all_cell_items: Vec<Vec<(u32, Arc<NifFile>, NiTransform, fo3_esm::types::FourCC, String)>> = Vec::new();
                     let mut placed_lights: Vec<PlacedPointLight> = Vec::new();
                     let mut interactables: Vec<InteractableObject> = Vec::new();
                     let mut skipped_markers = 0;
@@ -325,7 +325,7 @@ pub fn load_scene(
                             }
                         }
 
-                        let mut cell_items: Vec<(u32, Arc<NifFile>, NiTransform)> = Vec::new();
+                        let mut cell_items: Vec<(u32, Arc<NifFile>, NiTransform, fo3_esm::types::FourCC, String)> = Vec::new();
                         for refr in refrs {
                             // 配置点光源の収集 (LIGHT レコード)
                             if let Some(light_rec) = light_map.get(&refr.base_object) {
@@ -529,10 +529,13 @@ pub fn load_scene(
                                 );
                                 let world_transform =
                                     NiTransform::from_euler_xyz(pos, rot, refr.scale);
-                                cell_items.push((refr.form_id.0, nif, world_transform));
+                                
+                                let record_type = model_map.get(&refr.base_object).map(|o| o.record_type).unwrap_or(fo3_esm::types::FourCC(*b"    "));
+                                let model_path = model_map.get(&refr.base_object).map(|o| o.model.clone()).unwrap_or_default();
+                                cell_items.push((refr.form_id.0, nif, world_transform, record_type, model_path));
 
-                                // インタラクト対象の判定 (ドア、コンテナ、アイテム、アクティベーター)
-                                // 参照元: references/openmw/components/esm4/loadrefr.hpp, Gamebryo 2.6 NiPick
+                                // インタラクト可能オブジェクト (アクティベーターやドアなど)
+                                // 参照: references/openmw/components/esm4/loadrefr.hpp, Gamebryo 2.6 NiPick
                                 if let Some(obj_info) = model_map.get(&refr.base_object) {
                                     let kind_opt = if refr.teleport.is_some()
                                         || obj_info.record_type == fo3_esm::types::REC_DOOR
@@ -621,7 +624,7 @@ pub fn load_scene(
                 );
 
 
-                    let mut animated_statics: Vec<(u32, std::sync::Arc<fo3_nif::NifFile>, fo3_gamebryo_core::NiTransform, std::sync::Arc<fo3_render::animation::AnimationClip>)> = Vec::new();
+                    let mut animated_statics: Vec<(u32, std::sync::Arc<fo3_nif::NifFile>, fo3_gamebryo_core::NiTransform, Option<std::sync::Arc<fo3_render::animation::AnimationClip>>, String)> = Vec::new();
 
                     let cell_inputs: Vec<(
                         Vec<(&fo3_nif::NifFile, fo3_gamebryo_core::NiTransform)>,
@@ -631,9 +634,11 @@ pub fn load_scene(
                         .zip(all_cell_items.iter())
                         .map(|((cell, _, land), items)| {
                             let mut placed_refs = Vec::new();
-                            for (form_id, n, t) in items {
+                            for (form_id, n, t, record_type, model_path) in items {
                                 if let Some(clip) = fo3_render::animation::AnimationClip::from_transform_controllers(n.as_ref()) {
-                                    animated_statics.push((*form_id, n.clone(), *t, std::sync::Arc::new(clip)));
+                                    animated_statics.push((*form_id, n.clone(), *t, Some(std::sync::Arc::new(clip)), model_path.clone()));
+                                } else if *record_type == fo3_esm::types::REC_ACTI || *record_type == fo3_esm::types::REC_MSTT {
+                                    animated_statics.push((*form_id, n.clone(), *t, None, model_path.clone()));
                                 } else {
                                     placed_refs.push((n.as_ref(), *t));
                                 }
@@ -669,17 +674,17 @@ pub fn load_scene(
                         texture_cache,
                     );
 
-                    for (form_id, nif, transform, clip) in animated_statics {
+                    for (form_id, nif, transform, clip, model_path) in animated_statics {
                         scene.add_animated_static(
                             device,
                             queue,
                             context,
                             vfs,
                             form_id,
-                            "AnimatedStatic",
+                            &model_path,
                             &transform,
                             nif,
-                            Some(clip),
+                            clip,
                             texture_cache,
                         );
                     }
@@ -962,7 +967,7 @@ pub fn load_scene(
                     // 2. 配置オブジェクト (REFR) コライダーの登録および RefrBinding 構築
                     let mut refr_bindings = HashMap::new();
                     let mut flat_idx = 0;
-                    for (form_id, nif, world_transform) in
+                    for (form_id, nif, world_transform, _record_type, _model_path) in
                         all_cell_items.iter().flat_map(|items| items.iter())
                     {
                         let col_data = extract_collision_data(nif);
