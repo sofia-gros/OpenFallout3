@@ -105,36 +105,36 @@ fn test_full_playthrough_newgame_to_megaton() {
     assert!(vm.active_imods.iter().any(|m| m.eq_ignore_ascii_case("CG00BlackScreenISFX")),
             "CG00 暗転エフェクト");
 
-    // 産声 (Stage 6→8→9→10 まで大 dt で進行)
-    tick_n(&mut vm, &mut dispatcher, 11.0, 2);
+    // 出産 (Stage 6→8は10秒待機)
+    tick_n(&mut vm, &mut dispatcher, 1.0, 20); // 20 frames of 1.0s to allow multiple stages to digest
     let cg00_after_birth = vm.get_stage(CG00);
     println!("[CG00] 産声後ステージ: {}", cg00_after_birth);
     assert!(cg00_after_birth >= 8, "CG00 産声タイマー消化後 Stage 8 以上");
 
-    tick_n(&mut vm, &mut dispatcher, 2.5, 2);
-    assert!(vm.get_stage(CG00) >= 9, "CG00 Stage 8→9 以上");
+    tick_n(&mut vm, &mut dispatcher, 1.0, 5);
+    assert!(vm.get_stage(CG00) >= 9, "CG00 Stage 8→9 移行");
 
-    tick_n(&mut vm, &mut dispatcher, 8.0, 2);
+    tick_n(&mut vm, &mut dispatcher, 1.0, 10);
     let cg00_stage10 = vm.get_stage(CG00);
-    println!("[CG00] 父親台詞フェーズ ステージ: {}", cg00_stage10);
-    assert!(cg00_stage10 >= 10, "CG00 Stage 10 (父親台詞) 以上に到達");
-    println!("[CG00] Stage 10+ 確認 OK");
+    println!("[CG00] 名前入力直前 ステージ: {}", cg00_stage10);
+    assert!(cg00_stage10 >= 10, "CG00 Stage 10 (名前入力) 到達確認");
+    println!("[CG00] Stage 10+ 進行 OK");
 
-    // 性別選択フェーズまで進行
-    tick_n(&mut vm, &mut dispatcher, 30.0, 6);
+    // 性別メニュー選択
+    tick_n(&mut vm, &mut dispatcher, 1.0, 35);
     vm.player_is_female = false;
     vm.set_button_pressed(0);
-    tick_n(&mut vm, &mut dispatcher, 5.0, 6);
+    tick_n(&mut vm, &mut dispatcher, 1.0, 10);
 
-    // 名前入力フェーズまで進行
-    tick_n(&mut vm, &mut dispatcher, 60.0, 8);
+    // キャラメイク終了
+    tick_n(&mut vm, &mut dispatcher, 1.0, 65);
     let cg00_progress = vm.get_stage(CG00);
-    println!("[CG00] 進行ステージ: {}", cg00_progress);
+    println!("[CG00] 完了直前ステージ: {}", cg00_progress);
     assert!(cg00_progress >= 10, "CG00 進行確認");
 
-    // CG00 完了を強制セット
+    // CG00 完了フック
     vm.set_stage(CG00, 100);
-    tick(&mut vm, &mut dispatcher); tick(&mut vm, &mut dispatcher);
+    tick_n(&mut vm, &mut dispatcher, 1.0, 5);
     assert!(vm.quest_manager.get_stage_done(CG00, 100), "CG00 完了");
     println!("[CG00] 完了 OK");
 

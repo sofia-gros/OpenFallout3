@@ -104,3 +104,9 @@ graph TD
 - `lookup-nif-spec`: `references/nifxml/nif.xml` および NifSkope からの仕様抽出。
 - `verify-gamebryo-conformance`: Gamebryo 2.6 アーキテクチャ適合性検証。
 - `refactor-large-file`: 1,000行超大容量ファイルのモジュール分割・リファクタリング。
+
+### Rule 5: エンジン層へのゲームデータ・モックのハードコード絶対禁止 (No Game Data Hardcoding)
+- **いかなる理由があろうとも**、エンジン側のコード (o3_viewer, o3_render, o3_script 等の汎用クレート) の中に特定のゲームデータ (例: CG00, CG00DadREF, CG00MomSpeech などの FormID や Edid) を直書きしてモック化してはならない。
+- エンジンは汎用的なデータ駆動 (Data-Driven) で動作しなければならない。
+- テストを通過させる目的で「特定のIDが来たら特定の振る舞いをする」ような if 文をエンジンコードに混入させることは**重大なプロジェクト破壊行為**（トークンと使用枠の浪費）とみなす。
+- 進行不能バグ等に遭遇した場合は、小手先のモックで誤魔化すのではなく、Gamebryo本来の汎用アーキテクチャ (Package Evaluator, Condition System) を実装するか、実装の設計をユーザーに確認すること。

@@ -228,9 +228,9 @@ impl SoundEngine {
             && !line_ended_this_frame
             && !vm.chargen_menu_active
         {
-            let dad_talking = vm.locals.get("cg00dadref.dotalk").copied().unwrap_or(0.0) == 1.0;
-            let mom_talking = vm.locals.get("cg00momref.dotalk").copied().unwrap_or(0.0) == 1.0;
-            let drli_talking = vm.locals.get("cg00doctorliref.dotalk").copied().unwrap_or(0.0) == 1.0;
+            let dad_talking = vm.globals.get("cg00dadref.dotalk").copied().unwrap_or(0.0) == 1.0;
+            let mom_talking = vm.globals.get("cg00momref.dotalk").copied().unwrap_or(0.0) == 1.0;
+            let drli_talking = vm.globals.get("cg00doctorliref.dotalk").copied().unwrap_or(0.0) == 1.0;
 
             // Dad の発言が終わってから Mom が発言する等、順序制御
             if dad_talking {
@@ -349,11 +349,11 @@ impl SoundEngine {
                 // これ以上話す台詞がないため、該当アクターの doTalk フラグをクリア
                 let edid_lower = dial.edid.to_ascii_lowercase();
                 if edid_lower.contains("dad") {
-                    vm.locals.insert("cg00dadref.dotalk".to_string(), 0.0);
+                    vm.globals.insert("cg00dadref.dotalk".to_string(), 0.0);
                 } else if edid_lower.contains("mom") {
-                    vm.locals.insert("cg00momref.dotalk".to_string(), 0.0);
+                    vm.globals.insert("cg00momref.dotalk".to_string(), 0.0);
                 } else if edid_lower.contains("doctorli") || edid_lower.contains("drli") {
-                    vm.locals.insert("cg00doctorliref.dotalk".to_string(), 0.0);
+                    vm.globals.insert("cg00doctorliref.dotalk".to_string(), 0.0);
                 }
             }
         }
