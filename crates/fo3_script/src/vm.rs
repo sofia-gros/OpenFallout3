@@ -101,6 +101,8 @@ pub struct ScriptVm {
     pub chargen_events: Vec<String>,
     /// テレポート移動リクエストキュー: (Subject FormID (None は player), Target Marker EDID)
     pub teleport_requests: Vec<(Option<FormId>, String)>,
+    pub chargen_menu_active: bool,
+    pub playgroup_queue: Vec<(FormId, String)>,
     /// 台詞発言リクエストキュー: (Speaker FormID, Topic EDID)
     pub say_queue: Vec<(Option<FormId>, String)>,
     /// スクリプトパッケージ追加リクエストキュー: (Subject FormID, Package EDID)
@@ -144,6 +146,8 @@ impl Default for ScriptVm {
             sound_queue: Vec::new(),
             chargen_events: Vec::new(),
             teleport_requests: Vec::new(),
+            chargen_menu_active: false,
+            playgroup_queue: Vec::new(),
             say_queue: Vec::new(),
             script_package_requests: Vec::new(),
             evaluate_package_requests: Vec::new(),
@@ -294,6 +298,7 @@ impl ScriptVm {
 
         let cmd = cmd.as_str();
         let parts = cmd_parts;
+        match cmd {
             "setstage" => {
                 if parts.len() >= 3 {
                     let q_id = self.resolve_form_id(parts[1])?;
@@ -317,19 +322,33 @@ impl ScriptVm {
                     let expr = parts[3..].join(" ");
                     let val = self.eval_expr(&expr);
                     let lower_var = var_name.to_ascii_lowercase();
-                    // グローバル変数 (case-insensitive で検索)
+                    // グローバル変数                    // 変数解決 (case-insensitive 検索)
                     let global_key = self.globals.keys()
                         .find(|k| k.eq_ignore_ascii_case(var_name))
                         .cloned();
                     if let Some(k) = global_key {
                         self.globals.insert(k, val);
                     } else if let Some((prefix, sub)) = lower_var.split_once('.') {
-                        // ドット付き変数: "cg00.timer" → locals["cg00.timer"] と locals["timer"] 両方へ格納
-                        // 参照元: GECK スクリプト変数命名規約 (QuestEditorID.VarName 形式)
-                        self.locals.insert(format!("{}.{}", prefix, sub), val);
-                        self.locals.insert(sub.to_string(), val);
+                        // 2. Cross reference set (e.g. CG00.timer)
+                        let mut target_q_id = None;
+                        if let Some(q_id) = self.edid_map.get(prefix).or_else(|| self.edid_map.get(&prefix.to_ascii_uppercase())) {
+                            if self.quest_manager.quests.contains_key(q_id) {
+                                target_q_id = Some(*q_id);
+                            }
+                        }
+                        if let Some(q_id) = target_q_id {
+                            self.quest_manager.set_quest_variable(q_id, sub, val as f64);
+                        } else {
+                            self.locals.insert(format!("{}.{}", prefix, sub), val);
+                            self.locals.insert(sub.to_string(), val);
+                        }
                     } else {
-                        // ベア変数: そのままローカルテーブルへ (cg00. 自動付与は廃止)
+                        // 3. Local variable set
+                        if let Some(q_id) = self_id {
+                            if self.quest_manager.quests.contains_key(&q_id) {
+                                self.quest_manager.set_quest_variable(q_id, &lower_var, val as f64);
+                            }
+                        }
                         self.locals.insert(lower_var, val);
                     }
                 }
@@ -485,19 +504,19 @@ impl ScriptVm {
             "moveto" => {
                 if parts.len() >= 2 {
                     let target_marker = parts[1].to_string();
-                    println!("[Script] MoveTo 要求: subject={:?}, target={}", self_id, target_marker);
-                    self.teleport_requests.push((self_id, target_marker));
+                    println!("[Script] MoveTo 要求: subject={:?}, target={}", effective_self_id, target_marker);
+                    self.teleport_requests.push((effective_self_id, target_marker));
                 }
             }
             "evaluatepackage" | "evp" => {
-                println!("[Script] EvaluatePackage (AI パッケージ再評価要求): subject={:?}", self_id);
-                self.evaluate_package_requests.push(self_id);
+                println!("[Script] EvaluatePackage (AI パッケージ再評価要求): subject={:?}", effective_self_id);
+                self.evaluate_package_requests.push(effective_self_id);
             }
             "say" => {
                 if parts.len() >= 2 {
                     let topic = parts[1].to_string();
-                    println!("[Script] Say (台詞発言要求): topic={:?}, speaker={:?}", topic, self_id);
-                    self.say_queue.push((self_id, topic));
+                    println!("[Script] Say (台詞発言要求): topic={:?}, speaker={:?}", topic, effective_self_id);
+                    self.say_queue.push((effective_self_id, topic));
                 }
             }
             "sayto" => {
@@ -508,12 +527,12 @@ impl ScriptVm {
                     // parts[1] = Target (話しかける相手の FormID/EditorID)
                     // Speaker は自分自身 (self_id) が Target に向かって発話
                     let _target_id = self.resolve_form_id(parts[1]).ok();
-                    println!("[Script] SayTo (台詞発言要求): topic={:?}, speaker={:?}, target_str={:?}", topic, self_id, parts[1]);
-                    self.say_queue.push((self_id, topic));
+                    println!("[Script] SayTo (台詞発言要求): topic={:?}, speaker={:?}, target_str={:?}", topic, effective_self_id, parts[1]);
+                    self.say_queue.push((effective_self_id, topic));
                 } else if parts.len() == 2 {
                     let topic = parts[1].to_string();
-                    println!("[Script] SayTo (台詞発言要求): topic={:?}, speaker={:?}", topic, self_id);
-                    self.say_queue.push((self_id, topic));
+                    println!("[Script] SayTo (台詞発言要求): topic={:?}, speaker={:?}", topic, effective_self_id);
+                    self.say_queue.push((effective_self_id, topic));
                 }
             }
             "startquest" => {

@@ -13,6 +13,14 @@ mod audio;
 #[path = "../src/chargen_menu.rs"]
 mod chargen_menu;
 
+fn digest_pending(vm: &mut fo3_script::ScriptVm) {
+    while let Some((_quest_id, _stage, script)) = vm.pending_stage_scripts.pop_front() {
+        if let Err(e) = vm.execute_result_script(&script, None) {
+            println!("[TEST ERR] {}", e);
+        }
+    }
+}
+
 #[test]
 fn test_new_game_cg00_progression_simulation() {
     let esm_path = "A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\\Fallout3.esm";
@@ -36,7 +44,8 @@ fn test_new_game_cg00_progression_simulation() {
 
     // 2. ScriptVm の初期化とマスター同期
     let mut vm = ScriptVm::new();
-    for (_, q) in quest_map {
+    for (_, q) in quest_map.clone() {
+        vm.edid_map.insert(q.editor_id.to_ascii_uppercase(), q.form_id);
         vm.quest_manager.register_quest(q);
     }
     for (id, scpt) in &script_map {
@@ -59,7 +68,10 @@ fn test_new_game_cg00_progression_simulation() {
     let cg00_id = FormId(0x0001F388);
     println!("ニューゲーム開始: CG00 (Stage 0) 起動...");
     vm.set_stage(cg00_id, 0);
+    digest_pending(&mut vm);
 
+
+    
     // 5. 連鎖実行の検証:
     // Stage 0 スクリプト: `setstage CG00 5`, `player.moveto CG00PlayerStartMarker`
     // Stage 5 スクリプト: `set CG00.timer to .01`, `set CG00.runTimer to 1`, `disableplayercontrols`, `imod CG00BlackScreenISFX`
@@ -90,7 +102,7 @@ fn test_new_game_cg00_progression_simulation() {
     );
 
     // タイマー変数がセットされていること
-    let timer_val = vm.locals.get("cg00.timer").or_else(|| vm.locals.get("timer")).or_else(|| vm.globals.get("CG00.timer"));
+    let timer_val = vm.quest_manager.get_quest_variable(cg00_id, "timer");
     println!("CG00.timer: {:?}", timer_val);
     assert!(
         timer_val.is_some(),
@@ -99,13 +111,17 @@ fn test_new_game_cg00_progression_simulation() {
 
     // 6. フレーム毎 GameMode イベントディスパッチ (タイマー減算とステージ進行)
     // 1フレーム目: timer = 0.01 - 0.016 = -0.006
+    vm.delta_time = 0.016;
     dispatcher.push_event(GameEvent::GameMode);
     dispatcher.process_queue(&mut vm).unwrap();
-
+    digest_pending(&mut vm);
+    
     // 2フレーム目: timer <= 0 のため if getstage CG00 == 5 -> setstage CG00 6
+    vm.delta_time = 0.016;
     dispatcher.push_event(GameEvent::GameMode);
     dispatcher.process_queue(&mut vm).unwrap();
-
+    digest_pending(&mut vm);
+    
     let new_stage = vm.get_stage(cg00_id);
     println!("GameMode 駆動後の CG00 ステージ: {}", new_stage);
     assert_eq!(
@@ -118,10 +134,12 @@ fn test_new_game_cg00_progression_simulation() {
     vm.delta_time = 10.5;
     dispatcher.push_event(GameEvent::GameMode);
     dispatcher.process_queue(&mut vm).unwrap();
+    digest_pending(&mut vm);
 
     // 判定フレーム
     dispatcher.push_event(GameEvent::GameMode);
     dispatcher.process_queue(&mut vm).unwrap();
+    digest_pending(&mut vm);
 
     let stage_after_timer = vm.get_stage(cg00_id);
     println!("タイマー満了後の CG00 ステージ: {}", stage_after_timer);
@@ -132,10 +150,12 @@ fn test_new_game_cg00_progression_simulation() {
     vm.delta_time = 2.5;
     dispatcher.push_event(GameEvent::GameMode);
     dispatcher.process_queue(&mut vm).unwrap();
+    digest_pending(&mut vm);
 
     // 判定フレーム
     dispatcher.push_event(GameEvent::GameMode);
     dispatcher.process_queue(&mut vm).unwrap();
+    digest_pending(&mut vm);
 
     let stage_after_timer2 = vm.get_stage(cg00_id);
     println!("Stage 8 満了後の CG00 ステージ: {}", stage_after_timer2);
@@ -146,10 +166,12 @@ fn test_new_game_cg00_progression_simulation() {
     vm.delta_time = 8.0;
     dispatcher.push_event(GameEvent::GameMode);
     dispatcher.process_queue(&mut vm).unwrap();
+    digest_pending(&mut vm);
 
     // 判定フレーム
     dispatcher.push_event(GameEvent::GameMode);
     dispatcher.process_queue(&mut vm).unwrap();
+    digest_pending(&mut vm);
 
     let stage_after_timer3 = vm.get_stage(cg00_id);
     println!("Stage 9 満了後の CG00 ステージ: {}", stage_after_timer3);
@@ -181,10 +203,10 @@ fn test_new_game_cg00_progression_simulation() {
     // Stage 10: 父親の最初の台詞を発火 (doTalk == 1)
     sound_engine.update(0.016, &mut vm, &master, &mut vfs);
     assert!(
-        sound_engine.active_subtitle.is_some(),
+        (!sound_engine.active_subtitles.is_empty()),
         "Stage 10 で父親の台詞字幕が開始されていること"
     );
-    let sub = sound_engine.active_subtitle.as_ref().unwrap();
+    let sub = sound_engine.active_subtitles.values().next().map(|(s, _)| s).unwrap();
     println!("表示中の台詞字幕: FormID=0x{:08X}, Speaker={}", sub.form_id.0, sub.speaker);
     assert_eq!(sub.form_id, FormId(0x0001F387));
 
@@ -194,12 +216,13 @@ fn test_new_game_cg00_progression_simulation() {
     println!("台詞終了後の CG00 ステージ: {}", stage_after_speech);
     assert_eq!(stage_after_speech, 18, "父親の台詞完了により Stage 18 へ自動遷移すること");
 
-    // Stage 18 の 1秒タイマー経過 -> Stage 20 (性別選択メニュー表示)
-    vm.delta_time = 1.5;
-    dispatcher.push_event(GameEvent::GameMode);
-    dispatcher.process_queue(&mut vm).unwrap();
-    dispatcher.push_event(GameEvent::GameMode);
-    dispatcher.process_queue(&mut vm).unwrap();
+    // Stage 18 の 1フレーム後 -> Stage 20 (性別選択メッセージ)
+    for _ in 0..1 {
+        vm.delta_time = 1.5;
+        dispatcher.push_event(GameEvent::GameMode);
+        dispatcher.process_queue(&mut vm).unwrap();
+        digest_pending(&mut vm);
+    }
 
     let stage_choose_sex = vm.get_stage(cg00_id);
     println!("性別選択フェーズの CG00 ステージ: {}", stage_choose_sex);
@@ -210,12 +233,14 @@ fn test_new_game_cg00_progression_simulation() {
     vm.set_button_pressed(1);
     dispatcher.push_event(GameEvent::GameMode);
     dispatcher.process_queue(&mut vm).unwrap();
+    digest_pending(&mut vm);
 
     // 実機 CG00SCRIPT: chooseSex == 1 により GetButtonPressed が処理され、
     // timer <= 0 で if getStage CG00 == 20 -> setstage CG00 22 が実行される
     vm.delta_time = 1.5;
     dispatcher.push_event(GameEvent::GameMode);
     dispatcher.process_queue(&mut vm).unwrap();
+    digest_pending(&mut vm);
 
     let stage_after_select = vm.get_stage(cg00_id);
     println!("性別選択後の CG00 ステージ: {}", stage_after_select);
@@ -223,23 +248,25 @@ fn test_new_game_cg00_progression_simulation() {
 
     // 12. Stage 22: 父親の性別認知台詞 (INFO 0x0001F385)
     sound_engine.update(0.016, &mut vm, &master, &mut vfs);
-    assert!(sound_engine.active_subtitle.is_some(), "父親の台詞が開始されること");
-    let dad_sub = sound_engine.active_subtitle.as_ref().unwrap();
+    assert!((!sound_engine.active_subtitles.is_empty()), "父親の台詞が開始されること");
+    let dad_sub = sound_engine.active_subtitles.values().next().map(|(s, _)| s).unwrap();
     println!("父親の台詞1: FormID=0x{:08X}", dad_sub.form_id.0);
     assert_eq!(dad_sub.form_id, FormId(0x0001F385));
 
     // 父親の台詞終了 (15秒経過) -> ResultScript `set CG00DadREF.doTalk to 0; set CG00MomREF.doTalk to 1` が実行され、
     // 即座に自律トピックトリガーにより母親の台詞 (CG00MomSpeech, INFO 0x0005EDD8) が開始される
     sound_engine.update(15.0, &mut vm, &master, &mut vfs);
-    assert!(sound_engine.active_subtitle.is_some(), "父親終了後に母親の台詞が自律開始されること");
-    let mom_sub = sound_engine.active_subtitle.as_ref().unwrap();
+    sound_engine.update(0.016, &mut vm, &master, &mut vfs);
+    assert!((!sound_engine.active_subtitles.is_empty()), "父親終了後に母親の台詞が自律開始されること");
+    let mom_sub = sound_engine.active_subtitles.values().next().map(|(s, _)| s).unwrap();
     println!("母親の台詞: FormID=0x{:08X}", mom_sub.form_id.0);
     assert_eq!(mom_sub.form_id, FormId(0x0005EDD8));
 
     // 母親の台詞終了 (15秒経過) -> ResultScript `set CG00DadREF.doTalk to 1` が実行され、
     // 即座に自律トピックトリガーにより父親の台詞が開始される
     sound_engine.update(15.0, &mut vm, &master, &mut vfs);
-    assert!(sound_engine.active_subtitle.is_some(), "母親終了後に父親の台詞が自律開始されること");
+    sound_engine.update(0.016, &mut vm, &master, &mut vfs);
+    assert!((!sound_engine.active_subtitles.is_empty()), "母親終了後に父親の台詞が自律開始されること");
 
     // 父親が名前を促す Stage 38 に到達するまで台詞を自動進行
     for _ in 0..5 {
@@ -247,7 +274,7 @@ fn test_new_game_cg00_progression_simulation() {
             break;
         }
         sound_engine.update(0.016, &mut vm, &master, &mut vfs);
-        if let Some(sub) = sound_engine.active_subtitle.as_ref() {
+        if let Some(sub) = sound_engine.active_subtitles.values().next().map(|(s, _)| s) {
             println!("父親の台詞: FormID=0x{:08X}", sub.form_id.0);
         }
         sound_engine.update(15.0, &mut vm, &master, &mut vfs);
@@ -255,14 +282,17 @@ fn test_new_game_cg00_progression_simulation() {
 
     let stage_name_prompt = vm.get_stage(cg00_id);
     println!("名前入力準備ステージ: {}", stage_name_prompt);
-    assert_eq!(stage_name_prompt, 38, "名前促し台詞終了で Stage 38 へ遷移すること");
+    assert_eq!(stage_name_prompt, 38, "名前入力準備 (Stage 38) に進行すること");
 
-    // Stage 38 の 1秒タイマー経過 -> Stage 40 (名前入力フェーズ)
-    vm.delta_time = 1.5;
-    dispatcher.push_event(GameEvent::GameMode);
-    dispatcher.process_queue(&mut vm).unwrap();
-    dispatcher.push_event(GameEvent::GameMode);
-    dispatcher.process_queue(&mut vm).unwrap();
+    digest_pending(&mut vm);
+
+    // Stage 38 でタイマーを回して Stage 40 (GetPlayerName) へ
+    for _ in 0..2 {
+        vm.delta_time = 1.5;
+        dispatcher.push_event(GameEvent::GameMode);
+        dispatcher.process_queue(&mut vm).unwrap();
+        digest_pending(&mut vm);
+    }
 
     let stage_name = vm.get_stage(cg00_id);
     println!("名前決定ステージ: {}", stage_name);
@@ -279,4 +309,5 @@ fn test_new_game_cg00_progression_simulation() {
     println!("名前決定後のステージ: {}", stage_after_name);
     assert_eq!(stage_after_name, 42, "名前決定により Stage 42 へ進むこと");
 }
+
 

@@ -7,7 +7,7 @@ use std::io::Cursor;
 use std::path::Path;
 use std::sync::Arc;
 
-use fo3_esm::{CellLighting, CellRecord, EsmReader, LandRecord, RefrRecord};
+use fo3_esm::{CellLighting, CellRecord, EsmReader, FormId, LandRecord, RefrRecord};
 use fo3_gamebryo_core::NiTransform;
 use fo3_nif::collision::extract_collision_data;
 use fo3_nif::NifFile;
@@ -22,6 +22,7 @@ use crate::types::{
     get_actor_part_paths, is_editor_marker_or_effect, is_ghoul_race, resolve_candidate_items,
     ViewerTarget,
 };
+use fo3_script::conditions::ConditionContext;
 
 /// ロード結果をまとめた構造体。
 pub struct LoadedSceneResult {
@@ -619,21 +620,31 @@ pub fn load_scene(
                     placed_lights.len()
                 );
 
+
+                    let mut animated_statics: Vec<(u32, std::sync::Arc<fo3_nif::NifFile>, fo3_gamebryo_core::NiTransform, std::sync::Arc<fo3_render::animation::AnimationClip>)> = Vec::new();
+
                     let cell_inputs: Vec<(
-                        Vec<(&NifFile, NiTransform)>,
-                        Option<(&LandRecord, i32, i32)>,
+                        Vec<(&fo3_nif::NifFile, fo3_gamebryo_core::NiTransform)>,
+                        Option<(&fo3_esm::records::LandRecord, i32, i32)>,
                     )> = cells
                         .iter()
                         .zip(all_cell_items.iter())
                         .map(|((cell, _, land), items)| {
-                            let placed_refs: Vec<(&NifFile, NiTransform)> =
-                                items.iter().map(|(_, n, t)| (n.as_ref(), *t)).collect();
+                            let mut placed_refs = Vec::new();
+                            for (form_id, n, t) in items {
+                                if let Some(clip) = fo3_render::animation::AnimationClip::from_transform_controllers(n.as_ref()) {
+                                    animated_statics.push((*form_id, n.clone(), *t, std::sync::Arc::new(clip)));
+                                } else {
+                                    placed_refs.push((n.as_ref(), *t));
+                                }
+                            }
                             let land_info = land
                                 .as_ref()
                                 .and_then(|l| cell.grid.map(|(gx, gy)| (l, gx, gy)));
                             (placed_refs, land_info)
                         })
                         .collect();
+
 
                     let cell_refs: Vec<(
                         &[(&NifFile, NiTransform)],
@@ -657,6 +668,21 @@ pub fn load_scene(
                         vfs,
                         texture_cache,
                     );
+
+                    for (form_id, nif, transform, clip) in animated_statics {
+                        scene.add_animated_static(
+                            device,
+                            queue,
+                            context,
+                            vfs,
+                            form_id,
+                            "AnimatedStatic",
+                            &transform,
+                            nif,
+                            Some(clip),
+                            texture_cache,
+                        );
+                    }
 
                     if !cell_npcs.is_empty() {
                         println!(
@@ -695,20 +721,13 @@ pub fn load_scene(
                             None
                         };
 
-                        // アイドルアニメーション KF のキャッシュ
-                        let idle_kf_path =
-                            "meshes\\characters\\_male\\idleanims\\ttnpchappysubtlelistena.kf";
-                        let (kf_nif, anim_clip) = if let Ok(bytes) = vfs.read(idle_kf_path) {
-                            let mut cursor = Cursor::new(bytes);
-                            if let Ok(kf) = NifFile::read(&mut cursor) {
-                                let clip = fo3_render::AnimationClip::from_kf(&kf).map(Arc::new);
-                                (Some(Arc::new(kf)), clip)
-                            } else {
-                                (None, None)
-                            }
-                        } else {
-                            (None, None)
-                        };
+                        // 既定アイドルアニメーション (PKID -> PACK -> IDLE -> MODL のデータ駆動解決)
+                        // 従来のハードコード NIF (`idleanims\ttnpchappysubtlelistena.kf`) は廃止した。
+                        // ロード時はクエスト未進行 (空ステージ) で条件評価するため、GetStage 等の
+                        // 条件付き Section PACK は不採用となり、条件なし Start/Default PACK が
+                        // フォールバックとなる。アイドルコレクションを持たない場合は None (静止)。
+                        let mut default_idle_arcs: HashMap<u32, (Option<Arc<NifFile>>, Option<Arc<fo3_render::AnimationClip>>)> =
+                            HashMap::new();
 
                         for npc in &cell_npcs {
                             let skeleton = if npc.is_female {
@@ -814,6 +833,67 @@ pub fn load_scene(
                             let fg_sym_ref = npc.facegen_geometry_symmetric.as_deref();
                             let fg_asym_ref = npc.facegen_geometry_asymmetric.as_deref();
 
+                            // 各 NPC の既定アイドル (PKID -> PACK -> IDLE -> MODL)。
+                            // 従来のハードコード NIF に代わり、NPC レコードの PKID リストから
+                            // データ駆動で解決する。同一 NPC ベースの重複 VFS 読み込みは
+                            // default_idle_arcs キャッシュで回避。
+                            let (npc_kf, npc_clip) = {
+                                let base_id = npc.base_form_id;
+                                if let Some(cached) = default_idle_arcs.get(&base_id) {
+                                    cached.clone()
+                                } else {
+                                    // ロード時は空 ConditionContext (クエスト未進行) で評価。
+                                    // GetStage 等の条件付き Section PACK は不採用となり、
+                                    // 条件なし Start/Default PACK がフォールバックとなる。
+                                    let cond_ctx = ConditionContext::default();
+                                    let resolved = crate::action::resolve_pack_for_actor(
+                                        master_context,
+                                        FormId(base_id),
+                                        &cond_ctx,
+                                    )
+                                    .and_then(|pkg| {
+                                        let mut kf_paths = crate::action::resolve_idle_kf_from_pack(master_context, pkg);
+                                        // Fallback to mtidle.kf if package has no animations
+                                        if kf_paths.is_empty() {
+                                            kf_paths.push("meshes\\characters\\_male\\idleanims\\mtidle.kf".to_string());
+                                        }
+                                        for path in &kf_paths {
+                                            if let Ok(bytes) = vfs.read(path) {
+                                                let mut cursor = Cursor::new(bytes);
+                                                if let Ok(kf) = NifFile::read(&mut cursor) {
+                                                    if let Some(clip) = fo3_render::AnimationClip::from_kf(&kf) {
+                                                        return Some((Arc::new(kf), Arc::new(clip)));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        None
+                                    });
+                                    let result = match resolved {
+                                        Some(pair) => (Some(pair.0), Some(pair.1)),
+                                        None => {
+                                            // どのパッケージも条件を満たさない（またはアニメーション解決に失敗した）場合も mtidle.kf にフォールバック
+                                            if let Ok(bytes) = vfs.read("meshes\\characters\\_male\\idleanims\\mtidle.kf") {
+                                                let mut cursor = std::io::Cursor::new(bytes);
+                                                if let Ok(kf) = fo3_nif::NifFile::read(&mut cursor) {
+                                                    if let Some(clip) = fo3_render::animation::AnimationClip::from_kf(&kf) {
+                                                        (Some(std::sync::Arc::new(kf)), Some(std::sync::Arc::new(clip)))
+                                                    } else {
+                                                        (None, None)
+                                                    }
+                                                } else {
+                                                    (None, None)
+                                                }
+                                            } else {
+                                                (None, None)
+                                            }
+                                        }
+                                    };
+                                    default_idle_arcs.insert(base_id, result.clone());
+                                    result
+                                }
+                            };
+
                             scene.add_actor(
                                 &device,
                                 &queue,
@@ -824,8 +904,8 @@ pub fn load_scene(
                                 &npc.transform,
                                 skel,
                                 parts,
-                                kf_nif.clone(),
-                                anim_clip.clone(),
+                                npc_kf,
+                                npc_clip,
                                 &mut actor_texture_cache,
                                 npc.hair_color,
                                 npc.has_hat,
@@ -982,3 +1062,4 @@ pub fn load_scene(
         scene, cell_lighting, placed_lights, clear_color, physics_world, door_spawn_point, interactables, refr_bindings,
     }
 }
+

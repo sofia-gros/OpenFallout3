@@ -58,6 +58,10 @@ pub enum GameEvent {
         /// 殺害者の FormID (自殺・環境死の場合は FormId(0))
         killer: FormId,
     },
+    /// アニメーション終了イベント
+    OnAnimationEnd {
+        actor: FormId,
+    },
 }
 
 /// 個々のオブジェクトインスタンスに紐づくスクリプト実行コンテキスト。
@@ -67,7 +71,7 @@ pub struct ScriptInstanceContext {
     /// アタッチされたスクリプトの FormID
     pub script_form_id: FormId,
     /// インスタンス固有のローカル変数ストレージ (変数名小文字 -> 値)
-    pub local_vars: HashMap<String, f32>,
+    pub local_vars: HashMap<String, f64>,
     /// アクティベート抑制フラグ (`Flag_SuppressActivate`)
     /// `OnActivate` ブロックが実行されると true になり、スクリプト内で `Activate` が呼ばれると false に戻る。
     pub suppress_activate: bool,
@@ -160,7 +164,7 @@ impl EventDispatcher {
         instance.trigger_default_activate = false;
 
         // ローカル変数を VM に同期
-        vm.locals = instance.local_vars.clone();
+        vm.locals = instance.local_vars.iter().map(|(k, v)| (k.clone(), *v as f32)).collect();
 
         // 各 OnActivate ブロックを実行
         for block in on_activate_blocks {
@@ -182,7 +186,7 @@ impl EventDispatcher {
         }
 
         // 実行後のローカル変数をインスタンスストレージに書き戻し
-        instance.local_vars = vm.locals.clone();
+        instance.local_vars = vm.locals.iter().map(|(k, v)| (k.clone(), *v as f64)).collect();
 
         Ok(instance.suppress_activate || !instance.trigger_default_activate)
     }
@@ -213,38 +217,47 @@ impl EventDispatcher {
                                     .filter(|b| b.event_type == ScriptEventType::GameMode)
                                     .cloned()
                                     .collect();
-                                vm.locals = instance.local_vars.clone();
+                                vm.locals = instance.local_vars.iter().map(|(k, v)| (k.clone(), *v as f32)).collect();
                                 for block in gm_blocks {
                                     let _ = vm.execute_block(&block.lines, Some(target));
                                 }
-                                instance.local_vars = vm.locals.clone();
+                                instance.local_vars = vm.locals.iter().map(|(k, v)| (k.clone(), *v as f64)).collect();
                             }
                         }
                     }
 
                     // 2. アクティブなクエストスクリプトの GameMode ブロックを実行
-                    let active_quests: Vec<(FormId, FormId)> = vm
-                        .quest_manager
-                        .quests
-                        .iter()
-                        .filter_map(|(&q_id, quest)| {
-                            if vm.quest_manager.current_stages.contains_key(&q_id) {
-                                quest.script_form_id.map(|s_id| (q_id, s_id))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
+                                          let active_quests: Vec<(FormId, FormId)> = vm
+                          .quest_manager
+                          .quests
+                          .iter()
+                          .filter_map(|(&q_id, quest)| {
+                              if vm.quest_manager.current_stages.contains_key(&q_id) {
+                                  quest.script_form_id.map(|s_id| (q_id, s_id))
+                              } else {
+                                  None
+                              }
+                          })
+                          .collect();
 
-                    for (q_id, script_id) in active_quests {
-                        if let Some(blocks) = self.parsed_blocks.get(&script_id) {
-                            for block in blocks {
-                                if block.event_type == ScriptEventType::GameMode {
-                                    let _ = vm.execute_block(&block.lines, Some(q_id));
-                                }
-                            }
-                        }
-                    }
+                      for (q_id, script_id) in active_quests {
+                          if let Some(blocks) = self.parsed_blocks.get(&script_id) {
+                              let gm_blocks: Vec<ScriptBlock> = blocks
+                                  .iter()
+                                  .filter(|b| b.event_type == ScriptEventType::GameMode)
+                                  .cloned()
+                                  .collect();
+                              if !gm_blocks.is_empty() {
+                                  vm.locals.clear();
+                                  if let Some(q_vars) = vm.quest_manager.quest_variables.get(&q_id) {
+                                      vm.locals = q_vars.iter().map(|(k, v)| (k.clone(), *v as f32)).collect();
+                                  }
+                                  for block in gm_blocks {
+                                      let _ = vm.execute_block(&block.lines, Some(q_id));
+                                  }
+                              }
+                          }
+                      }
                 }
                 GameEvent::OnAdd { item, container } => {
                     // コンテナに紐づくスクリプトの OnAdd ブロックをディスパッチ
@@ -255,12 +268,12 @@ impl EventDispatcher {
                             let target_blocks: Vec<ScriptBlock> = blocks.iter()
                                 .filter(|b| b.event_type == ScriptEventType::OnAdd)
                                 .cloned().collect();
-                            vm.locals = instance.local_vars.clone();
+                            vm.locals = instance.local_vars.iter().map(|(k, v)| (k.clone(), *v as f32)).collect();
                             for block in target_blocks {
                                 let _ = vm.execute_block(&block.lines, Some(item));
                             }
                             if let Some(inst) = self.instances.get_mut(&container) {
-                                inst.local_vars = vm.locals.clone();
+                                inst.local_vars = vm.locals.iter().map(|(k, v)| (k.clone(), *v as f64)).collect();
                             }
                         }
                     }
@@ -274,12 +287,12 @@ impl EventDispatcher {
                             let target_blocks: Vec<ScriptBlock> = blocks.iter()
                                 .filter(|b| b.event_type == ScriptEventType::OnEquip)
                                 .cloned().collect();
-                            vm.locals = instance.local_vars.clone();
+                            vm.locals = instance.local_vars.iter().map(|(k, v)| (k.clone(), *v as f32)).collect();
                             for block in target_blocks {
                                 let _ = vm.execute_block(&block.lines, Some(actor));
                             }
                             if let Some(inst) = self.instances.get_mut(&item) {
-                                inst.local_vars = vm.locals.clone();
+                                inst.local_vars = vm.locals.iter().map(|(k, v)| (k.clone(), *v as f64)).collect();
                             }
                         }
                     }
@@ -292,12 +305,12 @@ impl EventDispatcher {
                             let target_blocks: Vec<ScriptBlock> = blocks.iter()
                                 .filter(|b| b.event_type == ScriptEventType::OnUnequip)
                                 .cloned().collect();
-                            vm.locals = instance.local_vars.clone();
+                            vm.locals = instance.local_vars.iter().map(|(k, v)| (k.clone(), *v as f32)).collect();
                             for block in target_blocks {
                                 let _ = vm.execute_block(&block.lines, Some(actor));
                             }
                             if let Some(inst) = self.instances.get_mut(&item) {
-                                inst.local_vars = vm.locals.clone();
+                                inst.local_vars = vm.locals.iter().map(|(k, v)| (k.clone(), *v as f64)).collect();
                             }
                         }
                     }
@@ -310,12 +323,12 @@ impl EventDispatcher {
                             let target_blocks: Vec<ScriptBlock> = blocks.iter()
                                 .filter(|b| b.event_type == ScriptEventType::OnDrop)
                                 .cloned().collect();
-                            vm.locals = instance.local_vars.clone();
+                            vm.locals = instance.local_vars.iter().map(|(k, v)| (k.clone(), *v as f32)).collect();
                             for block in target_blocks {
                                 let _ = vm.execute_block(&block.lines, Some(dropper));
                             }
                             if let Some(inst) = self.instances.get_mut(&item) {
-                                inst.local_vars = vm.locals.clone();
+                                inst.local_vars = vm.locals.iter().map(|(k, v)| (k.clone(), *v as f64)).collect();
                             }
                         }
                     }
@@ -329,12 +342,12 @@ impl EventDispatcher {
                             let target_blocks: Vec<ScriptBlock> = blocks.iter()
                                 .filter(|b| b.event_type == ScriptEventType::OnDeath)
                                 .cloned().collect();
-                            vm.locals = instance.local_vars.clone();
+                            vm.locals = instance.local_vars.iter().map(|(k, v)| (k.clone(), *v as f32)).collect();
                             for block in target_blocks {
                                 let _ = vm.execute_block(&block.lines, Some(killer));
                             }
                             if let Some(inst) = self.instances.get_mut(&actor) {
-                                inst.local_vars = vm.locals.clone();
+                                inst.local_vars = vm.locals.iter().map(|(k, v)| (k.clone(), *v as f64)).collect();
                             }
                         }
                     }
@@ -358,11 +371,30 @@ impl EventDispatcher {
                                             .unwrap_or(true)
                                     })
                                     .cloned().collect();
-                                vm.locals = instance.local_vars.clone();
+                                vm.locals = instance.local_vars.iter().map(|(k, v)| (k.clone(), *v as f32)).collect();
                                 for block in mm_blocks {
                                     let _ = vm.execute_block(&block.lines, Some(target));
                                 }
-                                instance.local_vars = vm.locals.clone();
+                                instance.local_vars = vm.locals.iter().map(|(k, v)| (k.clone(), *v as f64)).collect();
+                            }
+                        }
+                    }
+                }
+                GameEvent::OnAnimationEnd { actor } => {
+                    if let Some(instance) = self.instances.get(&actor) {
+                        let script_id = instance.script_form_id;
+                        if let Some(blocks) = self.parsed_blocks.get(&script_id) {
+                            let target_blocks: Vec<ScriptBlock> = blocks
+                                .iter()
+                                .filter(|b| b.event_type == ScriptEventType::Custom("OnAnimationEnd".to_string()))
+                                .cloned()
+                                .collect();
+                            vm.locals = instance.local_vars.iter().map(|(k, v)| (k.clone(), *v as f32)).collect();
+                            for block in target_blocks {
+                                let _ = vm.execute_block(&block.lines, Some(actor));
+                            }
+                            if let Some(inst) = self.instances.get_mut(&actor) {
+                                inst.local_vars = vm.locals.iter().map(|(k, v)| (k.clone(), *v as f64)).collect();
                             }
                         }
                     }

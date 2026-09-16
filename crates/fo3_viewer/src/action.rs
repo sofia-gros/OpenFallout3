@@ -6,7 +6,7 @@
 //! - `references/openmw/components/esm4/loaddial.hpp`, `loadinfo.hpp`
 //! - `menus/dialog/dialog_menu.xml`, `menus/terminal/terminal_menu.xml`
 
-use fo3_esm::FormId;
+use fo3_esm::{EsmMasterContext, FormId, PackRecord};
 use fo3_script::{evaluate_conditions, ConditionContext};
 use crate::anim::AnimState;
 use crate::app::ViewerState;
@@ -359,38 +359,6 @@ pub fn perform_interact(app: &mut ViewerState) {
     }
 }
 
-/// Bink ビデオ (.bik) を全画面再生する。
-/// 参照元: Fallout 3 Gamebryo 2.6 BinkVideo パイプライン, `Video/Fallout INTRO Vsk.bik`
-pub fn play_bink_video(file_path: &str) {
-    let path = std::path::Path::new(file_path);
-    if !path.exists() {
-        eprintln!("[BinkVideo] 指定されたビデオファイルが見つかりません: {:?}", file_path);
-        return;
-    }
-
-    println!("============================================================");
-    println!("★ Bink ムービー全画面再生開始: {:?}", path.file_name().unwrap_or_default());
-    println!("   (再生完了または Esc/q キーでゲーム画面へシームレス復帰)");
-    println!("============================================================");
-
-    let res = std::process::Command::new("ffplay")
-        .arg("-autoexit")
-        .arg("-fs")
-        .arg("-loglevel")
-        .arg("quiet")
-        .arg(file_path)
-        .status();
-
-    match res {
-        Ok(status) => {
-            println!("[BinkVideo] ムービー再生終了: status={:?}", status);
-        }
-        Err(e) => {
-            eprintln!("[BinkVideo] ffplay 起動失敗 (スキップします): {:?}", e);
-        }
-    }
-}
-
 /// スクリプトからのテレポート移動要求 (MoveTo) を消化し、アクターやプレイヤーを移動させる。
 pub fn process_teleport_requests(app: &mut ViewerState) {
     while !app.vm.teleport_requests.is_empty() {
@@ -455,13 +423,90 @@ pub fn process_teleport_requests(app: &mut ViewerState) {
     }
 }
 
-/// スクリプトからの AI パッケージ追加 (`AddScriptPackage`) および再評価 (`EvaluatePackage` / `evp`) 要求を消化し、
-/// 対象アクター（NPC およびプレイヤー）に適切な実機 KF アニメーションを適用・再生する。
+/// PACK レコードの Idle Collection (IDLA->IDLE->MODL) からロード可能な KF ファイルパス一覧を解決する。
 ///
-/// 参照元:
-/// - Gamebryo 2.6 `NiControllerManager::ActivateSequence`
-/// - Fallout 3 クエスト `CG00` (FormID: 0x0001F388), パッケージ `CG00PlayerSection0` 〜 `CG00PlayerSection5`
-/// - 実機アニメーション: `Fallout - Meshes.bsa` (`meshes\characters\_male\idleanims\cg00*section*.kf`)
+/// チェーン: PACK `IDLA` (IDLE FormID リスト) -> IDLE レコード -> `MODL` (KF 相対パス C-String)。
+/// 戻り値は VFS 読み取り用に小文字化 + `meshes\` プレフィックス正規化済み。
+///
+/// 参照元: `references/bevyout/src/vsa/openmw_esm4/actor_support.rs:L659-745` (decode_package_idle_collection),
+///         `references/bevyout/src/vsa/openmw_esm4/idle.rs:L120-193` (IDLE の MODL パース),
+///         `knowledge/phase11_ai_package_and_quest_progression.md` (セクション 4)
+pub(crate) fn resolve_idle_kf_from_pack(ctx: &EsmMasterContext, pkg: &PackRecord) -> Vec<String> {
+    let mut paths = Vec::new();
+    if let Some(col) = &pkg.idle_collection {
+        for fid in &col.animation_form_ids {
+            if let Some(idle) = ctx.idle_map.get(fid) {
+                if let Some(model) = &idle.model_path {
+                    let mut lower = model.to_ascii_lowercase().replace('/', "\\");
+                    if !lower.starts_with("meshes\\") {
+                        lower = format!("meshes\\{}", lower);
+                    }
+                    if !lower.ends_with(".kf") {
+                        lower.push_str(".kf");
+                    }
+                    paths.push(lower);
+                }
+            }
+        }
+    }
+    paths
+}
+
+/// NPC レコードの AI パッケージリスト (PKID) から、CTDA 条件を満たす最初の PACK を選択する。
+///
+/// Gamebryo 2.6 では PKID は優先順位付きリストであり、エンジンは先頭から順に PACK の
+/// CTDA 条件式を評価し、最初に全条件が成立した PACK を適用する。条件を持たない
+/// Start / Default 系 PACK が最終フォールバックとなる (evaluate_conditions が空リスト
+/// を真とみなすため)。
+///
+/// 実機 ESM 検証 (CG00 クエスト): Dad (0x000290A6) / Mom (0x0005EDDF) / DrLi (0x000290A3)
+/// 各 NPC の PKID は Section5 -> Section4 -> ... -> Section0 -> Start/Default の順で並び、
+/// 各 Section PACK の CTDA は `GetStage(0x0001F388) >= {8,10,20,40,60,80}` 
+/// (fnIndex=58, operator=0x60 -> GTE) で統一されている。
+///
+/// 参照元: `references/openmw/components/esm4/loadnpc.cpp` (PKID),
+///         `references/bevyout/src/vsa/openmw_esm4/actor_support.rs:L534-600`,
+///         `crates/fo3_script/src/conditions.rs` (evaluate_conditions)
+pub(crate) fn resolve_pack_for_actor<'a>(
+    ctx: &'a EsmMasterContext,
+    base_npc: FormId,
+    cond_ctx: &ConditionContext,
+) -> Option<&'a PackRecord> {
+    let npc = ctx.npc_map.get(&base_npc)?;
+    for pkid in &npc.ai_packages {
+        if let Some(pkg) = ctx.pack_map.get(pkid) {
+            if evaluate_conditions(&pkg.conditions, cond_ctx) {
+                return Some(pkg);
+            }
+        }
+    }
+    None
+}
+
+/// PACK の Idle Collection からロード済み (nif, clip) を組み立てる共通適用処理。
+/// 複数 KF 候補を先頭から順に試し、初めて正常に NIF+クリップ化できた候補を返す。
+fn load_first_clip(app: &mut ViewerState, kf_paths: &[String]) -> Option<(String, std::sync::Arc<fo3_nif::NifFile>, std::sync::Arc<fo3_render::AnimationClip>)> {
+    for path in kf_paths {
+        if let Ok(bytes) = app.vfs.read(path) {
+            let mut cursor = std::io::Cursor::new(bytes);
+            if let Ok(kf) = fo3_nif::NifFile::read(&mut cursor) {
+                if let Some(clip) = fo3_render::AnimationClip::from_kf(&kf) {
+                    return Some((path.clone(), std::sync::Arc::new(kf), std::sync::Arc::new(clip)));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// EvaluatePackage 要求の消化 & AddScriptPackage 要求の消化 (パッケージアニメーション適用)。
+///
+/// - **AddScriptPackage**: スクリプトが名前指定した PACK を EDID 一致で解決し、その
+///   Idle Collection (IDLA->IDLE->MODL) から KF をロードする。
+/// - **EvaluatePackage**: 対象アクターの NPC ベース PKID リストを先頭から評価し、
+///   CTDA 条件が最初に成立した PACK の Idle Collection から KF を適用する (データ駆動)。
+///   CG00_* 固有のステージ連動 KF ハードコードは廃止し、実機 ESM の
+///   `NPC.PKID -> PACK.CTDA (GetStage >= 閾値) -> IDLE.MODL` を直接解決する。
 pub fn process_package_requests(app: &mut ViewerState) {
     let mut add_pkgs = Vec::new();
     std::mem::swap(&mut add_pkgs, &mut app.vm.script_package_requests);
@@ -469,40 +514,27 @@ pub fn process_package_requests(app: &mut ViewerState) {
     let mut evp_requests = Vec::new();
     std::mem::swap(&mut evp_requests, &mut app.vm.evaluate_package_requests);
 
-    let cg00_id = FormId(0x0001F388);
-    let stage = app.vm.quest_manager.get_stage(cg00_id);
-
     // 1. AddScriptPackage 要求の消化
     for (subject_opt, pkg_name) in add_pkgs {
         let target_fid = subject_opt.unwrap_or(FormId(0x00000014));
-        let lower = pkg_name.to_ascii_lowercase();
 
         // KF ファイルパスの解決
         let mut kf_paths = Vec::new();
-        kf_paths.push(format!("meshes\\characters\\_male\\idleanims\\{}.kf", lower));
 
-        // 末尾の 0 を 00 等にパディング（例: cg00playersection0 -> cg00playersection00.kf）
-        if let Some(pos) = lower.rfind(|c: char| c.is_ascii_digit()) {
-            let (prefix, num_str) = lower.split_at(pos);
-            if let Ok(num) = num_str.parse::<u32>() {
-                kf_paths.push(format!("meshes\\characters\\_male\\idleanims\\{:}{:02}.kf", prefix, num));
-            }
+        // 1a. PACK レコードを EDID 一致で解決し、Idle Collection (IDLA->IDLE->MODL) から KF を取得
+        if let Some(pkg) = app.master_context
+            .pack_map
+            .values()
+            .find(|p| p.editor_id.as_deref().map(|e| e.eq_ignore_ascii_case(&pkg_name)).unwrap_or(false))
+        {
+            kf_paths.extend(resolve_idle_kf_from_pack(&app.master_context, pkg));
         }
 
-        let mut loaded = None;
-        for path in &kf_paths {
-            if let Ok(bytes) = app.vfs.read(path) {
-                let mut cursor = std::io::Cursor::new(bytes);
-                if let Ok(kf) = fo3_nif::NifFile::read(&mut cursor) {
-                    if let Some(clip) = fo3_render::AnimationClip::from_kf(&kf) {
-                        loaded = Some((path.clone(), std::sync::Arc::new(kf), std::sync::Arc::new(clip)));
-                        break;
-                    }
-                }
-            }
-        }
+        // 1b. 条件なし PACK (条件式を持たない Start / Default 系 PACK) は
+        // AddScriptPackage からは直接適用されない (EvaluatePackage 経由でのみ評価)。
+        // 経路を単一化し、推測による `idleanims\{edid}.kf` フォールバックは廃止した。
 
-        if let Some((path, kf, clip)) = loaded {
+        if let Some((path, kf, clip)) = load_first_clip(app, &kf_paths) {
             if target_fid == FormId(0x00000014) {
                 if let Some(ref player) = app.controller.player_actor {
                     if player.third_person_actor_idx < app.scene.actors.len() {
@@ -520,80 +552,75 @@ pub fn process_package_requests(app: &mut ViewerState) {
     }
 
     // 2. EvaluatePackage (evp) 要求の消化
+    //
+    // データ駆動解決 (モック排除): REFR FormID -> ベース NPC FormID -> PKID (PACK リスト)
+    // -> CTDA 条件式評価 -> 適用 PACK -> Idle Collection (IDLA -> IDLE -> MODL) -> KF ファイル。
+    // 従来の CG00_* 固有 KF ハードコード (REFR FormID ベースのステージ連動) は廃止し、
+    // Fallout3.esm の NPC.PKID / PACK.CTDA / IDLE.MODL を直接参照して解決する。
     for subject_opt in evp_requests {
         let target_fid = subject_opt.unwrap_or(FormId(0x00000014));
-        let kf_rel_path = match target_fid.0 {
-            // Dad (CG00DadREF: 0x000290A7)
-            0x000290A7 => {
-                if stage >= 40 {
-                    "meshes\\characters\\_male\\idleanims\\cg00dadsection04.kf"
-                } else if stage >= 30 {
-                    "meshes\\characters\\_male\\idleanims\\cg00dadsection03.kf"
-                } else if stage >= 20 {
-                    "meshes\\characters\\_male\\idleanims\\cg00dadsection02.kf"
-                } else if stage >= 10 {
-                    "meshes\\characters\\_male\\idleanims\\cg00dadsection01.kf"
-                } else {
-                    "meshes\\characters\\_male\\idleanims\\cg00dadsection00.kf"
-                }
+
+        // REFR FormID -> NPC ベース FormID への解決 (REFR の NAME サブレコード由来)
+        let base_npc = app.interactables.iter().find_map(|it| match it.kind {
+            InteractableKind::Actor { form_id, base_form_id, .. } if form_id == target_fid.0 => {
+                Some(fo3_esm::FormId(base_form_id))
             }
-            // Mom (CG00MomREF: 0x0005EDE0)
-            0x0005EDE0 => {
-                if stage >= 30 {
-                    "meshes\\characters\\_male\\idleanims\\cg00momsection03.kf"
-                } else if stage >= 20 {
-                    "meshes\\characters\\_male\\idleanims\\cg00momsection02.kf"
-                } else if stage >= 10 {
-                    "meshes\\characters\\_male\\idleanims\\cg00momsection01.kf"
-                } else {
-                    "meshes\\characters\\_male\\idleanims\\cg00momsection00.kf"
-                }
+            _ => None,
+        });
+        let Some(base_npc) = base_npc else { continue };
+
+        // PKID (NPC.ai_packages) を先頭から評価し、最初に CTDA が成立した PACK を決定する。
+        // 借用はブロック内で完結させる (pkg は master_context への借用のため)。
+        let (pkg_edid, kf_paths) = {
+            let mut cond_ctx = ConditionContext::default();
+            cond_ctx.speaker = Some(base_npc);
+            cond_ctx.target = Some(target_fid);
+            cond_ctx.quest_stages = app.vm.quest_stages.clone();
+            cond_ctx.quest_stage_history = app.vm.quest_manager.get_stage_history_u32();
+            match resolve_pack_for_actor(&app.master_context, base_npc, &cond_ctx) {
+                Some(p) => (
+                    p.editor_id.clone().unwrap_or_default(),
+                    resolve_idle_kf_from_pack(&app.master_context, p),
+                ),
+                None => (String::new(), Vec::new()),
             }
-            // Dr. Li (CG00DoctorLiREF: 0x000290A5)
-            0x000290A5 => {
-                if stage >= 30 {
-                    "meshes\\characters\\_male\\idleanims\\cg00drlisection03.kf"
-                } else if stage >= 20 {
-                    "meshes\\characters\\_male\\idleanims\\cg00drlisection02.kf"
-                } else if stage >= 10 {
-                    "meshes\\characters\\_male\\idleanims\\cg00drlisection01.kf"
-                } else {
-                    "meshes\\characters\\_male\\idleanims\\cg00drlisection00.kf"
-                }
-            }
-            // Player (0x00000014)
-            0x00000014 => {
-                if stage >= 10 {
-                    "meshes\\characters\\_male\\idleanims\\cg00playersection01.kf"
-                } else {
-                    "meshes\\characters\\_male\\idleanims\\cg00playersection00.kf"
-                }
-            }
-            _ => continue,
         };
 
-        if let Ok(bytes) = app.vfs.read(kf_rel_path) {
-            let mut cursor = std::io::Cursor::new(bytes);
-            if let Ok(kf) = fo3_nif::NifFile::read(&mut cursor) {
-                if let Some(clip) = fo3_render::AnimationClip::from_kf(&kf) {
-                    let kf_arc = std::sync::Arc::new(kf);
-                    let clip_arc = std::sync::Arc::new(clip);
-                    if target_fid == FormId(0x00000014) {
-                        if let Some(ref player) = app.controller.player_actor {
-                            if player.third_person_actor_idx < app.scene.actors.len() {
-                                app.scene.actors[player.third_person_actor_idx].set_animation(kf_arc, clip_arc);
-                                println!("[AI/EVP] プレイヤーにアニメーション \"{}\" を適用", kf_rel_path);
-                            }
-                        }
-                    } else if let Some(actor) = app.scene.actors.iter_mut().find(|a| a.form_id == target_fid.0) {
-                        actor.set_animation(kf_arc, clip_arc);
-                        println!("[AI/EVP] アクター 0x{:08X} (\"{}\") にアニメーション \"{}\" を適用", target_fid.0, actor.name, kf_rel_path);
-                    }
-                }
+        // 適用 PACK の Idle Collection 由来 KF をロードしてアクターに適用
+        if let Some((path, kf, clip)) = load_first_clip(app, &kf_paths) {
+            if let Some(actor) = app.scene.actors.iter_mut().find(|a| a.form_id == target_fid.0) {
+                actor.set_animation(kf, clip);
+                println!("[AI/EVP] アクター 0x{:08X} (\"{}\") に PACK \"{}\" 由来のアニメーション \"{}\" を適用",
+                    target_fid.0, actor.name, pkg_edid, path);
             }
-        } else {
-            println!("[AI/EVP] KF ファイル読み込み失敗: \"{}\"", kf_rel_path);
         }
     }
 }
 
+
+
+/// `PlayGroup` や `PlayAnim` によるアニメーション再生要求を処理する。
+/// Actorだけでなく、ActivatorやStatic(例: gene_projector.nif)にも適用する。
+pub fn process_playgroup_requests(app: &mut ViewerState) {
+    let mut requests = Vec::new();
+    std::mem::swap(&mut requests, &mut app.vm.playgroup_queue);
+
+    for (target_fid, anim_name) in requests {
+        if let Some(actor) = app.scene.actors.iter_mut().find(|a| a.form_id == target_fid.0) {
+            // Actorの場合はそのままkfを適用
+            let kf_path = format!("meshes/characters/_male/{}", anim_name);
+            if let Ok(buf) = app.vfs.read(&kf_path) {
+                if let Ok(kf) = fo3_nif::NifFile::read(&mut std::io::Cursor::new(&buf)) {
+                    let kf_arc = std::sync::Arc::new(kf);
+                    if let Some(clip) = fo3_render::animation::AnimationClip::from_kf(&kf_arc) {
+                        actor.set_animation(kf_arc, std::sync::Arc::new(clip));
+                        println!("[Action] Actor {:08X} に PlayGroup: {} (KF: {}) を適用しました", target_fid.0, anim_name, kf_path);
+                    }
+                }
+            }
+        } else {
+            // 非Actorのアニメーション (gene_projector等) は stub
+            println!("[Action] [stub] 3Dオブジェクト {:08X} のアニメーション再生 PlayGroup: {}", target_fid.0, anim_name);
+        }
+    }
+}

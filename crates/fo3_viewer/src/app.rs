@@ -80,6 +80,10 @@ pub struct ViewerState {
     pub sound_engine: crate::audio::SoundEngine,
     /// キャラクター作成画面 (RaceSexMenu / NameMenu)
     pub chargen_menu: crate::chargen_menu::ChargenMenu,
+    /// ゲームウィンドウ内 Bink ムービープレイヤー (再生中のみ Some)
+    pub bink_player: Option<crate::bink_player::BinkPlayer>,
+    /// Bink テクスチャ用バインドグループキャッシュ (bink_player が Some の間保持)
+    pub bink_video_bind_group: Option<wgpu::BindGroup>,
 }
 
 impl ViewerState {
@@ -323,6 +327,8 @@ impl ViewerState {
             screen_fade_alpha: if matches!(target, ViewerTarget::NewGame) { 1.0 } else { 0.0 },
             sound_engine: crate::audio::SoundEngine::new(),
             chargen_menu: crate::chargen_menu::ChargenMenu::new(),
+            bink_player: None,
+            bink_video_bind_group: None,
         };
 
         // セル EDID の解決: ターゲット種別に応じてスクリプト登録対象のセルを決定
@@ -339,10 +345,13 @@ impl ViewerState {
             println!("★ 実機ニューゲームシーケンス開始: CG00 (FormID: 0x0001F388)");
             println!("============================================================");
 
-            // 1. 実機オープニングムービー (Fallout INTRO Vsk.bik) のフルスクリーン再生
+            // 1. 実機オープニングムービー (Fallout INTRO Vsk.bik) の再生要求を積む。
+            //    別ウィンドウ・別全画面を生成せず、update() の play_bink_queue 消化が
+            //    ゲームウィンドウ内の BinkPlayer (テクスチャ描画) で再生する。
+            //    参照元: Gamebryo 2.6 BinkVideo パイプライン (ゲームウィンドウ内描画)
             let intro_bik = Path::new(data_dir).join("Video").join("Fallout INTRO Vsk.bik");
             if intro_bik.exists() {
-                crate::action::play_bink_video(&intro_bik.to_string_lossy());
+                state.vm.play_bink_queue.push(intro_bik.to_string_lossy().to_string());
             }
 
             // 2. CG00 クエスト Stage 0 開始
@@ -420,6 +429,53 @@ impl ViewerState {
         self.input_manager.update_frame();
         let dt = self.controller.update();
 
+        // 0. スクリプトからの動画再生要求の消化
+        // playBink コマンドはファイル名のみを渡すため、data_dir/Video/ パスに解決する。
+        // 参照元: Fallout 3 実機 `playBink "1 year later.bik"` — Data/Video/ フォルダ基準
+        // 別ウィンドウは生成せず、ゲームウィンドウ内テクスチャとして描画する。
+        while !self.vm.play_bink_queue.is_empty() {
+            let bink_name = self.vm.play_bink_queue.remove(0);
+            let bink_path = if std::path::Path::new(&bink_name).is_absolute() {
+                bink_name.clone()
+            } else {
+                std::path::Path::new(&self.data_dir)
+                    .join("Video")
+                    .join(&bink_name)
+                    .to_string_lossy()
+                    .to_string()
+            };
+            // 現在再生中のムービーを停止して新しいムービーを開始
+            self.bink_video_bind_group = None;
+            self.bink_player = crate::bink_player::BinkPlayer::open(
+                &bink_path,
+                self.size.width,
+                self.size.height,
+                &self.device,
+                self.sound_engine.output_handle(),
+            );
+            // バインドグループを生成してキャッシュ
+            if let Some(ref player) = self.bink_player {
+                let bg = self.hud.create_video_bind_group(&self.device, &player.texture_view);
+                self.bink_video_bind_group = Some(bg);
+            }
+        }
+
+        // 再生中の Bink ムービーの次フレームを取得 (終了したら bink_player をクリア)
+        if let Some(ref mut player) = self.bink_player {
+            if !player.advance_frame(&self.queue) {
+                println!("[BinkPlayer] ムービー再生終了");
+                self.bink_player = None;
+                self.bink_video_bind_group = None;
+            }
+        }
+
+        // ムービー再生中はゲームワールドのシミュレーションを進めない。
+        // 旧 play_bink_video (ffplay 外部ウィンドウ・ブロッキング) と同等の
+        // 「動画再生中はゲーム進行を停止」する動作を維持する。
+        if self.bink_player.is_some() {
+            return;
+        }
+
         // -1. ステージ Result Script の遅延実行キューを 1件/フレームで消化
         // 実機 Fallout 3 では setstage は次フレームの GameMode ループ開始時に処理される。
         // 参照元: Fallout 3 実機ゲームループ仕様 — SetStage 遅延実行
@@ -434,31 +490,15 @@ impl ViewerState {
             }
         }
 
-        // 0. スクリプトからの動画再生要求の消化
-        // playBink コマンドはファイル名のみを渡すため、data_dir/Video/ パスに解決する。
-        // 参照元: Fallout 3 実機 `playBink "1 year later.bik"` — Data/Video/ フォルダ基準
-        while !self.vm.play_bink_queue.is_empty() {
-            let bink_name = self.vm.play_bink_queue.remove(0);
-            // フルパスでない場合は data_dir/Video/ に解決
-            let bink_path = if std::path::Path::new(&bink_name).is_absolute() {
-                bink_name.clone()
-            } else {
-                std::path::Path::new(&self.data_dir)
-                    .join("Video")
-                    .join(&bink_name)
-                    .to_string_lossy()
-                    .to_string()
-            };
-            crate::action::play_bink_video(&bink_path);
-        }
-
         // 0.1 スクリプトからのテレポート移動要求 (MoveTo) の消化
         crate::action::process_teleport_requests(self);
 
         // 0.2 スクリプトからの AI パッケージ・アニメーション要求 (AddScriptPackage / evp) の消化
         crate::action::process_package_requests(self);
+        crate::action::process_playgroup_requests(self);
 
         // 0.3 オーディオ・会話シーケンスの進行更新 (実機 DIAL/INFO/SOUN 連動)
+        self.vm.chargen_menu_active = self.chargen_menu.is_active();
         self.sound_engine.update(dt, &mut self.vm, &self.master_context, &mut self.vfs);
 
         // 0.4 キャラクター作成イベント (GetPlayerName / ShowRaceMenu) のポーリング
@@ -559,6 +599,17 @@ impl ViewerState {
         // 全 NPC アクターのアニメーション・ボーン姿勢・メッシュ更新
         for actor in &mut self.scene.actors {
             actor.update(dt, &self.device, &self.queue, &mut self.scene.meshes);
+            // KF アニメーション完了時、OnAnimationEnd を 1 回だけ発行する
+            // (パッケージの次のステージ進行トリガー)
+            // 参照元: `references/openmw/apps/openmw/mwlua/engineevents.hpp:63` (OnAnimationEnded)
+            if let Some(ref mut player) = actor.anim_player {
+                if player.is_finished() && !player.end_dispatched {
+                    player.end_dispatched = true;
+                    self.dispatcher.push_event(fo3_script::GameEvent::OnAnimationEnd {
+                        actor: fo3_esm::types::FormId(actor.form_id),
+                    });
+                }
+            }
         }
 
         // CG00 出産シーケンス (Chargen 拘束中) の赤ちゃん仰向け視点
@@ -698,6 +749,19 @@ impl ViewerState {
                     self.size.height as f32,
                 );
             }
+
+            // Bink ムービー再生中: 動画フレームテクスチャをゲームウィンドウ全面に描画する。
+            // 参照元: Gamebryo 2.6 BinkVideo — ゲームウィンドウ内描画仕様
+            // 3D シーン描画の上に重ねて表示し、スクリーンフェードの下に位置する。
+            if let Some(ref bg) = self.bink_video_bind_group {
+                self.hud.render_video_frame(
+                    &mut render_pass,
+                    &self.queue,
+                    bg,
+                    self.size.width as f32,
+                    self.size.height as f32,
+                );
+            }
         }
 
         // Phase 9: 最前面 2D UI (会話テキスト・選択肢・ターミナル画面) の描画パス
@@ -709,19 +773,21 @@ impl ViewerState {
             self.size.height as f32,
         );
 
-        // 字幕 (Subtitle) の描画
-        if let Some(ref sub) = self.sound_engine.active_subtitle {
+        // Draw active subtitles
+        let mut y_offset = self.size.height as f32 - 100.0;
+        for (sub, _) in self.sound_engine.active_subtitles.values() {
             let subtitle_text = format!("{}: {}", sub.speaker, sub.text);
             let screen_w = self.size.width as f32;
-            let screen_h = self.size.height as f32;
+            
             ui_batch.add_text(
                 self.ui_renderer.font(),
                 &subtitle_text,
                 screen_w * 0.1,
-                screen_h * 0.85,
+                y_offset,
                 1.2,
                 [0.2, 1.0, 0.4, 1.0],
             );
+            y_offset -= 30.0;
         }
 
         // 実機メッセージメニュー (MESG / ShowMessage) の描画
@@ -841,7 +907,17 @@ impl ApplicationHandler for App {
                 state.update();
                 match state.render() {
                     Ok(_) => {}
-                    Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
+                    // サーフェスが再構成を要求している状態からの復帰。
+                    // wgpu 仕様: Outdated / Lost は「ウィンドウリサイズや表示状態変化等により
+                    // サーフェス構成が古くなった」ことを示し、`Surface::configure` の再実行で回復する。
+                    // 放置すると毎フレーム失敗し続けるため、現在の実ウィンドウサイズで再構成して再描画を要求する。
+                    Err(wgpu::SurfaceError::Outdated) | Err(wgpu::SurfaceError::Lost) => {
+                        let live = state.window.inner_size();
+                        if live.width > 0 && live.height > 0 {
+                            state.resize(live);
+                        }
+                        state.window.request_redraw();
+                    }
                     Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
                     Err(e) => eprintln!("レンダリングエラー: {:?}", e),
                 }
@@ -907,3 +983,5 @@ impl ApplicationHandler for App {
 /// `window_input.rs` が `crate::app::AppState` としてインポートするための型エイリアス。
 /// 参照元: `AGENTS.md` — モジュール公開 API の互換維持義務
 pub type AppState = ViewerState;
+
+

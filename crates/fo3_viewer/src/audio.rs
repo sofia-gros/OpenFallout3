@@ -48,10 +48,9 @@ pub struct SoundEngine {
     /// rodio 出力ストリームハンドル
     stream_handle: Option<OutputStreamHandle>,
     /// 現在のボイス再生シンク
-    current_voice_sink: Option<Arc<Sink>>,
-    /// 現在アクティブな字幕
-    pub active_subtitle: Option<Subtitle>,
-    /// 最後に処理したクエストステージ履歴 (QuestID -> Stage)
+    /// Active subtitles and their optional voice sinks per actor
+    pub active_subtitles: HashMap<FormId, (Subtitle, Option<Arc<Sink>>)>,
+    /// Last processed quest stages (QuestID -> Stage)
     last_processed_stages: HashMap<FormId, u32>,
     /// 発話済み INFO レコードの FormID (実機 Say Once フラグ対応)
     pub spoken_infos: HashSet<FormId>,
@@ -71,15 +70,22 @@ impl SoundEngine {
         Self {
             _stream: stream,
             stream_handle,
-            current_voice_sink: None,
-            active_subtitle: None,
+            active_subtitles: HashMap::new(),
             last_processed_stages: HashMap::new(),
             spoken_infos: HashSet::new(),
         }
     }
 
+    /// rodio 出力ストリームハンドルを複製して返す。
+    ///
+    /// Bink ムービー音声 (s16le パイプ → rodio) のシンク生成に使う。
+    /// ストリーム本体 (`OutputStream`) は SoundEngine が保持し続ける必要がある。
+    pub fn output_handle(&self) -> Option<OutputStreamHandle> {
+        self.stream_handle.clone()
+    }
+
     /// 相対パスに基づいて音声 (WAV / OGG) を非同期再生する。
-    pub fn play_sound_file(&mut self, rel_path: &str, vfs: &mut VfsManager, is_voice: bool) -> Option<f32> {
+    pub fn play_sound_file(&mut self, rel_path: &str, vfs: &mut VfsManager, is_voice: bool) -> Option<(Option<f32>, Arc<Sink>)> {
         let handle = match self.stream_handle.as_ref() {
             Some(h) => h,
             None => return None,
@@ -137,12 +143,7 @@ impl SoundEngine {
 
                 sink.append(source);
                 sink.play();
-
-                if is_voice {
-                    self.current_voice_sink = Some(sink);
-                }
-
-                duration_sec
+                Some((duration_sec, sink))
             }
             Err(e) => {
                 eprintln!("[SoundEngine] 音声デコード失敗 ({}): {:?}", rel_path, e);
@@ -159,30 +160,30 @@ impl SoundEngine {
         master: &EsmMasterContext,
         vfs: &mut VfsManager,
     ) {
-        // 1. アクティブ字幕とボイス再生終了の監視
-        if let Some(ref mut sub) = self.active_subtitle {
+        // 台詞終了フレーム記録: ResultScript の setstage は遅延キュー (pending_stage_scripts) へ
+        // 積まれ次フレームの app.update で適用されるため、終了と同一フレームで doTalk の
+        // 再評価・再 push を行うと性別選択前に次の行が再生されてしまう。
+        // 終了フレームは section 3 の自律トリガーを 1 フレーム休止させる。
+        let mut line_ended_this_frame = false;
+
+        // 1. Process active subtitles (per-actor)
+        let mut finished_speakers = Vec::new();
+        for (speaker_id, (sub, sink_opt)) in self.active_subtitles.iter_mut() {
             sub.remaining -= dt;
-            let is_voice_finished = self.current_voice_sink
-                .as_ref()
-                .map(|s| s.empty())
-                .unwrap_or(false);
+            let is_voice_finished = sink_opt.as_ref().map(|s| s.empty()).unwrap_or(false);
 
             if sub.remaining <= 0.0 || is_voice_finished {
-                println!("[SoundEngine] 台詞終了: FormID=0x{:08X}", sub.form_id.0);
-                let on_complete = sub.on_complete_script.take();
-                self.active_subtitle = None;
-                self.current_voice_sink = None;
-
-                if let Some(script_src) = on_complete {
-                    println!("[SoundEngine] ResultScript 自動実行: \"{}\"", script_src);
-                    for line in script_src.lines() {
-                        let trimmed = line.trim();
-                        if !trimmed.is_empty() && !trimmed.starts_with(';') {
-                            let _ = vm.execute_statement(trimmed, None);
-                        }
-                    }
+                println!("[SoundEngine] Subtitle finished: FormID=0x{:08X}", sub.form_id.0);
+                if let Some(script_src) = sub.on_complete_script.take() {
+                    println!("[SoundEngine] Running ResultScript:\n{}", script_src);
+                    let _ = vm.execute_result_script(&script_src, None);
                 }
+                finished_speakers.push(*speaker_id);
+                line_ended_this_frame = true;
             }
+        }
+        for speaker_id in finished_speakers {
+            self.active_subtitles.remove(&speaker_id);
         }
 
         // 2. PlaySound キューの消費 (実機 `SOUN` レコード連動)
@@ -204,36 +205,49 @@ impl SoundEngine {
 
             if let Some(soun) = soun_opt {
                 println!("[SoundEngine] PlaySound: EDID=\"{}\" -> File=\"{}\"", soun.edid, soun.sound_file);
-                self.play_sound_file(&soun.sound_file, vfs, false);
+                let _ = self.play_sound_file(&soun.sound_file, vfs, false);
             } else {
                 // 直接ファイルパス指定の場合
-                self.play_sound_file(clean, vfs, false);
+                let _ = self.play_sound_file(clean, vfs, false);
             }
         }
 
-        // 3. クエストステージ変化時の自動トピックトリガー (汎用)
         // 3. doTalk フラグに基づく自律的トピックトリガー (CG00 等の実機 AI 会話進行)
         // 参照元: Fallout 3 実機スクリプト `CG00DadREF.doTalk`, `CG00MomREF.doTalk`, `CG00DoctorLiREF.doTalk`
-        if self.active_subtitle.is_none() && vm.say_queue.is_empty() {
+        //
+        // doTalk はラッチ変数: Quest Script / INFO ResultScript が明示的に 0/1 を切り替えるまで
+        // 1 を保持し続ける (例: CG00SCRIPT stage 10/22/42/80 で `set ...doTalk to 1`,
+        // INFO 0x0001F386 の ResultScript で `set CG00DadREF.doTalk to 0` 等)。
+        // 参照元: references 実機 ESM — CG00SCRIPT (SCPT 0x0003A17C), INFO 0x0001F386/0x0005EDD7 等
+        //
+        // `in_chargen` は stage 0 で `SetInCharGen 1` が実行され出生シーン全体で 1 のため、
+        // ダイアログ抑止は UI 表示状態 (chargen_menu_active) で判断する。
+        // app.rs の `chargen_menu.is_active()` が VM 経由で各フレーム同期される。
+        println!("[SoundEngine DEBUG] active={}, say_queue={}, line_ended={}, menu={}",
+            self.active_subtitles.is_empty(),
+            vm.say_queue.is_empty(),
+            line_ended_this_frame,
+            vm.chargen_menu_active);
+        if self.active_subtitles.is_empty()
+            && vm.say_queue.is_empty()
+            && !line_ended_this_frame
+            && !vm.chargen_menu_active
+        {
             let dad_talking = vm.locals.get("cg00dadref.dotalk").copied().unwrap_or(0.0) == 1.0;
             let mom_talking = vm.locals.get("cg00momref.dotalk").copied().unwrap_or(0.0) == 1.0;
             let drli_talking = vm.locals.get("cg00doctorliref.dotalk").copied().unwrap_or(0.0) == 1.0;
+            println!("[SoundEngine] Autonomous check! dad={}, mom={}, drli={}", dad_talking, mom_talking, drli_talking);
 
             // Dad が話すターンになった場合は Mom の発話を終了とみなす
             if dad_talking {
                 let dad_id = FormId(0x000290A7);
                 vm.say_queue.push((Some(dad_id), "CG00DadSpeech".to_string()));
-                // push 後に doTalk フラグを即座にリセット (次フレームで再 push されるループを防ぐ)
-                // 参照元: Fallout 3 実機 CG00 スクリプト — doTalk は 1 フレームのトリガー
-                vm.locals.insert("cg00dadref.dotalk".to_string(), 0.0);
             } else if mom_talking {
                 let mom_id = FormId(0x0005EDE0);
                 vm.say_queue.push((Some(mom_id), "CG00MomSpeech".to_string()));
-                vm.locals.insert("cg00momref.dotalk".to_string(), 0.0);
             } else if drli_talking {
                 let drli_id = FormId(0x000290A5);
                 vm.say_queue.push((Some(drli_id), "CG00DoctorLiSpeech".to_string()));
-                vm.locals.insert("cg00doctorliref.dotalk".to_string(), 0.0);
             }
         }
 
@@ -277,9 +291,11 @@ impl SoundEngine {
                 }
             }).or_else(|| {
                 // 未読がない場合、Say Once でない候補から再探索
+                // ただし既読 INFO (spoken_infos) は厳格に除外する:
+                // doTalk はラッチ保持されるため、未読行が尽きたトピックで同じ行を
+                // 再選択し続ける無限ループを防ぎ、下位の doTalk フラグ解除処理へ到達させる。
                 infos.iter().find(|info| {
-                    let is_say_once = (info.flags & 0x0004) != 0;
-                    if is_say_once && self.spoken_infos.contains(&info.form_id) {
+                    if self.spoken_infos.contains(&info.form_id) {
                         return false;
                     }
                     if info.conditions.is_empty() {
@@ -313,25 +329,27 @@ impl SoundEngine {
                     vfs.find_path_by_suffix(&wav_suffix)
                 });
 
-                let mut duration = 4.0f32; // デフォルト再生秒数
+                let mut sink_opt = None;
+                let mut duration = 4.0f32; // Default for text-only
                 if let Some(ref voice_path) = voice_path_opt {
-                    if let Some(dur) = self.play_sound_file(voice_path, vfs, true) {
-                        duration = dur;
+                    if let Some((_, s)) = self.play_sound_file(voice_path, vfs, true) {
+                        duration = f32::INFINITY;
+                        sink_opt = Some(s);
                     }
                 } else {
-                    // 音声ファイルが未検出の場合はテキスト長に応じた表示時間を計算
+                    // Fallback to text length
                     duration = (subtitle_text.chars().count() as f32 * 0.15).max(3.0);
-                    println!("[SoundEngine] ボイスファイル未検出 (suffix={}): 表示時間={:.1}秒", suffix, duration);
+                    println!("[SoundEngine] Voice file missing (suffix={}): duration={:.1}s", suffix, duration);
                 }
 
-                // 実機字幕および ResultScript を登録
-                self.active_subtitle = Some(Subtitle {
+                // Register Subtitle
+                self.active_subtitles.insert(speaker_id.unwrap_or(FormId(0)), (Subtitle {
                     form_id: info.form_id,
                     speaker: speaker_name,
                     text: subtitle_text,
                     remaining: duration,
                     on_complete_script: info.result_script_source.clone(),
-                });
+                }, sink_opt));
             } else {
                 println!("[SoundEngine] トピック \"{}\" に適合する INFO 条件が見つかりませんでした", dial.edid);
                 // これ以上話す台詞がないため、該当アクターの doTalk フラグをクリア
@@ -347,3 +365,9 @@ impl SoundEngine {
         }
     }
 }
+
+
+
+
+
+

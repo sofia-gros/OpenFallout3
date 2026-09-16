@@ -15,8 +15,8 @@ pub struct QuestManager {
     stage_history: HashMap<FormId, HashSet<u16>>,
     /// 各クエストの目標表示状態 ((QuestFormId, ObjectiveIndex) -> Displayed)
     objectives_displayed: HashMap<(FormId, u32), bool>,
-    /// クエスト固有のスクリプト変数 (QuestFormId -> VarName -> Value)
-    quest_variables: HashMap<FormId, HashMap<String, f64>>,
+    /// クエストに紐づくローカル変数 (QuestFormId -> VarName -> Value)
+    pub quest_variables: HashMap<FormId, HashMap<String, f64>>,
     /// 実機 ESM からロードされたクエスト定義レコード群 (FormId -> QuestRecord)
     pub quests: HashMap<FormId, QuestRecord>,
     /// EditorID (大文字) -> Quest FormID 逆引きマップ
@@ -205,14 +205,14 @@ impl QuestManager {
         self.quest_variables
             .entry(quest)
             .or_default()
-            .insert(name.to_ascii_uppercase(), value);
+            .insert(name.to_ascii_lowercase(), value);
     }
 
-    /// クエスト変数を取得する。
+    /// クエスト変数を取得
     pub fn get_quest_variable(&self, quest: FormId, name: &str) -> Option<f64> {
         self.quest_variables
             .get(&quest)
-            .and_then(|vars| vars.get(&name.to_ascii_uppercase()).copied())
+            .and_then(|vars| vars.get(&name.to_ascii_lowercase()).copied())
     }
 }
 

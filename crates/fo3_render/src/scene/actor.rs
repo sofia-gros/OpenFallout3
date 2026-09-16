@@ -86,6 +86,11 @@ pub struct RenderActorInstance {
     pub kf_nif: Option<Arc<NifFile>>,
     /// 複数シーケンス合成マネージャー (Gamebryo 2.6 NiControllerManager: ボディ+フェイシャル+リップシンク)
     pub sequence_manager: Option<SequenceManager>,
+    /// クロスフェード遷移用の旧アニメーション (旧プレイヤー, 旧KF, 残りブレンド時間[秒])
+    /// Gamebryo 2.6 `NiControllerManager::ActivateSequence(blend_time=0.3)` の実装。
+    pub blend_from: Option<(AnimationPlayer, Arc<NifFile>, f32)>,
+    /// クロスフェードの総ブレンド時間 (秒)。既定は 0.3 秒。
+    pub blend_total: f32,
     /// 現在のボーンアニメーション姿勢
     pub anim_pose: SkeletonPose,
     /// このアクターに属するスキンメッシュ更新情報リスト
@@ -111,8 +116,25 @@ impl RenderActorInstance {
         // 複数シーケンスマネージャーが設定されている場合はマルチトラック優先度合成（ボディ＋フェイシャル＋リップシンク）
         if let Some(ref mut seq_mgr) = self.sequence_manager {
             self.anim_pose = seq_mgr.update(dt);
-        } else if let (Some(ref mut player), Some(ref kf_nif)) = (&mut self.anim_player, &self.kf_nif) {
-            player.update(kf_nif, dt, &mut self.anim_pose);
+            self.blend_from = None;
+        } else if let Some(ref mut player) = self.anim_player {
+            let target_kf = self.kf_nif.as_ref().unwrap_or(&self.skeleton_nif);
+            if let Some((ref mut old_player, ref old_kf_opt, ref mut blend_remaining)) = self.blend_from {
+                let total = if self.blend_total > 0.0 { self.blend_total } else { 0.3 };
+                let alpha = 1.0 - (*blend_remaining / total).clamp(0.0, 1.0);
+                let mut old_pose = SkeletonPose::default();
+                let old_kf = old_kf_opt;
+                old_player.update(old_kf, dt, &mut old_pose);
+                let mut new_pose = self.anim_pose.clone();
+                player.update(target_kf, dt, &mut new_pose);
+                self.anim_pose = crate::blend_poses(&old_pose, 1.0 - alpha, &new_pose, alpha);
+                *blend_remaining -= dt;
+                if *blend_remaining <= 0.0 {
+                    self.blend_from = None;
+                }
+            } else {
+                player.update(target_kf, dt, &mut self.anim_pose);
+            }
         }
 
         let mut skel_bone_world_map = HashMap::new();
@@ -225,9 +247,21 @@ impl RenderActorInstance {
     ///
     /// 参照元: Gamebryo 2.6 `NiControllerManager::ActivateSequence`
     pub fn set_animation(&mut self, kf: Arc<NifFile>, clip: Arc<crate::animation::AnimationClip>) {
+        // 現在再生中のプレイヤーをクロスフェード遷移元として退避する
+        // (Gamebryo 2.6 `ActivateSequence` の blend_time 遷移に相当)
+        if let (Some(old_player), Some(old_kf)) = (self.anim_player.take(), self.kf_nif.clone()) {
+            self.blend_from = Some((old_player, old_kf, self.blend_total));
+        }
         self.kf_nif = Some(kf);
-        self.anim_player = Some(crate::animation::AnimationPlayer::new((*clip).clone()));
+        let mut player = crate::animation::AnimationPlayer::new((*clip).clone());
+        // 確実にクリップ先頭から再生を開始する (1フレーム遅延・ポーズズレ防止)
+        player.seek(0.0);
+        self.anim_player = Some(player);
         self.sequence_manager = None;
+        // 遷移元が存在しない初回適用時は T-ポーズにリセットしてポップを防ぐ
+        if self.blend_from.is_none() {
+            self.anim_pose = crate::animation::SkeletonPose::default();
+        }
     }
 }
 
@@ -513,7 +547,69 @@ impl RenderScene {
     /// セルまたはワールド描画シーンに独立したアクター（NPC）を追加インスタンス化する。
     ///
     /// 参照元: Gamebryo 2.6 `NiNode::AttachChild`, Fallout 3 `ACHR` 配置アクター仕様
-    pub fn add_actor(
+    
+    /// 静的メッシュ (NIF) に NiTransformController 等のアニメーションが含まれる場合、
+    /// それをアクターとして登録してアニメーション可能にする
+    
+    pub fn add_animated_static(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        context: &RenderContext,
+        vfs: &mut VfsManager,
+        form_id: u32,
+        name: &str,
+        world_transform: &NiTransform,
+        nif: Arc<NifFile>,
+        anim_clip: Option<Arc<crate::animation::AnimationClip>>,
+        texture_cache: &mut HashMap<String, GpuTexture>,
+    ) -> usize {
+        let parts = vec![nif.clone()];
+        let part_refs: Vec<&NifFile> = parts.iter().map(|p| p.as_ref()).collect();
+        let mut sub_scene = RenderScene::from_actor_parts(
+            device,
+            queue,
+            context,
+            &nif,
+            &part_refs,
+            vfs,
+        );
+
+        let start_idx = self.meshes.len();
+        self.meshes.append(&mut sub_scene.meshes);
+
+        for anim_skin in &mut sub_scene.anim_skin_meshes {
+            anim_skin.mesh_index += start_idx;
+        }
+        for anim_rigid in &mut sub_scene.anim_rigid_meshes {
+            anim_rigid.mesh_index += start_idx;
+        }
+
+        let anim_player = anim_clip.map(|clip| {
+            crate::animation::AnimationPlayer::new((*clip).clone())
+        });
+
+        let actor = RenderActorInstance {
+            form_id,
+            name: name.to_string(),
+            world_transform: world_transform.clone(),
+            skeleton_nif: nif,
+            parts,
+            anim_player,
+            kf_nif: None,
+            sequence_manager: None,
+            anim_skin_meshes: sub_scene.anim_skin_meshes,
+            anim_rigid_meshes: sub_scene.anim_rigid_meshes,
+            blend_from: None,
+            blend_total: 0.0,
+            anim_pose: crate::animation::SkeletonPose::default(),
+        };
+
+        let actor_idx = self.actors.len();
+        self.actors.push(actor);
+        actor_idx
+    }
+pub fn add_actor(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -622,6 +718,7 @@ impl RenderScene {
                 &root_transform,
                 None,
                 None,
+                None,
                 part_nif,
                 vfs,
                 device,
@@ -665,6 +762,8 @@ impl RenderScene {
             anim_player,
             kf_nif,
             sequence_manager: None,
+            blend_from: None,
+            blend_total: 0.3,
             anim_pose: initial_pose,
             anim_skin_meshes: actor_anim_skins,
             anim_rigid_meshes: actor_anim_rigids,
@@ -673,3 +772,6 @@ impl RenderScene {
         actor_idx
     }
 }
+
+
+
