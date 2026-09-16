@@ -336,7 +336,7 @@ impl ScriptVm {
                                 target_q_id = Some(*q_id);
                             }
                         }
-                        if let Some(q_id) = target_q_id {
+                        println!("[DEBUG] TARGET Q_ID FOUND FOR {}: {:?}", prefix, target_q_id); if let Some(q_id) = target_q_id {
                             self.quest_manager.set_quest_variable(q_id, sub, val as f64);
                         } else {
                             self.locals.insert(format!("{}.{}", prefix, sub), val);
