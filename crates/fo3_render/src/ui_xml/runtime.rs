@@ -7,10 +7,10 @@
 //! - `menus/dialog/dialog_menu.xml`
 //! - `menus/prefabs/top_bracket.xml`, `bottom_bracket.xml`
 
-use std::collections::HashMap;
-use crate::ui::{BitmapFont, TextBatch, colors as ui_colors};
+use crate::ui::{colors as ui_colors, BitmapFont, TextBatch};
 use crate::ui_xml::ast::{ExprOp, MenuNode, NodeType, TraitSource, TraitValue};
 use crate::ui_xml::atlas::TextureAtlas;
+use std::collections::HashMap;
 
 /// 計算済みノードのレイアウト情報。
 #[derive(Clone, Debug, Default)]
@@ -55,7 +55,8 @@ impl MenuRuntime {
 
     /// 外部状態フラグを設定する。
     pub fn set_io_flag(&mut self, name: &str, val: bool) {
-        self.io_traits.insert(name.to_lowercase(), if val { 1.0 } else { 0.0 });
+        self.io_traits
+            .insert(name.to_lowercase(), if val { 1.0 } else { 0.0 });
     }
 
     /// 外部状態数値を設定する。
@@ -65,7 +66,8 @@ impl MenuRuntime {
 
     /// テキスト表示文字列を設定する。
     pub fn set_text(&mut self, node_name: &str, text: &str) {
-        self.text_overrides.insert(node_name.to_lowercase(), text.to_string());
+        self.text_overrides
+            .insert(node_name.to_lowercase(), text.to_string());
     }
 
     /// 画面解像度に合わせて全ノードのレイアウトとプロパティを解決し、TextBatch にレンダリングする。
@@ -92,41 +94,57 @@ impl MenuRuntime {
         computed: &mut HashMap<String, ComputedLayout>,
     ) {
         // 幅・高さの評価
-        let width = self.eval_trait_num(node, "width", parent, screen_w, screen_h, computed).unwrap_or(0.0);
-        let height = self.eval_trait_num(node, "height", parent, screen_w, screen_h, computed).unwrap_or(0.0);
+        let width = self
+            .eval_trait_num(node, "width", parent, screen_w, screen_h, computed)
+            .unwrap_or(0.0);
+        let height = self
+            .eval_trait_num(node, "height", parent, screen_w, screen_h, computed)
+            .unwrap_or(0.0);
 
         // 一時登録 (自己参照 me() 用)
-        computed.insert(node.name.to_lowercase(), ComputedLayout {
-            x: 0.0,
-            y: 0.0,
-            width,
-            height,
-            visible: true,
-            alpha: 1.0,
-        });
+        computed.insert(
+            node.name.to_lowercase(),
+            ComputedLayout {
+                x: 0.0,
+                y: 0.0,
+                width,
+                height,
+                visible: true,
+                alpha: 1.0,
+            },
+        );
 
         // X・Y 座標の評価
-        let x = self.eval_trait_num(node, "x", parent, screen_w, screen_h, computed).unwrap_or(0.0);
-        let y = self.eval_trait_num(node, "y", parent, screen_w, screen_h, computed).unwrap_or(0.0);
+        let x = self
+            .eval_trait_num(node, "x", parent, screen_w, screen_h, computed)
+            .unwrap_or(0.0);
+        let y = self
+            .eval_trait_num(node, "y", parent, screen_w, screen_h, computed)
+            .unwrap_or(0.0);
 
         // 可視性 (visible)
-        let visible = self.eval_trait_num(node, "visible", parent, screen_w, screen_h, computed)
+        let visible = self
+            .eval_trait_num(node, "visible", parent, screen_w, screen_h, computed)
             .map(|v| v > 0.5)
             .unwrap_or(true);
 
         // アルファ値
-        let alpha = self.eval_trait_num(node, "alpha", parent, screen_w, screen_h, computed)
+        let alpha = self
+            .eval_trait_num(node, "alpha", parent, screen_w, screen_h, computed)
             .map(|a| (a / 255.0).clamp(0.0, 1.0))
             .unwrap_or(1.0);
 
-        computed.insert(node.name.to_lowercase(), ComputedLayout {
-            x,
-            y,
-            width,
-            height,
-            visible,
-            alpha,
-        });
+        computed.insert(
+            node.name.to_lowercase(),
+            ComputedLayout {
+                x,
+                y,
+                width,
+                height,
+                visible,
+                alpha,
+            },
+        );
 
         for child in &node.children {
             self.evaluate_node(child, Some(node), screen_w, screen_h, computed);
@@ -151,7 +169,15 @@ impl MenuRuntime {
                 TraitValue::Expression(ops) => {
                     let mut current = 0.0;
                     for op in ops {
-                        self.apply_expr_op(op, &mut current, node, parent, screen_w, screen_h, computed);
+                        self.apply_expr_op(
+                            op,
+                            &mut current,
+                            node,
+                            parent,
+                            screen_w,
+                            screen_h,
+                            computed,
+                        );
                     }
                     Some(current)
                 }
@@ -176,7 +202,9 @@ impl MenuRuntime {
         match op {
             ExprOp::Const(val) => *current = *val,
             ExprOp::CopyTrait { source, trait_name } => {
-                *current = self.resolve_trait_val(source, trait_name, node, parent, screen_w, screen_h, computed);
+                *current = self.resolve_trait_val(
+                    source, trait_name, node, parent, screen_w, screen_h, computed,
+                );
             }
             ExprOp::Add(inner) => {
                 let mut v = 0.0;
@@ -227,11 +255,21 @@ impl MenuRuntime {
             }
             ExprOp::OnlyIf { condition, operand } => {
                 let mut cond_val = 0.0;
-                self.apply_expr_op(condition, &mut cond_val, node, parent, screen_w, screen_h, computed);
+                self.apply_expr_op(
+                    condition,
+                    &mut cond_val,
+                    node,
+                    parent,
+                    screen_w,
+                    screen_h,
+                    computed,
+                );
                 if cond_val > 0.5 {
                     if let Some(opnd) = operand {
                         let mut v = 0.0;
-                        self.apply_expr_op(opnd, &mut v, node, parent, screen_w, screen_h, computed);
+                        self.apply_expr_op(
+                            opnd, &mut v, node, parent, screen_w, screen_h, computed,
+                        );
                         *current += v;
                     }
                 } else {
@@ -240,11 +278,21 @@ impl MenuRuntime {
             }
             ExprOp::OnlyIfNot { condition, operand } => {
                 let mut cond_val = 0.0;
-                self.apply_expr_op(condition, &mut cond_val, node, parent, screen_w, screen_h, computed);
+                self.apply_expr_op(
+                    condition,
+                    &mut cond_val,
+                    node,
+                    parent,
+                    screen_w,
+                    screen_h,
+                    computed,
+                );
                 if cond_val <= 0.5 {
                     if let Some(opnd) = operand {
                         let mut v = 0.0;
-                        self.apply_expr_op(opnd, &mut v, node, parent, screen_w, screen_h, computed);
+                        self.apply_expr_op(
+                            opnd, &mut v, node, parent, screen_w, screen_h, computed,
+                        );
                         *current += v;
                     }
                 } else {
@@ -343,7 +391,12 @@ impl MenuRuntime {
             match node.node_type {
                 NodeType::Image => {
                     // 背景テクスチャまたはアトラスパーツの描画
-                    let color = [ui_colors::PIPBOY_GREEN[0], ui_colors::PIPBOY_GREEN[1], ui_colors::PIPBOY_GREEN[2], layout.alpha];
+                    let color = [
+                        ui_colors::PIPBOY_GREEN[0],
+                        ui_colors::PIPBOY_GREEN[1],
+                        ui_colors::PIPBOY_GREEN[2],
+                        layout.alpha,
+                    ];
                     let filename = node.traits.get("filename").and_then(|v| match v {
                         TraitValue::String(s) => Some(s.as_str()),
                         _ => None,
@@ -369,15 +422,29 @@ impl MenuRuntime {
                     if !rendered_from_atlas {
                         if node.name.eq_ignore_ascii_case("DM_TextBackground") {
                             // solid_black 背景矩形
-                            batch.add_rect(layout.x, layout.y, layout.width, layout.height, [0.0, 0.0, 0.0, 0.85]);
+                            batch.add_rect(
+                                layout.x,
+                                layout.y,
+                                layout.width,
+                                layout.height,
+                                [0.0, 0.0, 0.0, 0.85],
+                            );
                         } else {
                             // 単色バー
-                            batch.add_rect(layout.x, layout.y, layout.width.max(2.0), layout.height.max(2.0), color);
+                            batch.add_rect(
+                                layout.x,
+                                layout.y,
+                                layout.width.max(2.0),
+                                layout.height.max(2.0),
+                                color,
+                            );
                         }
                     }
                 }
                 NodeType::Text => {
-                    let text = self.text_overrides.get(&node.name.to_lowercase())
+                    let text = self
+                        .text_overrides
+                        .get(&node.name.to_lowercase())
                         .cloned()
                         .or_else(|| {
                             node.traits.get("string").and_then(|v| match v {
@@ -388,13 +455,21 @@ impl MenuRuntime {
                         .unwrap_or_default();
 
                     if !text.is_empty() {
-                        let font_id = node.traits.get("font").and_then(|v| match v {
-                            TraitValue::Number(n) => Some(*n as u32),
-                            _ => None,
-                        }).unwrap_or(6);
+                        let font_id = node
+                            .traits
+                            .get("font")
+                            .and_then(|v| match v {
+                                TraitValue::Number(n) => Some(*n as u32),
+                                _ => None,
+                            })
+                            .unwrap_or(6);
 
                         let font = if font_id >= 7 { font_large } else { font_main };
-                        let color = if font_id >= 7 { ui_colors::HIGHLIGHT_WHITE } else { ui_colors::PIPBOY_GREEN };
+                        let color = if font_id >= 7 {
+                            ui_colors::HIGHLIGHT_WHITE
+                        } else {
+                            ui_colors::PIPBOY_GREEN
+                        };
                         batch.add_text(font, &text, layout.x, layout.y, 1.0, color);
                     }
                 }
@@ -443,7 +518,9 @@ mod tests {
         let mut computed = HashMap::new();
         runtime.evaluate_node(&runtime.root, None, screen_w, screen_h, &mut computed);
 
-        let bg = computed.get("dm_textbackground").expect("dm_textbackground layout");
+        let bg = computed
+            .get("dm_textbackground")
+            .expect("dm_textbackground layout");
         assert_eq!(bg.width, 1080.0);
         // x = (1920 - 1080) / 2 = 840 / 2 = 420
         assert_eq!(bg.x, 420.0);

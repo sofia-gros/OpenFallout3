@@ -4,11 +4,11 @@
 //! エディタID、テクスチャ画像パス (ICON)、スペキュラ、Havok物理マテリアルを保持。
 //! 参照元: `references/openmw/components/esm4/loadltex.hpp`, `loadltex.cpp`
 
-use std::io;
-use byteorder::{LittleEndian, ReadBytesExt};
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{FormId, SUB_EDID, SUB_GNAM, SUB_HNAM, SUB_ICON, SUB_SNAM, SUB_TNAM};
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io;
 
 /// 景観テクスチャレコード (`LTEX`)。
 #[derive(Clone, Debug, PartialEq)]

@@ -4,10 +4,10 @@
 //! ディフューズテクスチャ (TX00)、法線マップ (TX01) 等の画像ファイルパスを保持。
 //! 参照元: `references/openmw/components/esm4/loadtxst.hpp`, `loadtxst.cpp`
 
-use std::io;
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{FormId, SUB_EDID, SUB_TX00, SUB_TX01};
+use std::io;
 
 /// テクスチャセットレコード (`TXST`)。
 #[derive(Clone, Debug, PartialEq)]

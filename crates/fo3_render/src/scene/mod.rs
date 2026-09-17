@@ -25,8 +25,8 @@ pub mod traversal;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
 use glam::{Mat4, Vec3};
+use std::collections::HashMap;
 
 use fo3_gamebryo_core::NiTransform;
 pub use fo3_nif::{NifBlock, NifFile};
@@ -111,7 +111,12 @@ impl RenderScene {
         // コリジョンワイヤーフレームの抽出
         let mut collision_meshes = Vec::new();
         let col_lines = extract_collision_lines(nif);
-        if let Some(gpu_col) = GpuCollisionMesh::new(device, &context.model_bind_group_layout, &col_lines, &root_transform) {
+        if let Some(gpu_col) = GpuCollisionMesh::new(
+            device,
+            &context.model_bind_group_layout,
+            &col_lines,
+            &root_transform,
+        ) {
             collision_meshes.push(gpu_col);
         }
 
@@ -235,7 +240,12 @@ impl RenderScene {
         let mut collision_meshes = Vec::new();
         let col_lines = extract_collision_lines(skeleton_nif);
         let root_transform = NiTransform::default();
-        if let Some(gpu_col) = GpuCollisionMesh::new(device, &context.model_bind_group_layout, &col_lines, &root_transform) {
+        if let Some(gpu_col) = GpuCollisionMesh::new(
+            device,
+            &context.model_bind_group_layout,
+            &col_lines,
+            &root_transform,
+        ) {
             collision_meshes.push(gpu_col);
         }
 
@@ -256,7 +266,11 @@ impl RenderScene {
 
     /// シーン内のすべてのメッシュを描画する（不透明パス → 半透明パス）。
     /// 参照元: Gamebryo 2.6 レンダリング順序（不透明オブジェクトを先に深度書き込みありで描画し、その後半透明オブジェクトを合成）
-    pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>, context: &'a RenderContext) {
+    pub fn render<'a>(
+        &'a self,
+        render_pass: &mut wgpu::RenderPass<'a>,
+        context: &'a RenderContext,
+    ) {
         self.render_with_camera_pos(render_pass, context, None);
     }
 
@@ -270,7 +284,11 @@ impl RenderScene {
     ) {
         // 1. 不透明メッシュ群の描画 (深度書き込み有効)
         let mut current_skinned: Option<bool> = None;
-        for mesh_node in self.meshes.iter().filter(|m| m.is_visible && !m.is_transparent) {
+        for mesh_node in self
+            .meshes
+            .iter()
+            .filter(|m| m.is_visible && !m.is_transparent)
+        {
             let is_skinned = mesh_node.bone_palette.is_some();
             if current_skinned != Some(is_skinned) {
                 render_pass.set_pipeline(if is_skinned {
@@ -287,12 +305,19 @@ impl RenderScene {
                 render_pass.set_bind_group(3, &bp.bind_group, &[]);
             }
             render_pass.set_vertex_buffer(0, mesh_node.mesh.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(mesh_node.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.set_index_buffer(
+                mesh_node.mesh.index_buffer.slice(..),
+                wgpu::IndexFormat::Uint16,
+            );
             render_pass.draw_indexed(0..mesh_node.mesh.num_elements, 0, 0..1);
         }
 
         // 2. 半透明メッシュ群の描画 (深度書き込み無効、アルファブレンド)
-        let mut transparent_meshes: Vec<&RenderMesh> = self.meshes.iter().filter(|m| m.is_visible && m.is_transparent).collect();
+        let mut transparent_meshes: Vec<&RenderMesh> = self
+            .meshes
+            .iter()
+            .filter(|m| m.is_visible && m.is_transparent)
+            .collect();
 
         // ソートが要求されている（!is_no_sorter()）かつカメラ座標が与えられている場合、カメラから遠い順（降順）にソート
         // 参照元: references/nifskope/src/gl/glproperty.cpp:L230, Gamebryo 2.6 NiAlphaProperty
@@ -301,7 +326,9 @@ impl RenderScene {
                 if a.alpha_sort && b.alpha_sort {
                     let dist_a = a.world_center.distance_squared(cam);
                     let dist_b = b.world_center.distance_squared(cam);
-                    dist_b.partial_cmp(&dist_a).unwrap_or(std::cmp::Ordering::Equal)
+                    dist_b
+                        .partial_cmp(&dist_a)
+                        .unwrap_or(std::cmp::Ordering::Equal)
                 } else {
                     std::cmp::Ordering::Equal
                 }
@@ -326,13 +353,20 @@ impl RenderScene {
                 render_pass.set_bind_group(3, &bp.bind_group, &[]);
             }
             render_pass.set_vertex_buffer(0, mesh_node.mesh.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(mesh_node.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.set_index_buffer(
+                mesh_node.mesh.index_buffer.slice(..),
+                wgpu::IndexFormat::Uint16,
+            );
             render_pass.draw_indexed(0..mesh_node.mesh.num_elements, 0, 0..1);
         }
     }
 
     /// シーン内のすべての Havok コリジョンワイヤーフレームを描画する。
-    pub fn render_collision<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>, context: &'a RenderContext) {
+    pub fn render_collision<'a>(
+        &'a self,
+        render_pass: &mut wgpu::RenderPass<'a>,
+        context: &'a RenderContext,
+    ) {
         render_pass.set_pipeline(&context.collision_pipeline);
         for col_mesh in &self.collision_meshes {
             render_pass.set_bind_group(1, &col_mesh.model_bind_group, &[]);
@@ -341,4 +375,3 @@ impl RenderScene {
         }
     }
 }
-

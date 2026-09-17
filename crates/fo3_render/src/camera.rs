@@ -82,7 +82,8 @@ impl OrbitCamera {
             self.pitch.cos() * self.yaw.cos(),
             self.pitch.cos() * self.yaw.sin(),
             self.pitch.sin(),
-        ).normalize()
+        )
+        .normalize()
     }
 
     /// ビュー行列 (Z-up) を計算。

@@ -4,8 +4,8 @@
 //! スキンインスタンスボーン引き当て、剛体アタッチメントボーン解決を担当する。
 //! 参照元: Gamebryo 2.6 `NiAVObject::UpdateDownwardPass`, `NiSkinInstance::Update`, `NiNode::AttachChild`
 
-use std::collections::HashMap;
 use glam::Mat4;
+use std::collections::HashMap;
 
 use fo3_gamebryo_core::NiTransform;
 use fo3_nif::{NifBlock, NifFile};
@@ -69,7 +69,14 @@ pub fn recompute_bone_world_maps_with_pose(
 ) {
     bone_world_map.clear();
     bone_name_world_map.clear();
-    recompute_fk_with_names(0, &NiTransform::default(), nif, pose, bone_world_map, bone_name_world_map);
+    recompute_fk_with_names(
+        0,
+        &NiTransform::default(),
+        nif,
+        pose,
+        bone_world_map,
+        bone_name_world_map,
+    );
 }
 
 /// NIF 内のボーン階層をアニメーション姿勢 (`pose`) で順運動学 (FK) 再計算し、
@@ -81,7 +88,14 @@ pub fn recompute_bone_world_map_with_pose(
 ) {
     bone_world_map.clear();
     let mut dummy_name_map = HashMap::new();
-    recompute_fk_with_names(0, &NiTransform::default(), nif, pose, bone_world_map, &mut dummy_name_map);
+    recompute_fk_with_names(
+        0,
+        &NiTransform::default(),
+        nif,
+        pose,
+        bone_world_map,
+        &mut dummy_name_map,
+    );
 }
 
 /// Forward Kinematics 再帰: `pose.overrides` に一致するノードはローカル変換を差し替えて
@@ -110,7 +124,14 @@ fn recompute_fk_with_names(
                 bone_name_world_map.insert(name.to_string(), mat);
             }
             for &child in &node.children {
-                recompute_fk_with_names(child, &world, nif, pose, bone_world_map, bone_name_world_map);
+                recompute_fk_with_names(
+                    child,
+                    &world,
+                    nif,
+                    pose,
+                    bone_world_map,
+                    bone_name_world_map,
+                );
             }
         }
         NifBlock::BSFadeNode(fade) => {
@@ -123,7 +144,14 @@ fn recompute_fk_with_names(
                 bone_name_world_map.insert(name.to_string(), mat);
             }
             for &child in &fade.node.children {
-                recompute_fk_with_names(child, &world, nif, pose, bone_world_map, bone_name_world_map);
+                recompute_fk_with_names(
+                    child,
+                    &world,
+                    nif,
+                    pose,
+                    bone_world_map,
+                    bone_name_world_map,
+                );
             }
         }
         _ => {}
@@ -180,7 +208,10 @@ pub fn resolve_bone_world_transforms_by_name(
                 }
             }
             if let Some(fallback) = fallback_bone_world_map {
-                fallback.get(&bone_block_idx).copied().unwrap_or(Mat4::IDENTITY)
+                fallback
+                    .get(&bone_block_idx)
+                    .copied()
+                    .unwrap_or(Mat4::IDENTITY)
             } else {
                 Mat4::IDENTITY
             }

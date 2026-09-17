@@ -8,8 +8,8 @@
 //! - `references/openmw/components/esm4/loadrefr.hpp`
 //! - `knowledge/actor_and_skin_mesh.md`
 
-use glam::Vec3;
 use fo3_esm::records::refr::{LockData, TeleportDoor};
+use glam::Vec3;
 
 /// インタラクト対象の種別。
 #[derive(Clone, Debug, PartialEq)]
@@ -33,13 +33,9 @@ pub enum InteractableKind {
         is_open: bool,
     },
     /// 入手可能アイテム（`WEAP`, `ARMO`, `ALCH`, `BOOK`, `MISC`）。
-    Item {
-        form_id: u32,
-    },
+    Item { form_id: u32 },
     /// アクティベーター（`ACTI`）。スイッチ等。
-    Activator {
-        form_id: u32,
-    },
+    Activator { form_id: u32 },
     /// ターミナル（`TERM`）。
     Terminal {
         form_id: u32,
@@ -81,7 +77,11 @@ impl InteractableObject {
         };
 
         match &self.kind {
-            InteractableKind::Door { lock, teleport, is_open } => {
+            InteractableKind::Door {
+                lock,
+                teleport,
+                is_open,
+            } => {
                 if let Some(l) = lock {
                     let level_str = match l.lock_level {
                         0..=24 => "非常に簡単",
@@ -151,7 +151,9 @@ pub fn find_focused_by_raycast<'a>(
         return None;
     }
     let target_form_id = hit.user_data as u32;
-    interactables.iter().find(|obj| obj.form_id == target_form_id)
+    interactables
+        .iter()
+        .find(|obj| obj.form_id == target_form_id)
 }
 
 /// プレイヤーの視線レイとオブジェクト群のバウンディング球との交差判定を行い、
@@ -295,7 +297,7 @@ mod tests {
             edid: "ColinMoriarty".to_string(),
             name: "コリン・モリアティ".to_string(),
             position: Vec3::new(0.0, 100.0, -130.0), // 足元
-            height: 125.0,                         // 頭頂 Z = -5.0 付近
+            height: 125.0,                           // 頭頂 Z = -5.0 付近
             radius: 40.0,
             kind: InteractableKind::Actor {
                 form_id: 0x0005,
@@ -305,7 +307,10 @@ mod tests {
         };
         let npc_list = vec![npc];
         let hit_npc = find_focused_interactable(cam_pos, cam_dir, &npc_list, 200.0);
-        assert!(hit_npc.is_some(), "アイレベルから水平に見ている NPC がヒットすること");
+        assert!(
+            hit_npc.is_some(),
+            "アイレベルから水平に見ている NPC がヒットすること"
+        );
         assert_eq!(hit_npc.unwrap().name, "コリン・モリアティ");
     }
 
@@ -346,7 +351,10 @@ mod tests {
             user_data: 0,
         });
         let res_wall = find_focused_by_raycast(hit_wall, &list);
-        assert!(res_wall.is_none(), "手前の壁で遮蔽された場合は None になること");
+        assert!(
+            res_wall.is_none(),
+            "手前の壁で遮蔽された場合は None になること"
+        );
 
         // 3. 何もヒットしなかった場合 (None)
         assert!(find_focused_by_raycast(None, &list).is_none());

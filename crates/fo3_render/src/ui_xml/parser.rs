@@ -30,7 +30,10 @@ impl<'a> MenuXmlParser<'a> {
         while let Some(tok) = tokens.first() {
             if tok.is_open_tag() {
                 let tag_name = tok.tag_name().to_lowercase();
-                if matches!(tag_name.as_str(), "menu" | "rect" | "image" | "text" | "hotrect" | "template") {
+                if matches!(
+                    tag_name.as_str(),
+                    "menu" | "rect" | "image" | "text" | "hotrect" | "template"
+                ) {
                     let node = self.parse_node(&mut tokens)?;
                     root_node = Some(node);
                     break;
@@ -50,7 +53,9 @@ impl<'a> MenuXmlParser<'a> {
 
         let open_tok = tokens.remove(0);
         let tag_name = open_tok.tag_name().to_lowercase();
-        let name_attr = open_tok.get_attr("name").unwrap_or_else(|| tag_name.clone());
+        let name_attr = open_tok
+            .get_attr("name")
+            .unwrap_or_else(|| tag_name.clone());
 
         let node_type = match tag_name.as_str() {
             "menu" => NodeType::Menu,
@@ -99,7 +104,10 @@ impl<'a> MenuXmlParser<'a> {
                 }
 
                 // 子ノード (rect, image, text, hotrect, template)
-                if matches!(child_tag.as_str(), "rect" | "image" | "text" | "hotrect" | "template") {
+                if matches!(
+                    child_tag.as_str(),
+                    "rect" | "image" | "text" | "hotrect" | "template"
+                ) {
                     let child_node = self.parse_node(tokens)?;
                     node.children.push(child_node);
                     continue;
@@ -119,7 +127,11 @@ impl<'a> MenuXmlParser<'a> {
     }
 
     /// Trait の値または演算式をパースする。
-    fn parse_trait_value(&self, tokens: &mut Vec<XmlToken>, trait_name: &str) -> Result<TraitValue, String> {
+    fn parse_trait_value(
+        &self,
+        tokens: &mut Vec<XmlToken>,
+        trait_name: &str,
+    ) -> Result<TraitValue, String> {
         let open_tok = tokens.remove(0);
         if open_tok.is_self_closing() {
             return Ok(TraitValue::String(String::new()));
@@ -197,19 +209,54 @@ impl<'a> MenuXmlParser<'a> {
         // 単一タグで trait 指定がある場合 (例: `<copy src="screen()" trait="width"/>`)
         if let (Some(src), false) = (source.clone(), trait_str.is_empty()) {
             match tag.as_str() {
-                "copy" => return Ok(ExprOp::CopyTrait { source: src, trait_name: trait_str }),
-                "add" => return Ok(ExprOp::Add(Box::new(ExprOp::CopyTrait { source: src, trait_name: trait_str }))),
-                "sub" => return Ok(ExprOp::Sub(Box::new(ExprOp::CopyTrait { source: src, trait_name: trait_str }))),
-                "mul" => return Ok(ExprOp::Mul(Box::new(ExprOp::CopyTrait { source: src, trait_name: trait_str }))),
-                "div" => return Ok(ExprOp::Div(Box::new(ExprOp::CopyTrait { source: src, trait_name: trait_str }))),
-                "onlyif" => return Ok(ExprOp::OnlyIf {
-                    condition: Box::new(ExprOp::CopyTrait { source: src, trait_name: trait_str }),
-                    operand: None,
-                }),
-                "onlyifnot" => return Ok(ExprOp::OnlyIfNot {
-                    condition: Box::new(ExprOp::CopyTrait { source: src, trait_name: trait_str }),
-                    operand: None,
-                }),
+                "copy" => {
+                    return Ok(ExprOp::CopyTrait {
+                        source: src,
+                        trait_name: trait_str,
+                    })
+                }
+                "add" => {
+                    return Ok(ExprOp::Add(Box::new(ExprOp::CopyTrait {
+                        source: src,
+                        trait_name: trait_str,
+                    })))
+                }
+                "sub" => {
+                    return Ok(ExprOp::Sub(Box::new(ExprOp::CopyTrait {
+                        source: src,
+                        trait_name: trait_str,
+                    })))
+                }
+                "mul" => {
+                    return Ok(ExprOp::Mul(Box::new(ExprOp::CopyTrait {
+                        source: src,
+                        trait_name: trait_str,
+                    })))
+                }
+                "div" => {
+                    return Ok(ExprOp::Div(Box::new(ExprOp::CopyTrait {
+                        source: src,
+                        trait_name: trait_str,
+                    })))
+                }
+                "onlyif" => {
+                    return Ok(ExprOp::OnlyIf {
+                        condition: Box::new(ExprOp::CopyTrait {
+                            source: src,
+                            trait_name: trait_str,
+                        }),
+                        operand: None,
+                    })
+                }
+                "onlyifnot" => {
+                    return Ok(ExprOp::OnlyIfNot {
+                        condition: Box::new(ExprOp::CopyTrait {
+                            source: src,
+                            trait_name: trait_str,
+                        }),
+                        operand: None,
+                    })
+                }
                 _ => {}
             }
         }
@@ -244,7 +291,10 @@ impl<'a> MenuXmlParser<'a> {
         } else if let Ok(val) = inner_text.parse::<f32>() {
             Box::new(ExprOp::Const(val))
         } else if let (Some(src), false) = (source, trait_str.is_empty()) {
-            Box::new(ExprOp::CopyTrait { source: src, trait_name: trait_str })
+            Box::new(ExprOp::CopyTrait {
+                source: src,
+                trait_name: trait_str,
+            })
         } else {
             Box::new(ExprOp::Const(0.0))
         };
@@ -273,12 +323,23 @@ fn remove_comments_and_normalize(xml: &str) -> String {
     let mut i = 0;
 
     while i < chars.len() {
-        if !in_comment && i + 3 < chars.len() && chars[i] == '<' && chars[i + 1] == '!' && chars[i + 2] == '-' && chars[i + 3] == '-' {
+        if !in_comment
+            && i + 3 < chars.len()
+            && chars[i] == '<'
+            && chars[i + 1] == '!'
+            && chars[i + 2] == '-'
+            && chars[i + 3] == '-'
+        {
             in_comment = true;
             i += 4;
             continue;
         }
-        if in_comment && i + 2 < chars.len() && chars[i] == '-' && chars[i + 1] == '-' && chars[i + 2] == '>' {
+        if in_comment
+            && i + 2 < chars.len()
+            && chars[i] == '-'
+            && chars[i + 1] == '-'
+            && chars[i + 2] == '>'
+        {
             in_comment = false;
             i += 3;
             continue;
@@ -305,14 +366,24 @@ fn remove_comments_and_normalize(xml: &str) -> String {
 /// 単純な XML トークン。
 #[derive(Clone, Debug)]
 enum XmlToken {
-    OpenTag { name: String, attrs: Vec<(String, String)>, self_closing: bool },
-    CloseTag { name: String },
+    OpenTag {
+        name: String,
+        attrs: Vec<(String, String)>,
+        self_closing: bool,
+    },
+    CloseTag {
+        name: String,
+    },
     Text(String),
 }
 
 impl XmlToken {
-    fn is_open_tag(&self) -> bool { matches!(self, XmlToken::OpenTag { .. }) }
-    fn is_close_tag(&self) -> bool { matches!(self, XmlToken::CloseTag { .. }) }
+    fn is_open_tag(&self) -> bool {
+        matches!(self, XmlToken::OpenTag { .. })
+    }
+    fn is_close_tag(&self) -> bool {
+        matches!(self, XmlToken::CloseTag { .. })
+    }
     fn is_self_closing(&self) -> bool {
         match self {
             XmlToken::OpenTag { self_closing, .. } => *self_closing,
@@ -328,13 +399,16 @@ impl XmlToken {
     }
     fn get_attr(&self, attr_name: &str) -> Option<String> {
         match self {
-            XmlToken::OpenTag { attrs, .. } => {
-                attrs.iter().find(|(k, _)| k.eq_ignore_ascii_case(attr_name)).map(|(_, v)| v.clone())
-            }
+            XmlToken::OpenTag { attrs, .. } => attrs
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(attr_name))
+                .map(|(_, v)| v.clone()),
             _ => None,
         }
     }
-    fn is_text(&self) -> bool { matches!(self, XmlToken::Text(_)) }
+    fn is_text(&self) -> bool {
+        matches!(self, XmlToken::Text(_))
+    }
     fn text(&self) -> &str {
         match self {
             XmlToken::Text(s) => s.as_str(),
@@ -367,7 +441,11 @@ fn tokenize(text: &str) -> Vec<XmlToken> {
                 tokens.push(XmlToken::CloseTag { name });
             } else {
                 let self_closing = trimmed.ends_with('/');
-                let tag_body = if self_closing { trimmed[..trimmed.len() - 1].trim() } else { trimmed };
+                let tag_body = if self_closing {
+                    trimmed[..trimmed.len() - 1].trim()
+                } else {
+                    trimmed
+                };
                 let mut parts = tag_body.split_whitespace();
                 let name = parts.next().unwrap_or("").to_string();
 
@@ -375,12 +453,20 @@ fn tokenize(text: &str) -> Vec<XmlToken> {
                 for part in parts {
                     if let Some(eq_idx) = part.find('=') {
                         let k = part[..eq_idx].trim().to_string();
-                        let v = part[eq_idx + 1..].trim().trim_matches('"').trim_matches('\'').to_string();
+                        let v = part[eq_idx + 1..]
+                            .trim()
+                            .trim_matches('"')
+                            .trim_matches('\'')
+                            .to_string();
                         attrs.push((k, v));
                     }
                 }
 
-                tokens.push(XmlToken::OpenTag { name, attrs, self_closing });
+                tokens.push(XmlToken::OpenTag {
+                    name,
+                    attrs,
+                    self_closing,
+                });
             }
         } else {
             let mut text_buf = String::new();
@@ -437,6 +523,9 @@ mod tests {
 
         let title_node = &box_node.children[0];
         assert_eq!(title_node.name, "Title");
-        assert_eq!(title_node.traits.get("string"), Some(&TraitValue::String("Hello Fallout 3".to_string())));
+        assert_eq!(
+            title_node.traits.get("string"),
+            Some(&TraitValue::String("Hello Fallout 3".to_string()))
+        );
     }
 }

@@ -51,11 +51,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let (data_dir, target) = if args[1] == "newgame" {
-        (args[2].clone(), ViewerTarget::NewGame {
-            intro_movie: Some("Video/Fallout INTRO Vsk.bik".to_string()),
-            start_quest: 0x0001F388,
-            start_stage: 0,
-        })
+        (
+            args[2].clone(),
+            ViewerTarget::NewGame {
+                intro_movie: Some("Video/Fallout INTRO Vsk.bik".to_string()),
+                start_quest: 0x0001F388,
+                start_stage: 0,
+            },
+        )
     } else if args[1] == "cell" {
         if args.len() < 4 {
             eprintln!("エラー: セル表示モードには <DataDir> と <CellEDID> が必要です。");
@@ -92,7 +95,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else if args[1] == "actor" {
         // actor <DataDir> [naked | outfit_path] <KfPath>
         if args.len() < 5 {
-            eprintln!("エラー: アクターモードには <DataDir> [naked | outfit_path] <KfPath> が必要です。");
+            eprintln!(
+                "エラー: アクターモードには <DataDir> [naked | outfit_path] <KfPath> が必要です。"
+            );
             eprintln!("例 (素体): cargo run -p fo3_viewer -- actor \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" naked \"meshes\\characters\\_male\\idleanims\\ttnpchappysubtlelistena.kf\"");
             eprintln!("例 (防具): cargo run -p fo3_viewer -- actor \"A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data\" \"meshes\\armor\\wastelandclothing01\\outfitm.nif\" \"meshes\\characters\\_male\\idleanims\\ttnpchappysubtlelistena.kf\"");
             return Ok(());

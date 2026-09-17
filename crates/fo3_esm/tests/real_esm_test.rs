@@ -3,14 +3,17 @@
 //! Vault 101 セルおよび配置オブジェクト群の完全パース検証。
 //! 参照元: `references/openmw/components/esm4/loadcell.hpp`, `loadrefr.hpp`
 
-use std::path::Path;
 use fo3_esm::{EsmReader, REC_ACHR, REC_REFR};
+use std::path::Path;
 
 #[test]
 fn test_real_vault101_refr_and_doors() {
     let esm_path = Path::new(r"A:\SteamLibrary\steamapps\common\Fallout 3 goty\Data\Fallout3.esm");
     if !esm_path.exists() {
-        eprintln!("Fallout3.esm が見つからないためスキップします: {:?}", esm_path);
+        eprintln!(
+            "Fallout3.esm が見つからないためスキップします: {:?}",
+            esm_path
+        );
         return;
     }
 
@@ -75,7 +78,10 @@ fn test_real_vault101_refr_and_doors() {
     }
 
     // Vault101a には隣接エリアへのテレポートドアが存在すること
-    assert!(!teleport_doors.is_empty(), "テレポートドアが 1 件も見つかりませんでした");
+    assert!(
+        !teleport_doors.is_empty(),
+        "テレポートドアが 1 件も見つかりませんでした"
+    );
 
     // テレポート先の dest_door FormID が有効であること
     for (_, tele) in &teleport_doors {
@@ -95,11 +101,19 @@ fn test_real_megaton_saloon_npcs() {
         .read_npc_and_armor_map()
         .expect("Failed to read maps");
 
-    println!("読み込み完了: NPC {} 件, Armor {} 件, Outfit {} 件, Hair {} 件, LVLI {} 件",
-        npc_map.len(), armor_map.len(), outfit_map.len(), hair_map.len(), lvli_map.len()
+    println!(
+        "読み込み完了: NPC {} 件, Armor {} 件, Outfit {} 件, Hair {} 件, LVLI {} 件",
+        npc_map.len(),
+        armor_map.len(),
+        outfit_map.len(),
+        hair_map.len(),
+        lvli_map.len()
     );
 
-    assert!(!lvli_map.is_empty(), "LVLI レコードが1件以上パースされていること");
+    assert!(
+        !lvli_map.is_empty(),
+        "LVLI レコードが1件以上パースされていること"
+    );
 
     let (_cell, refrs, _) = reader
         .find_cell_by_edid("MegatonMoriartysSaloon")
@@ -109,27 +123,51 @@ fn test_real_megaton_saloon_npcs() {
     println!("MegatonMoriartysSaloon 内 REFR 数: {}", refrs.len());
     for refr in &refrs {
         if let Some(npc) = npc_map.get(&refr.base_object) {
-            println!("--- NPC発見: EDID: {}, Name: {:?}, Female: {}, Pos: {:?}", npc.edid, npc.full_name, npc.is_female, refr.position);
-            println!("    Race: 0x{:08X}, WNAM: {:?}, DOFT: {:?}, HNAM: {:?}, HairColor: {:?}", npc.race.0, npc.default_armor, npc.default_outfit, npc.hair, npc.hair_color);
+            println!(
+                "--- NPC発見: EDID: {}, Name: {:?}, Female: {}, Pos: {:?}",
+                npc.edid, npc.full_name, npc.is_female, refr.position
+            );
+            println!(
+                "    Race: 0x{:08X}, WNAM: {:?}, DOFT: {:?}, HNAM: {:?}, HairColor: {:?}",
+                npc.race.0, npc.default_armor, npc.default_outfit, npc.hair, npc.hair_color
+            );
             if let Some(doft_id) = npc.default_outfit {
                 if let Some(otft) = outfit_map.get(&doft_id) {
-                    println!("    DOFT Outfit: EDID: {}, Inventory: {:?}", otft.edid, otft.inventory);
+                    println!(
+                        "    DOFT Outfit: EDID: {}, Inventory: {:?}",
+                        otft.edid, otft.inventory
+                    );
                     for &arm_id in &otft.inventory {
                         if let Some(arm) = armor_map.get(&arm_id) {
-                            println!("      Armor: EDID: {}, Male: '{}', Female: '{}'", arm.edid, arm.male_model, arm.female_model);
+                            println!(
+                                "      Armor: EDID: {}, Male: '{}', Female: '{}'",
+                                arm.edid, arm.male_model, arm.female_model
+                            );
                         } else {
-                            println!("      Armor FormID 0x{:08X} が armor_map に未登録！", arm_id.0);
+                            println!(
+                                "      Armor FormID 0x{:08X} が armor_map に未登録！",
+                                arm_id.0
+                            );
                         }
                     }
                 } else {
-                    println!("    DOFT FormID 0x{:08X} が outfit_map に未登録！", doft_id.0);
+                    println!(
+                        "    DOFT FormID 0x{:08X} が outfit_map に未登録！",
+                        doft_id.0
+                    );
                 }
             }
             if let Some(wnam_id) = npc.default_armor {
                 if let Some(arm) = armor_map.get(&wnam_id) {
-                    println!("    WNAM Armor: EDID: {}, Male: '{}', Female: '{}'", arm.edid, arm.male_model, arm.female_model);
+                    println!(
+                        "    WNAM Armor: EDID: {}, Male: '{}', Female: '{}'",
+                        arm.edid, arm.male_model, arm.female_model
+                    );
                 } else {
-                    println!("    WNAM FormID 0x{:08X} が armor_map に未登録！", wnam_id.0);
+                    println!(
+                        "    WNAM FormID 0x{:08X} が armor_map に未登録！",
+                        wnam_id.0
+                    );
                 }
             }
             if let Some(hair_id) = npc.hair {
@@ -142,9 +180,15 @@ fn test_real_megaton_saloon_npcs() {
             println!("    所持品数 (CNTO): {}", npc.inventory.len());
             for item in &npc.inventory {
                 if let Some(arm) = armor_map.get(&item.item) {
-                    println!("      ★防具所持: FormID 0x{:08X}, EDID: {}, Male: '{}', Female: '{}'", item.item.0, arm.edid, arm.male_model, arm.female_model);
+                    println!(
+                        "      ★防具所持: FormID 0x{:08X}, EDID: {}, Male: '{}', Female: '{}'",
+                        item.item.0, arm.edid, arm.male_model, arm.female_model
+                    );
                 } else {
-                    println!("      アイテム FormID 0x{:08X} (count: {})", item.item.0, item.count);
+                    println!(
+                        "      アイテム FormID 0x{:08X} (count: {})",
+                        item.item.0, item.count
+                    );
                 }
             }
         }
@@ -169,12 +213,17 @@ fn test_real_lvli_resolution() {
         .expect("Failed to read maps");
 
     // BFS 再帰展開ヘルパー
-    fn resolve(items: &[fo3_esm::FormId], lvlis: &std::collections::HashMap<fo3_esm::FormId, fo3_esm::LvliRecord>) -> Vec<fo3_esm::FormId> {
+    fn resolve(
+        items: &[fo3_esm::FormId],
+        lvlis: &std::collections::HashMap<fo3_esm::FormId, fo3_esm::LvliRecord>,
+    ) -> Vec<fo3_esm::FormId> {
         let mut res = Vec::new();
         let mut visited = std::collections::HashSet::new();
         let mut q: std::collections::VecDeque<fo3_esm::FormId> = items.iter().copied().collect();
         while let Some(id) = q.pop_front() {
-            if !visited.insert(id) { continue; }
+            if !visited.insert(id) {
+                continue;
+            }
             if let Some(lvli) = lvlis.get(&id) {
                 for e in &lvli.entries {
                     q.push_back(e.item);
@@ -187,42 +236,73 @@ fn test_real_lvli_resolution() {
     }
 
     // 1. Vault 101 警備員 (Officer Wolfe: 0x00035DA9)
-    let wolfe = npc_map.get(&fo3_esm::FormId(0x00035DA9)).expect("Officer Wolfe が存在すること");
+    let wolfe = npc_map
+        .get(&fo3_esm::FormId(0x00035DA9))
+        .expect("Officer Wolfe が存在すること");
     let wolfe_raw: Vec<fo3_esm::FormId> = wolfe.inventory.iter().map(|i| i.item).collect();
     let wolfe_resolved = resolve(&wolfe_raw, &lvli_map);
 
-    let has_helmet = wolfe_resolved.iter().any(|id| {
-        armor_map.get(id).map(|a| a.is_head()).unwrap_or(false)
-    });
+    let has_helmet = wolfe_resolved
+        .iter()
+        .any(|id| armor_map.get(id).map(|a| a.is_head()).unwrap_or(false));
     let has_armor = wolfe_resolved.iter().any(|id| {
-        armor_map.get(id).map(|a| a.is_upper_body()).unwrap_or(false)
+        armor_map
+            .get(id)
+            .map(|a| a.is_upper_body())
+            .unwrap_or(false)
     });
     let has_weapon = wolfe_resolved.iter().any(|id| {
-        model_map.get(id).map(|b| b.record_type == fo3_esm::types::REC_WEAP).unwrap_or(false)
+        model_map
+            .get(id)
+            .map(|b| b.record_type == fo3_esm::types::REC_WEAP)
+            .unwrap_or(false)
     });
 
-    assert!(has_helmet, "Officer Wolfe が警備ヘルメット (頭部防具) を解決できること");
-    assert!(has_armor, "Officer Wolfe が警備服 (胴体防具) を解決できること");
+    assert!(
+        has_helmet,
+        "Officer Wolfe が警備ヘルメット (頭部防具) を解決できること"
+    );
+    assert!(
+        has_armor,
+        "Officer Wolfe が警備服 (胴体防具) を解決できること"
+    );
     assert!(has_weapon, "Officer Wolfe が警棒等の武器を解決できること");
 
     // 2. Lucas Simms (0x00000A60)
-    let simms = npc_map.get(&fo3_esm::FormId(0x00000A60)).expect("Lucas Simms が存在すること");
+    let simms = npc_map
+        .get(&fo3_esm::FormId(0x00000A60))
+        .expect("Lucas Simms が存在すること");
     let simms_raw: Vec<fo3_esm::FormId> = simms.inventory.iter().map(|i| i.item).collect();
     let simms_resolved = resolve(&simms_raw, &lvli_map);
 
     let simms_has_hat = simms_resolved.iter().any(|id| {
-        armor_map.get(id).map(|a| a.is_head() && a.shows_hat()).unwrap_or(false)
+        armor_map
+            .get(id)
+            .map(|a| a.is_head() && a.shows_hat())
+            .unwrap_or(false)
     });
     let simms_has_duster = simms_resolved.iter().any(|id| {
-        armor_map.get(id).map(|a| a.is_upper_body()).unwrap_or(false)
+        armor_map
+            .get(id)
+            .map(|a| a.is_upper_body())
+            .unwrap_or(false)
     });
     let simms_has_rifle = simms_resolved.iter().any(|id| {
-        model_map.get(id).map(|b| b.record_type == fo3_esm::types::REC_WEAP).unwrap_or(false)
+        model_map
+            .get(id)
+            .map(|b| b.record_type == fo3_esm::types::REC_WEAP)
+            .unwrap_or(false)
     });
 
     assert!(simms_has_hat, "Lucas Simms が保安官帽子を解決できること");
-    assert!(simms_has_duster, "Lucas Simms がダスターコートを解決できること");
-    assert!(simms_has_rifle, "Lucas Simms が中国軍アサルトライフル (武器) を解決できること");
+    assert!(
+        simms_has_duster,
+        "Lucas Simms がダスターコートを解決できること"
+    );
+    assert!(
+        simms_has_rifle,
+        "Lucas Simms が中国軍アサルトライフル (武器) を解決できること"
+    );
 }
 
 #[test]
@@ -243,11 +323,19 @@ fn test_real_qust_inspection() {
                 let mut full = String::new();
                 let mut sub_tags = Vec::new();
                 for sub in &subrecords {
-                    sub_tags.push(std::str::from_utf8(&sub.type_id.0).unwrap_or("????").to_string());
+                    sub_tags.push(
+                        std::str::from_utf8(&sub.type_id.0)
+                            .unwrap_or("????")
+                            .to_string(),
+                    );
                     if sub.type_id == fo3_esm::types::SUB_EDID {
-                        edid = String::from_utf8_lossy(&sub.data).trim_end_matches('\0').to_string();
+                        edid = String::from_utf8_lossy(&sub.data)
+                            .trim_end_matches('\0')
+                            .to_string();
                     } else if sub.type_id == fo3_esm::types::SUB_FULL {
-                        full = String::from_utf8_lossy(&sub.data).trim_end_matches('\0').to_string();
+                        full = String::from_utf8_lossy(&sub.data)
+                            .trim_end_matches('\0')
+                            .to_string();
                     }
                 }
                 if qust_count <= 5 || edid == "MQ01" || edid == "MS11" {
@@ -257,8 +345,16 @@ fn test_real_qust_inspection() {
                     );
                     for sub in &subrecords {
                         let stag = std::str::from_utf8(&sub.type_id.0).unwrap_or("????");
-                        if matches!(stag, "INDX" | "QSDT" | "DATA" | "SCRI" | "SCHR" | "QOBJ" | "QSTA" | "NNAM") {
-                            println!("   Sub {}: len={}, hex={:02X?}", stag, sub.data.len(), &sub.data[..sub.data.len().min(16)]);
+                        if matches!(
+                            stag,
+                            "INDX" | "QSDT" | "DATA" | "SCRI" | "SCHR" | "QOBJ" | "QSTA" | "NNAM"
+                        ) {
+                            println!(
+                                "   Sub {}: len={}, hex={:02X?}",
+                                stag,
+                                sub.data.len(),
+                                &sub.data[..sub.data.len().min(16)]
+                            );
                         }
                     }
                 }
@@ -278,9 +374,14 @@ fn test_real_pack_inspection() {
     }
 
     let mut reader = EsmReader::open(esm_path).expect("Failed to open Fallout3.esm");
-    let pack_map = reader.read_all_packages_map().expect("read_all_packages_map");
+    let pack_map = reader
+        .read_all_packages_map()
+        .expect("read_all_packages_map");
     println!("Total PACK records found: {}", pack_map.len());
-    assert!(pack_map.len() > 100, "PACK レコードが多数取得できること (実機は1000件以上)");
+    assert!(
+        pack_map.len() > 100,
+        "PACK レコードが多数取得できること (実機は1000件以上)"
+    );
 
     let mut cg00_packs = 0;
     for (form_id, pack) in &pack_map {
@@ -309,7 +410,9 @@ fn test_real_cg00_cell_and_markers() {
     let mut cg00_refrs = Vec::new();
     while let Some(entry) = reader.read_next_entry().expect("read entry") {
         if let fo3_esm::reader::EsmEntry::Record(record, subs) = entry {
-            if record.type_id == fo3_esm::types::REC_REFR || record.type_id == fo3_esm::types::REC_ACHR {
+            if record.type_id == fo3_esm::types::REC_REFR
+                || record.type_id == fo3_esm::types::REC_ACHR
+            {
                 for sub in &subs {
                     if sub.type_id == fo3_esm::types::SUB_EDID {
                         let edid = sub.as_string();
@@ -330,14 +433,22 @@ fn test_real_cg00_cell_and_markers() {
     let marker_id = fo3_esm::types::FormId(0x00039562);
     // cell_map または reader で marker_id の所属セルを逆引き
     // EsmReader::find_cell_for_refr または CELL レコード走査
-    let marker_ids: std::collections::HashSet<fo3_esm::types::FormId> = cg00_refrs.iter().map(|(id, _, _)| *id).collect();
+    let marker_ids: std::collections::HashSet<fo3_esm::types::FormId> =
+        cg00_refrs.iter().map(|(id, _, _)| *id).collect();
     let mut reader2 = EsmReader::open(esm_path).expect("reopen");
     while let Some(entry) = reader2.read_next_entry().expect("read") {
         if let fo3_esm::reader::EsmEntry::Record(record, subs) = entry {
             if marker_ids.contains(&record.form_id) {
-                let edid = cg00_refrs.iter().find(|(id, _, _)| *id == record.form_id).map(|(_, e, _)| e.as_str()).unwrap_or("");
+                let edid = cg00_refrs
+                    .iter()
+                    .find(|(id, _, _)| *id == record.form_id)
+                    .map(|(_, e, _)| e.as_str())
+                    .unwrap_or("");
                 if let Ok(refr) = fo3_esm::records::refr::RefrRecord::from_record(&record, &subs) {
-                    println!("★ CG00 REFR \"{}\" (0x{:08X}): Pos={:?}, Rot={:?}", edid, record.form_id.0, refr.position, refr.rotation);
+                    println!(
+                        "★ CG00 REFR \"{}\" (0x{:08X}): Pos={:?}, Rot={:?}",
+                        edid, record.form_id.0, refr.position, refr.rotation
+                    );
                 }
                 println!("  Subs for \"{}\" (0x{:08X}):", edid, record.form_id.0);
                 for s in &subs {
@@ -346,7 +457,12 @@ fn test_real_cg00_cell_and_markers() {
                         let fid = u32::from_le_bytes(s.data.as_slice().try_into().unwrap());
                         println!("    [{}] len=4, FormId=0x{:08X}", tag, fid);
                     } else if s.data.len() < 30 {
-                        println!("    [{}] len={}, str=\"{}\"", tag, s.data.len(), s.as_string());
+                        println!(
+                            "    [{}] len={}, str=\"{}\"",
+                            tag,
+                            s.data.len(),
+                            s.as_string()
+                        );
                     } else {
                         println!("    [{}] len={}", tag, s.data.len());
                     }
@@ -355,6 +471,3 @@ fn test_real_cg00_cell_and_markers() {
         }
     }
 }
-
-
-

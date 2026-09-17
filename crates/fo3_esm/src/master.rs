@@ -9,20 +9,20 @@ use std::collections::HashMap;
 use std::io::{self, Read, Seek};
 use std::path::Path;
 
+use crate::reader::{BaseObjectInfo, EsmReader};
+use crate::records::armo::ArmorRecord;
+use crate::records::dial::{DialRecord, InfoRecord};
+use crate::records::hair::HairRecord;
+use crate::records::idle::IdleRecord;
 use crate::records::light::LightRecord;
 use crate::records::lvli::LvliRecord;
+use crate::records::mesg::MesgRecord;
 use crate::records::npc::NpcRecord;
 use crate::records::otft::OtftRecord;
-use crate::records::hair::HairRecord;
-use crate::records::armo::ArmorRecord;
 use crate::records::pack::PackRecord;
-use crate::records::idle::IdleRecord;
 use crate::records::quest::QuestRecord;
 use crate::records::scpt::ScptRecord;
-use crate::records::mesg::MesgRecord;
 use crate::records::soun::SounRecord;
-use crate::records::dial::{DialRecord, InfoRecord};
-use crate::reader::{BaseObjectInfo, EsmReader};
 use crate::types::FormId;
 
 /// ESM ファイル全体の静的マスター定義をキャッシュする構造体。

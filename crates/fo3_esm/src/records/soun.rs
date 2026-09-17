@@ -63,7 +63,8 @@ impl SounRecord {
                         max_attenuation = sub.data[1];
                         freq_adjustment = sub.data[2] as i8;
                         flags = u16::from_le_bytes(sub.data[4..6].try_into().unwrap_or([0, 0]));
-                        static_attenuation = u16::from_le_bytes(sub.data[8..10].try_into().unwrap_or([0, 0]));
+                        static_attenuation =
+                            u16::from_le_bytes(sub.data[8..10].try_into().unwrap_or([0, 0]));
                     }
                 }
                 _ => {}

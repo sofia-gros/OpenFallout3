@@ -3,13 +3,14 @@
 //! - `references/openmw/components/esm4/loadland.hpp` (クアドラント 0..3, ATXT, VTXT)
 //! - `knowledge/worldspace_cells.md` (ワールドスペースと外部セルグリッド)
 
-use std::collections::HashMap;
 use fo3_gamebryo_core::NiTransform;
 use fo3_nif::{NifBlock, NifFile};
 use fo3_vfs::VfsManager;
 use glam::{Mat4, Vec3};
+use std::collections::HashMap;
 use wgpu::util::DeviceExt;
 
+use super::RenderScene;
 use crate::collision::{extract_collision_lines, GpuCollisionMesh};
 use crate::mesh::GpuMesh;
 use crate::pipeline::{ModelUniform, RenderContext};
@@ -17,7 +18,6 @@ use crate::scene::bones::collect_bone_world_transforms;
 use crate::scene::mesh::{ensure_texture_cached, normalize_texture_path, RenderMesh};
 use crate::scene::traversal::traverse_block;
 use crate::texture::GpuTexture;
-use super::RenderScene;
 
 impl RenderScene {
     /// 複数の配置済み NIF インスタンスとワールド変換から RenderScene を構築。
@@ -62,7 +62,10 @@ impl RenderScene {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         context: &RenderContext,
-        cells_data: &[(&[(&NifFile, NiTransform)], Option<(&fo3_esm::LandRecord, i32, i32)>)],
+        cells_data: &[(
+            &[(&NifFile, NiTransform)],
+            Option<(&fo3_esm::LandRecord, i32, i32)>,
+        )],
         landscape_texture_map: Option<&HashMap<fo3_esm::FormId, (String, String)>>,
         vfs: &mut VfsManager,
         texture_cache: &mut HashMap<String, GpuTexture>,
@@ -87,7 +90,9 @@ impl RenderScene {
 
                 // ① 下地ベーステクスチャ (BTXT) メッシュ (4 クアドラント)
                 for q in 0..4 {
-                    if let Some(gpu_mesh) = GpuMesh::from_land_quadrant(device, land, grid_x, grid_y, q) {
+                    if let Some(gpu_mesh) =
+                        GpuMesh::from_land_quadrant(device, land, grid_x, grid_y, q)
+                    {
                         let form_id = land.base_textures[q];
                         let (diff_name, norm_name) = if form_id != fo3_esm::FormId(0) {
                             if let Some(tex_map) = landscape_texture_map {
@@ -122,46 +127,56 @@ impl RenderScene {
                             .and_then(|p| texture_cache.get(p))
                             .unwrap_or(&default_normal_texture);
 
-                        let model_uniform = ModelUniform::new(glam::Mat4::IDENTITY, None, None, false);
-                        let model_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("Landscape Model Uniform Buffer"),
-                            contents: bytemuck::bytes_of(&model_uniform),
-                            usage: wgpu::BufferUsages::UNIFORM,
-                        });
+                        let model_uniform =
+                            ModelUniform::new(glam::Mat4::IDENTITY, None, None, false);
+                        let model_uniform_buffer =
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Landscape Model Uniform Buffer"),
+                                contents: bytemuck::bytes_of(&model_uniform),
+                                usage: wgpu::BufferUsages::UNIFORM,
+                            });
 
-                        let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("Landscape Model Bind Group"),
-                            layout: &context.model_bind_group_layout,
-                            entries: &[
-                                wgpu::BindGroupEntry {
+                        let model_bind_group =
+                            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("Landscape Model Bind Group"),
+                                layout: &context.model_bind_group_layout,
+                                entries: &[wgpu::BindGroupEntry {
                                     binding: 0,
                                     resource: model_uniform_buffer.as_entire_binding(),
-                                },
-                            ],
-                        });
+                                }],
+                            });
 
-                        let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("Landscape Texture Bind Group"),
-                            layout: &context.texture_bind_group_layout,
-                            entries: &[
-                                wgpu::BindGroupEntry {
-                                    binding: 0,
-                                    resource: wgpu::BindingResource::TextureView(&diffuse_tex.view),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: wgpu::BindingResource::Sampler(&diffuse_tex.sampler),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 2,
-                                    resource: wgpu::BindingResource::TextureView(&normal_tex.view),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 3,
-                                    resource: wgpu::BindingResource::TextureView(&default_glow_texture.view),
-                                },
-                            ],
-                        });
+                        let texture_bind_group =
+                            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("Landscape Texture Bind Group"),
+                                layout: &context.texture_bind_group_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: wgpu::BindingResource::TextureView(
+                                            &diffuse_tex.view,
+                                        ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: wgpu::BindingResource::Sampler(
+                                            &diffuse_tex.sampler,
+                                        ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: wgpu::BindingResource::TextureView(
+                                            &normal_tex.view,
+                                        ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 3,
+                                        resource: wgpu::BindingResource::TextureView(
+                                            &default_glow_texture.view,
+                                        ),
+                                    },
+                                ],
+                            });
 
                         let world_bound = gpu_mesh.bound;
                         meshes.push(RenderMesh {
@@ -182,7 +197,9 @@ impl RenderScene {
 
                 // ② 追加レイヤー (ATXT/VTXT: 道路・瓦礫・草) の半透明重畳描画
                 for (l_idx, layer) in land.layers.iter().enumerate() {
-                    if let Some(gpu_mesh) = GpuMesh::from_land_quadrant_layer(device, land, grid_x, grid_y, layer) {
+                    if let Some(gpu_mesh) =
+                        GpuMesh::from_land_quadrant_layer(device, land, grid_x, grid_y, layer)
+                    {
                         let (diff_name, norm_name) = if layer.form_id != fo3_esm::FormId(0) {
                             if let Some(tex_map) = landscape_texture_map {
                                 if let Some((diff, norm)) = tex_map.get(&layer.form_id) {
@@ -216,50 +233,63 @@ impl RenderScene {
                             .and_then(|p| texture_cache.get(p))
                             .unwrap_or(&default_normal_texture);
 
-                        let model_uniform = ModelUniform::new(glam::Mat4::IDENTITY, None, None, false);
-                        let model_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("Landscape Layer Model Uniform Buffer"),
-                            contents: bytemuck::bytes_of(&model_uniform),
-                            usage: wgpu::BufferUsages::UNIFORM,
-                        });
+                        let model_uniform =
+                            ModelUniform::new(glam::Mat4::IDENTITY, None, None, false);
+                        let model_uniform_buffer =
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Landscape Layer Model Uniform Buffer"),
+                                contents: bytemuck::bytes_of(&model_uniform),
+                                usage: wgpu::BufferUsages::UNIFORM,
+                            });
 
-                        let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("Landscape Layer Model Bind Group"),
-                            layout: &context.model_bind_group_layout,
-                            entries: &[
-                                wgpu::BindGroupEntry {
+                        let model_bind_group =
+                            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("Landscape Layer Model Bind Group"),
+                                layout: &context.model_bind_group_layout,
+                                entries: &[wgpu::BindGroupEntry {
                                     binding: 0,
                                     resource: model_uniform_buffer.as_entire_binding(),
-                                },
-                            ],
-                        });
+                                }],
+                            });
 
-                        let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("Landscape Layer Texture Bind Group"),
-                            layout: &context.texture_bind_group_layout,
-                            entries: &[
-                                wgpu::BindGroupEntry {
-                                    binding: 0,
-                                    resource: wgpu::BindingResource::TextureView(&diffuse_tex.view),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 1,
-                                    resource: wgpu::BindingResource::Sampler(&diffuse_tex.sampler),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 2,
-                                    resource: wgpu::BindingResource::TextureView(&normal_tex.view),
-                                },
-                                wgpu::BindGroupEntry {
-                                    binding: 3,
-                                    resource: wgpu::BindingResource::TextureView(&default_glow_texture.view),
-                                },
-                            ],
-                        });
+                        let texture_bind_group =
+                            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("Landscape Layer Texture Bind Group"),
+                                layout: &context.texture_bind_group_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: wgpu::BindingResource::TextureView(
+                                            &diffuse_tex.view,
+                                        ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: wgpu::BindingResource::Sampler(
+                                            &diffuse_tex.sampler,
+                                        ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: wgpu::BindingResource::TextureView(
+                                            &normal_tex.view,
+                                        ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 3,
+                                        resource: wgpu::BindingResource::TextureView(
+                                            &default_glow_texture.view,
+                                        ),
+                                    },
+                                ],
+                            });
 
                         let world_bound = gpu_mesh.bound;
                         meshes.push(RenderMesh {
-                            name: format!("Landscape_Q{}_Layer{}_Cell_{}_{}", layer.quadrant, l_idx, grid_x, grid_y),
+                            name: format!(
+                                "Landscape_Q{}_Layer{}_Cell_{}_{}",
+                                layer.quadrant, l_idx, grid_x, grid_y
+                            ),
                             mesh: gpu_mesh,
                             model_bind_group,
                             model_uniform_buffer,
@@ -316,7 +346,12 @@ impl RenderScene {
 
                     // コリジョンワイヤーフレームの抽出
                     let col_lines = extract_collision_lines(nif);
-                    if let Some(gpu_col) = GpuCollisionMesh::new(device, &context.model_bind_group_layout, &col_lines, world_transform) {
+                    if let Some(gpu_col) = GpuCollisionMesh::new(
+                        device,
+                        &context.model_bind_group_layout,
+                        &col_lines,
+                        world_transform,
+                    ) {
                         collision_meshes.push(gpu_col);
                     }
 

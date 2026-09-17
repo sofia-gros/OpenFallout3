@@ -8,9 +8,9 @@
 //! - `references/nifxml/nif.xml:L1907` (`BoneVertData`)
 //! - `references/nifxml/nif.xml:L2276` (`BoneData`)
 
-use std::io::{self, Read};
-use byteorder::{LittleEndian, ReadBytesExt};
 use crate::types::{BoundingSphere, Matrix33, Vector3};
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Read};
 
 /// スキンデータの頂点とそのボーン影響度。
 ///
@@ -141,7 +141,6 @@ impl NiSkinData {
     }
 }
 
-
 /// スキンインスタンス（メッシュとスケルトンボーンの紐付け）。
 ///
 /// 参照元: `references/nifxml/nif.xml:L5076` (`NiSkinInstance`)
@@ -196,7 +195,10 @@ impl BodyPartList {
     pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
         let part_flag = reader.read_u16::<LittleEndian>()?;
         let body_part = reader.read_u16::<LittleEndian>()?;
-        Ok(BodyPartList { part_flag, body_part })
+        Ok(BodyPartList {
+            part_flag,
+            body_part,
+        })
     }
 }
 
@@ -230,7 +232,10 @@ impl BSDismemberSkinInstance {
             partitions.push(BodyPartList::read(reader)?);
         }
 
-        Ok(BSDismemberSkinInstance { skin_instance, partitions })
+        Ok(BSDismemberSkinInstance {
+            skin_instance,
+            partitions,
+        })
     }
 }
 
@@ -270,7 +275,11 @@ impl SkinPartition {
         }
 
         let has_vertex_map = reader.read_u8()? != 0;
-        let mut vertex_map = Vec::with_capacity(if has_vertex_map { num_vertices as usize } else { 0 });
+        let mut vertex_map = Vec::with_capacity(if has_vertex_map {
+            num_vertices as usize
+        } else {
+            0
+        });
         if has_vertex_map {
             for _ in 0..num_vertices {
                 vertex_map.push(reader.read_u16::<LittleEndian>()?);
@@ -278,7 +287,11 @@ impl SkinPartition {
         }
 
         let has_vertex_weights = reader.read_u8()? != 0;
-        let mut vertex_weights = Vec::with_capacity(if has_vertex_weights { num_vertices as usize } else { 0 });
+        let mut vertex_weights = Vec::with_capacity(if has_vertex_weights {
+            num_vertices as usize
+        } else {
+            0
+        });
         if has_vertex_weights {
             for _ in 0..num_vertices {
                 let mut weights = [0.0f32; 4];
@@ -319,7 +332,11 @@ impl SkinPartition {
         }
 
         let has_bone_indices = reader.read_u8()? != 0;
-        let mut bone_indices = Vec::with_capacity(if has_bone_indices { num_vertices as usize } else { 0 });
+        let mut bone_indices = Vec::with_capacity(if has_bone_indices {
+            num_vertices as usize
+        } else {
+            0
+        });
         if has_bone_indices {
             for _ in 0..num_vertices {
                 let mut indices = [0u8; 4];

@@ -7,14 +7,14 @@
 //! - Gamebryo 2.6 `NiTransformInterpolator::Update`
 //! - Gamebryo 2.6 `NiAVObject::UpdateDownwardPass`
 
-use std::collections::HashMap;
-use std::i16;
-use glam::{Mat3, Quat, Vec3};
 use fo3_gamebryo_core::NiTransform;
 use fo3_nif::{
     KeyGroup, NiBSplineCompTransformInterpolator, NiQuatTransform, NiTransformInterpolator,
     NifBlock, NifFile, QuatKey,
 };
+use glam::{Mat3, Quat, Vec3};
+use std::collections::HashMap;
+use std::i16;
 
 /// クォータニオンキーフレーム列から指定時刻の回転をサンプリング（Slerp 補間）する。
 pub fn sample_quaternion(keys: &[QuatKey], time: f32) -> Option<Quat> {
@@ -276,7 +276,8 @@ fn sample_bspline_transform_interpolator(
 ) -> Option<BoneTransformOverride> {
     // スプライン・基底データを解決
     let (spline_idx, basis_idx) = (bsp.spline_data, bsp.basis_data);
-    if spline_idx < 0 || basis_idx < 0
+    if spline_idx < 0
+        || basis_idx < 0
         || spline_idx as usize >= kf.blocks.len()
         || basis_idx as usize >= kf.blocks.len()
     {
@@ -454,7 +455,7 @@ impl AnimationClip {
     }
 
     /// `NiControllerSequence` ブロックから `AnimationClip` を構築する。
-    
+
     /// NIF 内のすべての NiTransformController から、デフォルトのアニメーションクリップを生成する
     pub fn from_transform_controllers(nif: &NifFile) -> Option<Self> {
         let mut channels = HashMap::new();
@@ -465,8 +466,12 @@ impl AnimationClip {
             if let NifBlock::NiTransformController(ctrl) = block {
                 if ctrl.target >= 0 && (ctrl.target as usize) < nif.blocks.len() {
                     let target_name = match &nif.blocks[ctrl.target as usize] {
-                        NifBlock::NiNode(n) => nif.get_string(n.av.net.name_index as u32).unwrap_or(""),
-                        NifBlock::NiTriShape(t) => nif.get_string(t.geom.av.net.name_index as u32).unwrap_or(""),
+                        NifBlock::NiNode(n) => {
+                            nif.get_string(n.av.net.name_index as u32).unwrap_or("")
+                        }
+                        NifBlock::NiTriShape(t) => nif
+                            .get_string(t.geom.av.net.name_index as u32)
+                            .unwrap_or(""),
                         _ => "",
                     };
                     if !target_name.is_empty() {
@@ -503,8 +508,14 @@ impl AnimationClip {
         })
     }
 
-    pub fn from_controller_sequence(nif: &NifFile, seq: &fo3_nif::NiControllerSequence) -> Option<Self> {
-        let name = nif.get_string(seq.name_index as u32).unwrap_or("").to_string();
+    pub fn from_controller_sequence(
+        nif: &NifFile,
+        seq: &fo3_nif::NiControllerSequence,
+    ) -> Option<Self> {
+        let name = nif
+            .get_string(seq.name_index as u32)
+            .unwrap_or("")
+            .to_string();
         let duration = (seq.stop_time - seq.start_time).max(0.0);
 
         let mut channels = HashMap::new();
@@ -526,7 +537,11 @@ impl AnimationClip {
             stop_time: seq.stop_time,
             duration,
             cycle_type: seq.cycle_type,
-            frequency: if seq.frequency > 0.01 { seq.frequency } else { 1.0 },
+            frequency: if seq.frequency > 0.01 {
+                seq.frequency
+            } else {
+                1.0
+            },
             channels,
         })
     }
@@ -567,7 +582,8 @@ impl AnimationClip {
         kf: &NifFile,
     ) -> Option<BoneTransformOverride> {
         let channel = self.channels.get(bone_name)?;
-        if channel.interpolator_index < 0 || channel.interpolator_index as usize >= kf.blocks.len() {
+        if channel.interpolator_index < 0 || channel.interpolator_index as usize >= kf.blocks.len()
+        {
             return None;
         }
 
@@ -744,7 +760,11 @@ fn sample_quat_transform(qt: &NiQuatTransform) -> Option<BoneTransformOverride> 
         && is_valid_float(qt.translation.y)
         && is_valid_float(qt.translation.z)
     {
-        Some(Vec3::new(qt.translation.x, qt.translation.y, qt.translation.z))
+        Some(Vec3::new(
+            qt.translation.x,
+            qt.translation.y,
+            qt.translation.z,
+        ))
     } else {
         None
     };
@@ -791,11 +811,7 @@ pub struct SkeletonPose {
 /// 参照元:
 /// - Gamebryo 2.6 `NiControllerSequence::Update`
 /// - `knowledge/animation_kf_format.md` (セクション 5: アニメーション更新ループ)
-pub fn apply_pose(
-    kf: &NifFile,
-    pose: &mut SkeletonPose,
-    time: f32,
-) -> Vec<String> {
+pub fn apply_pose(kf: &NifFile, pose: &mut SkeletonPose, time: f32) -> Vec<String> {
     let mut updated = Vec::new();
     // KF の中核は NiControllerSequence
     let Some(seq) = kf.blocks.iter().find_map(|b| match b {
@@ -849,7 +865,7 @@ mod tests {
         use fo3_nif::blocks::NiTransformInterpolator;
         use fo3_nif::header::{BSStreamHeader, ExportString, NifHeader};
         use fo3_nif::types::{NiQuatTransform, Quaternion, Vector3};
-        use fo3_nif::{ControlledBlock, NifFile, NiControllerSequence};
+        use fo3_nif::{ControlledBlock, NiControllerSequence, NifFile};
 
         // NiTransformInterpolator: 固定姿勢 (translation (5, 6, 7), identity rot, scale 1)
         let interp = NiTransformInterpolator {
@@ -899,26 +915,33 @@ mod tests {
                 num_blocks: 0,
                 bs_header: BSStreamHeader {
                     bs_version: 34,
-                    author: ExportString { value: String::new() },
+                    author: ExportString {
+                        value: String::new(),
+                    },
                     process_script: None,
-                    export_script: ExportString { value: String::new() },
+                    export_script: ExportString {
+                        value: String::new(),
+                    },
                 },
                 block_types: vec![],
                 block_type_indices: vec![],
                 block_sizes: vec![],
-                strings: vec![
-                    String::new(),
-                    "Bip01".to_string(),
-                ],
+                strings: vec![String::new(), "Bip01".to_string()],
             },
-            blocks: vec![NifBlock::NiControllerSequence(seq), NifBlock::NiTransformInterpolator(interp)],
+            blocks: vec![
+                NifBlock::NiControllerSequence(seq),
+                NifBlock::NiTransformInterpolator(interp),
+            ],
         };
 
         let mut pose = SkeletonPose::default();
         let updated = apply_pose(&kf, &mut pose, 0.25);
 
         assert_eq!(updated, vec!["Bip01".to_string()]);
-        let t = pose.overrides.get("Bip01").expect("Bip01 should be overridden");
+        let t = pose
+            .overrides
+            .get("Bip01")
+            .expect("Bip01 should be overridden");
         assert_eq!(t.translation, Some(Vec3::new(5.0, 6.0, 7.0)));
         assert_eq!(t.scale, Some(1.0));
     }
@@ -939,18 +962,27 @@ mod tests {
         };
 
         // LOOP (0): 25 秒 → 25 % 10 = 5
-        let loop_clip = AnimationClip { cycle_type: 0, ..base.clone() };
+        let loop_clip = AnimationClip {
+            cycle_type: 0,
+            ..base.clone()
+        };
         assert!((loop_clip.evaluate_time(25.0) - 5.0).abs() < 1e-5);
         assert!((loop_clip.evaluate_time(10.0) - 0.0).abs() < 1e-5);
 
         // REVERSE (1): 周期 20。15 秒 → 15 > 10 なので 20-15 = 5
-        let rev = AnimationClip { cycle_type: 1, ..base.clone() };
+        let rev = AnimationClip {
+            cycle_type: 1,
+            ..base.clone()
+        };
         assert!((rev.evaluate_time(5.0) - 5.0).abs() < 1e-5); // 前進
         assert!((rev.evaluate_time(15.0) - 5.0).abs() < 1e-5); // 後進
         assert!((rev.evaluate_time(25.0) - 5.0).abs() < 1e-5); // 再び前進
 
         // CLAMP (2): 12 秒 → 終端 10 で停止
-        let clamp = AnimationClip { cycle_type: 2, ..base.clone() };
+        let clamp = AnimationClip {
+            cycle_type: 2,
+            ..base.clone()
+        };
         assert!((clamp.evaluate_time(3.0) - 3.0).abs() < 1e-5);
         assert!((clamp.evaluate_time(12.0) - 10.0).abs() < 1e-5);
     }
@@ -982,9 +1014,13 @@ mod tests {
                 num_blocks: 0,
                 bs_header: BSStreamHeader {
                     bs_version: 34,
-                    author: ExportString { value: String::new() },
+                    author: ExportString {
+                        value: String::new(),
+                    },
                     process_script: None,
-                    export_script: ExportString { value: String::new() },
+                    export_script: ExportString {
+                        value: String::new(),
+                    },
                 },
                 block_types: vec![],
                 block_type_indices: vec![],
@@ -1024,9 +1060,13 @@ mod tests {
                 num_blocks: 0,
                 bs_header: BSStreamHeader {
                     bs_version: 34,
-                    author: ExportString { value: String::new() },
+                    author: ExportString {
+                        value: String::new(),
+                    },
                     process_script: None,
-                    export_script: ExportString { value: String::new() },
+                    export_script: ExportString {
+                        value: String::new(),
+                    },
                 },
                 block_types: vec![],
                 block_type_indices: vec![],

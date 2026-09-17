@@ -3,12 +3,12 @@
 //! ESM ファイルの逐次走査、グループトラバース、zlib 圧縮レコードの展開を担当。
 //! 参照元: `references/openmw/components/esm4/reader.cpp`
 
+use byteorder::{LittleEndian, ReadBytesExt};
+use flate2::read::ZlibDecoder;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
-use flate2::read::ZlibDecoder;
-use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::header::{GroupHeader, RecordHeader};
 use crate::records::{
@@ -18,10 +18,10 @@ use crate::records::{
 };
 use crate::subrecord::{parse_subrecords, Subrecord};
 use crate::types::{
-    FormId, FourCC, REC_ACTI, REC_ALCH, REC_AMMO, REC_ARMO, REC_BOOK,
-    REC_CONT, REC_DIAL, REC_DOOR, REC_FURN, REC_HAIR, REC_IDLE, REC_INFO, REC_KEYM, REC_LIGH, REC_LTEX, REC_LVLI, REC_MESG, REC_MISC,
-    REC_MSTT, REC_NPC_, REC_OTFT, REC_PACK, REC_QUST, REC_SCOL, REC_SCPT, REC_SOUN, REC_STAT, REC_TERM, REC_TES4, REC_TXST,
-    REC_WEAP, SUB_EDID, SUB_MODL, SUB_SCRI,
+    FormId, FourCC, REC_ACTI, REC_ALCH, REC_AMMO, REC_ARMO, REC_BOOK, REC_CONT, REC_DIAL, REC_DOOR,
+    REC_FURN, REC_HAIR, REC_IDLE, REC_INFO, REC_KEYM, REC_LIGH, REC_LTEX, REC_LVLI, REC_MESG,
+    REC_MISC, REC_MSTT, REC_NPC_, REC_OTFT, REC_PACK, REC_QUST, REC_SCOL, REC_SCPT, REC_SOUN,
+    REC_STAT, REC_TERM, REC_TES4, REC_TXST, REC_WEAP, SUB_EDID, SUB_MODL, SUB_SCRI,
 };
 
 /// 配置元ベースオブジェクトのメタ情報（モデルパス、エディタID、レコード型）。
@@ -175,7 +175,8 @@ impl<R: Read + Seek> EsmReader<R> {
                 EsmEntry::Group(group) => {
                     if group.target_record_type() == Some(REC_STAT) {
                         // STAT グループ内に進入
-                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        let group_end = self.reader.stream_position()?
+                            + (group.group_size as u64 - GroupHeader::SIZE as u64);
                         while self.reader.stream_position()? < group_end {
                             if let Some(inner) = self.read_next_entry()? {
                                 if let EsmEntry::Record(header, subrecords) = inner {
@@ -229,12 +230,14 @@ impl<R: Read + Seek> EsmReader<R> {
             match entry {
                 EsmEntry::Group(group) => {
                     if group.target_record_type() == Some(REC_LIGH) {
-                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        let group_end = self.reader.stream_position()?
+                            + (group.group_size as u64 - GroupHeader::SIZE as u64);
                         while self.reader.stream_position()? < group_end {
                             if let Some(inner) = self.read_next_entry()? {
                                 if let EsmEntry::Record(header, subrecords) = inner {
                                     if header.type_id == REC_LIGH {
-                                        lights.push(LightRecord::from_record(&header, &subrecords)?);
+                                        lights
+                                            .push(LightRecord::from_record(&header, &subrecords)?);
                                         if let Some(lim) = limit {
                                             if lights.len() >= lim {
                                                 return Ok(lights);
@@ -283,7 +286,8 @@ impl<R: Read + Seek> EsmReader<R> {
             match entry {
                 EsmEntry::Group(group) => {
                     if group.target_record_type() == Some(REC_LTEX) {
-                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        let group_end = self.reader.stream_position()?
+                            + (group.group_size as u64 - GroupHeader::SIZE as u64);
                         while self.reader.stream_position()? < group_end {
                             if let Some(inner) = self.read_next_entry()? {
                                 if let EsmEntry::Record(header, subrecords) = inner {
@@ -337,12 +341,14 @@ impl<R: Read + Seek> EsmReader<R> {
             match entry {
                 EsmEntry::Group(group) => {
                     if group.target_record_type() == Some(REC_TXST) {
-                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        let group_end = self.reader.stream_position()?
+                            + (group.group_size as u64 - GroupHeader::SIZE as u64);
                         while self.reader.stream_position()? < group_end {
                             if let Some(inner) = self.read_next_entry()? {
                                 if let EsmEntry::Record(header, subrecords) = inner {
                                     if header.type_id == REC_TXST {
-                                        textures.push(TextureSetRecord::read(&header, &subrecords)?);
+                                        textures
+                                            .push(TextureSetRecord::read(&header, &subrecords)?);
                                         if let Some(lim) = limit {
                                             if textures.len() >= lim {
                                                 return Ok(textures);
@@ -404,10 +410,8 @@ impl<R: Read + Seek> EsmReader<R> {
         self.reader.seek(SeekFrom::Start(start_pos))?;
 
         let target_types = [
-            REC_STAT, REC_SCOL, REC_DOOR, REC_ACTI,
-            REC_FURN, REC_CONT, REC_MSTT, REC_TERM,
-            REC_LIGH, REC_MISC, REC_BOOK, REC_ALCH,
-            REC_KEYM, REC_WEAP, REC_AMMO, REC_ARMO,
+            REC_STAT, REC_SCOL, REC_DOOR, REC_ACTI, REC_FURN, REC_CONT, REC_MSTT, REC_TERM,
+            REC_LIGH, REC_MISC, REC_BOOK, REC_ALCH, REC_KEYM, REC_WEAP, REC_AMMO, REC_ARMO,
         ];
 
         let mut map = HashMap::new();
@@ -417,7 +421,8 @@ impl<R: Read + Seek> EsmReader<R> {
                 EsmEntry::Group(group) => {
                     if let Some(rtype) = group.target_record_type() {
                         if target_types.contains(&rtype) {
-                            let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                            let group_end = self.reader.stream_position()?
+                                + (group.group_size as u64 - GroupHeader::SIZE as u64);
                             while self.reader.stream_position()? < group_end {
                                 if let Some(inner) = self.read_next_entry()? {
                                     if let EsmEntry::Record(header, subrecords) = inner {
@@ -436,13 +441,16 @@ impl<R: Read + Seek> EsmReader<R> {
                                             }
                                         }
                                         if !model.is_empty() {
-                                            map.insert(header.form_id, BaseObjectInfo {
-                                                form_id: header.form_id,
-                                                edid,
-                                                model,
-                                                record_type: header.type_id,
-                                                script,
-                                            });
+                                            map.insert(
+                                                header.form_id,
+                                                BaseObjectInfo {
+                                                    form_id: header.form_id,
+                                                    edid,
+                                                    model,
+                                                    record_type: header.type_id,
+                                                    script,
+                                                },
+                                            );
                                         }
                                     }
                                 } else {
@@ -493,35 +501,46 @@ impl<R: Read + Seek> EsmReader<R> {
                         || rtype == Some(REC_HAIR)
                         || rtype == Some(REC_LVLI)
                     {
-                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        let group_end = self.reader.stream_position()?
+                            + (group.group_size as u64 - GroupHeader::SIZE as u64);
                         while self.reader.stream_position()? < group_end {
                             if let Some(inner) = self.read_next_entry()? {
                                 match inner {
                                     EsmEntry::Record(header, subs) => {
                                         if header.type_id == REC_NPC_ {
-                                            if let Ok(npc) = NpcRecord::from_record(&header, &subs) {
+                                            if let Ok(npc) = NpcRecord::from_record(&header, &subs)
+                                            {
                                                 npcs.insert(header.form_id, npc);
                                             }
                                         } else if header.type_id == REC_ARMO {
-                                            if let Ok(armor) = ArmorRecord::from_record(&header, &subs) {
+                                            if let Ok(armor) =
+                                                ArmorRecord::from_record(&header, &subs)
+                                            {
                                                 armors.insert(header.form_id, armor);
                                             }
                                         } else if header.type_id == REC_OTFT {
-                                            if let Ok(otft) = OtftRecord::from_record(&header, &subs) {
+                                            if let Ok(otft) =
+                                                OtftRecord::from_record(&header, &subs)
+                                            {
                                                 outfits.insert(header.form_id, otft);
                                             }
                                         } else if header.type_id == REC_HAIR {
-                                            if let Ok(hair) = HairRecord::from_record(&header, &subs) {
+                                            if let Ok(hair) =
+                                                HairRecord::from_record(&header, &subs)
+                                            {
                                                 hairs.insert(header.form_id, hair);
                                             }
                                         } else if header.type_id == REC_LVLI {
-                                            if let Ok(lvli) = LvliRecord::from_record(&header, &subs) {
+                                            if let Ok(lvli) =
+                                                LvliRecord::from_record(&header, &subs)
+                                            {
                                                 lvlis.insert(header.form_id, lvli);
                                             }
                                         }
                                     }
                                     EsmEntry::Group(child_group) => {
-                                        let skip = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        let skip = child_group.group_size as u64
+                                            - GroupHeader::SIZE as u64;
                                         self.skip(skip)?;
                                     }
                                 }
@@ -553,7 +572,8 @@ impl<R: Read + Seek> EsmReader<R> {
             match entry {
                 EsmEntry::Group(group) => {
                     if group.target_record_type() == Some(REC_SCPT) {
-                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        let group_end = self.reader.stream_position()?
+                            + (group.group_size as u64 - GroupHeader::SIZE as u64);
                         while self.reader.stream_position()? < group_end {
                             if let Some(inner) = self.read_next_entry()? {
                                 match inner {
@@ -565,7 +585,8 @@ impl<R: Read + Seek> EsmReader<R> {
                                         }
                                     }
                                     EsmEntry::Group(child_group) => {
-                                        let skip = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        let skip = child_group.group_size as u64
+                                            - GroupHeader::SIZE as u64;
                                         self.skip(skip)?;
                                     }
                                 }
@@ -597,19 +618,23 @@ impl<R: Read + Seek> EsmReader<R> {
             match entry {
                 EsmEntry::Group(group) => {
                     if group.target_record_type() == Some(REC_QUST) {
-                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        let group_end = self.reader.stream_position()?
+                            + (group.group_size as u64 - GroupHeader::SIZE as u64);
                         while self.reader.stream_position()? < group_end {
                             if let Some(inner) = self.read_next_entry()? {
                                 match inner {
                                     EsmEntry::Record(header, subs) => {
                                         if header.type_id == REC_QUST {
-                                            if let Ok(qust) = QuestRecord::parse(header.form_id, &subs) {
+                                            if let Ok(qust) =
+                                                QuestRecord::parse(header.form_id, &subs)
+                                            {
                                                 quests.insert(header.form_id, qust);
                                             }
                                         }
                                     }
                                     EsmEntry::Group(child_group) => {
-                                        let skip = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        let skip = child_group.group_size as u64
+                                            - GroupHeader::SIZE as u64;
                                         self.skip(skip)?;
                                     }
                                 }
@@ -641,19 +666,25 @@ impl<R: Read + Seek> EsmReader<R> {
             match entry {
                 EsmEntry::Group(group) => {
                     if group.target_record_type() == Some(REC_PACK) {
-                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        let group_end = self.reader.stream_position()?
+                            + (group.group_size as u64 - GroupHeader::SIZE as u64);
                         while self.reader.stream_position()? < group_end {
                             if let Some(inner) = self.read_next_entry()? {
                                 match inner {
                                     EsmEntry::Record(header, subs) => {
                                         if header.type_id == REC_PACK {
-                                            if let Ok(pack) = PackRecord::parse(header.form_id, header.flags, &subs) {
+                                            if let Ok(pack) = PackRecord::parse(
+                                                header.form_id,
+                                                header.flags,
+                                                &subs,
+                                            ) {
                                                 packages.insert(header.form_id, pack);
                                             }
                                         }
                                     }
                                     EsmEntry::Group(child_group) => {
-                                        let skip = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        let skip = child_group.group_size as u64
+                                            - GroupHeader::SIZE as u64;
                                         self.skip(skip)?;
                                     }
                                 }
@@ -686,19 +717,24 @@ impl<R: Read + Seek> EsmReader<R> {
             match entry {
                 EsmEntry::Group(group) => {
                     if group.target_record_type() == Some(REC_IDLE) {
-                        let group_end =
-                            self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        let group_end = self.reader.stream_position()?
+                            + (group.group_size as u64 - GroupHeader::SIZE as u64);
                         while self.reader.stream_position()? < group_end {
                             if let Some(inner) = self.read_next_entry()? {
                                 match inner {
                                     EsmEntry::Record(header, subs) => {
                                         if header.type_id == REC_IDLE {
-                                            let rec = IdleRecord::parse(header.form_id, header.flags, &subs)?;
+                                            let rec = IdleRecord::parse(
+                                                header.form_id,
+                                                header.flags,
+                                                &subs,
+                                            )?;
                                             idles.insert(header.form_id, rec);
                                         }
                                     }
                                     EsmEntry::Group(child_group) => {
-                                        let skip = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        let skip = child_group.group_size as u64
+                                            - GroupHeader::SIZE as u64;
                                         self.skip(skip)?;
                                     }
                                 }
@@ -730,7 +766,8 @@ impl<R: Read + Seek> EsmReader<R> {
             match entry {
                 EsmEntry::Group(group) => {
                     if group.target_record_type() == Some(REC_MESG) {
-                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        let group_end = self.reader.stream_position()?
+                            + (group.group_size as u64 - GroupHeader::SIZE as u64);
                         while self.reader.stream_position()? < group_end {
                             if let Some(inner) = self.read_next_entry()? {
                                 match inner {
@@ -742,7 +779,8 @@ impl<R: Read + Seek> EsmReader<R> {
                                         }
                                     }
                                     EsmEntry::Group(child_group) => {
-                                        let skip = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        let skip = child_group.group_size as u64
+                                            - GroupHeader::SIZE as u64;
                                         self.skip(skip)?;
                                     }
                                 }
@@ -774,7 +812,8 @@ impl<R: Read + Seek> EsmReader<R> {
             match entry {
                 EsmEntry::Group(group) => {
                     if group.target_record_type() == Some(REC_SOUN) {
-                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        let group_end = self.reader.stream_position()?
+                            + (group.group_size as u64 - GroupHeader::SIZE as u64);
                         while self.reader.stream_position()? < group_end {
                             if let Some(inner) = self.read_next_entry()? {
                                 match inner {
@@ -786,7 +825,8 @@ impl<R: Read + Seek> EsmReader<R> {
                                         }
                                     }
                                     EsmEntry::Group(child_group) => {
-                                        let skip = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        let skip = child_group.group_size as u64
+                                            - GroupHeader::SIZE as u64;
                                         self.skip(skip)?;
                                     }
                                 }
@@ -810,7 +850,12 @@ impl<R: Read + Seek> EsmReader<R> {
 
     /// 全てのトピック (DIAL) および連動するセリフ (INFO) を一括走査してマップを構築する。
     /// 戻り値: (Topic EDID 大文字 -> (DialRecord, Vec<InfoRecord>), FormID -> InfoRecord)
-    pub fn read_all_dialogues_map(&mut self) -> io::Result<(HashMap<String, (DialRecord, Vec<InfoRecord>)>, HashMap<FormId, InfoRecord>)> {
+    pub fn read_all_dialogues_map(
+        &mut self,
+    ) -> io::Result<(
+        HashMap<String, (DialRecord, Vec<InfoRecord>)>,
+        HashMap<FormId, InfoRecord>,
+    )> {
         let mut topic_map: HashMap<String, (DialRecord, Vec<InfoRecord>)> = HashMap::new();
         let mut info_map: HashMap<FormId, InfoRecord> = HashMap::new();
         let start_pos = 24 + self.header_record.data_size as u64;
@@ -823,7 +868,8 @@ impl<R: Read + Seek> EsmReader<R> {
             match entry {
                 EsmEntry::Group(group) => {
                     if group.target_record_type() == Some(REC_DIAL) {
-                        let group_end = self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        let group_end = self.reader.stream_position()?
+                            + (group.group_size as u64 - GroupHeader::SIZE as u64);
                         while self.reader.stream_position()? < group_end {
                             if let Some(inner) = self.read_next_entry()? {
                                 match inner {
@@ -846,14 +892,19 @@ impl<R: Read + Seek> EsmReader<R> {
                                     }
                                     EsmEntry::Group(child_group) => {
                                         // Grp_TopicChild などのサブグループ走査
-                                        let sub_size = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        let sub_size = child_group.group_size as u64
+                                            - GroupHeader::SIZE as u64;
                                         let sub_end = self.reader.stream_position()? + sub_size;
                                         while self.reader.stream_position()? < sub_end {
                                             if let Some(inner_entry) = self.read_next_entry()? {
-                                                if let EsmEntry::Record(rec_hdr, subs) = inner_entry {
+                                                if let EsmEntry::Record(rec_hdr, subs) = inner_entry
+                                                {
                                                     if rec_hdr.type_id == REC_INFO {
-                                                        if let Ok(info) = InfoRecord::parse(&rec_hdr, &subs) {
-                                                            info_map.insert(info.form_id, info.clone());
+                                                        if let Ok(info) =
+                                                            InfoRecord::parse(&rec_hdr, &subs)
+                                                        {
+                                                            info_map
+                                                                .insert(info.form_id, info.clone());
                                                             current_infos.push(info);
                                                         }
                                                     }
@@ -887,5 +938,3 @@ impl<R: Read + Seek> EsmReader<R> {
         Ok((topic_map, info_map))
     }
 }
-
-

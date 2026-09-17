@@ -178,7 +178,9 @@ impl InputManager {
 
     /// 押下キーに対応する主要なアクションを取得する。
     pub fn get_action(&self, key: KeyCode) -> Option<InputCommand> {
-        self.bindings.get(&key).and_then(|list| list.first().copied())
+        self.bindings
+            .get(&key)
+            .and_then(|list| list.first().copied())
     }
 
     /// フレーム開始時の入力エッジ状態リセット。

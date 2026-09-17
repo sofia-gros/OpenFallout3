@@ -6,10 +6,10 @@
 //! - `references/nifxml/nif.xml:L4363` (`NiMaterialProperty`)
 //! - `references/nifxml/nif.xml:L3972` (`NiAlphaProperty`)
 
-use std::io::{self, Read};
-use byteorder::{LittleEndian, ReadBytesExt};
 use crate::blocks::node::NiObjectNET;
 use crate::types::{read_sized_string, Color3};
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Read};
 
 /// Bethesda 固有のテクスチャセットブロック。
 /// ディフューズ、ノーマルマップ、グローマップ等のファイルパスリストを保持。
@@ -328,4 +328,3 @@ mod tests {
         assert!((alpha.threshold_normalized() - 0.50196).abs() < 0.001);
     }
 }
-

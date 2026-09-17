@@ -205,6 +205,10 @@ mod tests {
 
         let dot = pipe_dir.dot(expected_dir);
         // 内積が 0.9999 以上（99.99% 以上の一致）であることを検証
-        assert!(dot > 0.9999, "Pipe direction dot product was {}, expected > 0.9999", dot);
+        assert!(
+            dot > 0.9999,
+            "Pipe direction dot product was {}, expected > 0.9999",
+            dot
+        );
     }
 }

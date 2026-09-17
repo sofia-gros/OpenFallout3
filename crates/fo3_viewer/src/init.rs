@@ -5,9 +5,9 @@
 //!
 //! 参照元: Gamebryo 2.6 アーカイブマネージャ, `references/openmw/components/resource/resourcesystem.hpp`
 
-use std::path::Path;
-use fo3_vfs::VfsManager;
 use fo3_esm::EsmMasterContext;
+use fo3_vfs::VfsManager;
+use std::path::Path;
 
 /// ゲーム起動時に仮想ファイルシステム (VFS) を初期化し、全 BSA アーカイブのインデックスを常駐させる。
 pub fn initialize_vfs(data_dir: &str) -> VfsManager {
@@ -37,7 +37,10 @@ pub fn initialize_vfs(data_dir: &str) -> VfsManager {
 pub fn initialize_master_context(data_dir: &str) -> EsmMasterContext {
     let esm_path = Path::new(data_dir).join("Fallout3.esm");
     if esm_path.exists() {
-        println!("マスター ESM \"{:?}\" から静的定義を一括ロード中...", esm_path);
+        println!(
+            "マスター ESM \"{:?}\" から静的定義を一括ロード中...",
+            esm_path
+        );
         match EsmMasterContext::open_and_load(&esm_path) {
             Ok(ctx) => {
                 println!(
@@ -57,7 +60,10 @@ pub fn initialize_master_context(data_dir: &str) -> EsmMasterContext {
             }
         }
     } else {
-        println!("マスター ESM が指定ディレクトリに見つかりません: {:?}", esm_path);
+        println!(
+            "マスター ESM が指定ディレクトリに見つかりません: {:?}",
+            esm_path
+        );
         EsmMasterContext::new()
     }
 }

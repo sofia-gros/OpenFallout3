@@ -1,13 +1,13 @@
 #[cfg(test)]
 mod tests {
-    use crate::*;
     use crate::records::*;
-    use crate::types::*;
     use crate::subrecord::parse_subrecords;
+    use crate::types::*;
+    use crate::*;
     use flate2::write::ZlibEncoder;
     use flate2::Compression;
-    use std::io::Write;
     use std::io::Cursor;
+    use std::io::Write;
 
     #[test]
     fn test_record_header_size() {
@@ -208,8 +208,8 @@ mod tests {
 
     #[test]
     fn test_land_record_parsing_and_heights() {
-        use crate::types::{SUB_DATA, SUB_VHGT};
         use crate::records::land::{LAND_NUM_VERTS, LAND_VERTS_PER_SIDE};
+        use crate::types::{SUB_DATA, SUB_VHGT};
 
         let land_header = RecordHeader {
             type_id: REC_LAND,
@@ -260,10 +260,10 @@ mod tests {
     /// REFR 拡張サブレコード (XTEL, XLOC, XESP, XMRK, TNAM, XOWN, XRNK, XCNT) のパース検証。
     #[test]
     fn test_refr_extended_subrecords() {
+        use crate::records::refr::{EnableParent, LockData, TeleportDoor};
         use crate::types::{
             SUB_TNAM, SUB_XCNT, SUB_XESP, SUB_XLOC, SUB_XMRK, SUB_XOWN, SUB_XRNK, SUB_XTEL,
         };
-        use crate::records::refr::{EnableParent, LockData, TeleportDoor};
 
         let refr_header = RecordHeader {
             type_id: REC_REFR,

@@ -5,9 +5,9 @@
 //! - GECK スクリプトコマンド: `ShowRaceMenu`, `GetPlayerName`, `ShowMessage`
 //! - 人種仕様: Caucasian, African American, Asian, Hispanic
 
-use winit::keyboard::KeyCode;
 use fo3_render::{TextBatch, UiRenderer};
 use fo3_script::ScriptVm;
+use winit::keyboard::KeyCode;
 
 /// キャラクター作成メニューの状態
 #[derive(Clone, Debug, PartialEq)]
@@ -15,9 +15,7 @@ pub enum ChargenMode {
     /// メニュー非表示
     None,
     /// 名前入力ダイアログ (`GetPlayerName`)
-    NameInput {
-        name: String,
-    },
+    NameInput { name: String },
     /// 人種・性別・容姿カスタマイズ (`ShowRaceMenu`)
     RaceSex {
         /// 現在選択中の項目インデックス (0: Sex, 1: Race, 2: Hair, 3: [DONE])
@@ -58,11 +56,18 @@ impl ChargenMenu {
             let evt = vm.chargen_events.remove(0);
             match evt.as_str() {
                 "GetPlayerName" => {
-                    let default_name = if vm.player_is_female { "Catherine" } else { "James" };
+                    let default_name = if vm.player_is_female {
+                        "Catherine"
+                    } else {
+                        "James"
+                    };
                     self.mode = ChargenMode::NameInput {
                         name: default_name.to_string(),
                     };
-                    println!("[ChargenMenu] 名前入力ダイアログ開始: default=\"{}\"", default_name);
+                    println!(
+                        "[ChargenMenu] 名前入力ダイアログ開始: default=\"{}\"",
+                        default_name
+                    );
                 }
                 "ShowRaceMenu" => {
                     self.mode = ChargenMode::RaceSex {
@@ -99,27 +104,48 @@ impl ChargenMenu {
                     _ => false,
                 }
             }
-            ChargenMode::RaceSex { cursor, is_female, race_index, hair_index } => {
+            ChargenMode::RaceSex {
+                cursor,
+                is_female,
+                race_index,
+                hair_index,
+            } => {
                 const RACES: &[&str] = &["Caucasian", "African American", "Asian", "Hispanic"];
                 const HAIRS: &[&str] = &["Default", "Wasteland", "Clean Cut", "Rough", "Ponytail"];
 
                 match key {
                     KeyCode::KeyW | KeyCode::ArrowUp => {
-                        if *cursor > 0 { *cursor -= 1; } else { *cursor = 3; }
+                        if *cursor > 0 {
+                            *cursor -= 1;
+                        } else {
+                            *cursor = 3;
+                        }
                         true
                     }
                     KeyCode::KeyS | KeyCode::ArrowDown => {
-                        if *cursor < 3 { *cursor += 1; } else { *cursor = 0; }
+                        if *cursor < 3 {
+                            *cursor += 1;
+                        } else {
+                            *cursor = 0;
+                        }
                         true
                     }
                     KeyCode::KeyA | KeyCode::ArrowLeft => {
                         match *cursor {
                             0 => *is_female = !*is_female,
                             1 => {
-                                if *race_index > 0 { *race_index -= 1; } else { *race_index = RACES.len() - 1; }
+                                if *race_index > 0 {
+                                    *race_index -= 1;
+                                } else {
+                                    *race_index = RACES.len() - 1;
+                                }
                             }
                             2 => {
-                                if *hair_index > 0 { *hair_index -= 1; } else { *hair_index = HAIRS.len() - 1; }
+                                if *hair_index > 0 {
+                                    *hair_index -= 1;
+                                } else {
+                                    *hair_index = HAIRS.len() - 1;
+                                }
                             }
                             _ => {}
                         }
@@ -140,7 +166,8 @@ impl ChargenMenu {
                     }
                     KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Space => {
                         if *cursor == 3 {
-                            println!("[ChargenMenu] キャラメイク完了: sex={}, race={}, hair={}",
+                            println!(
+                                "[ChargenMenu] キャラメイク完了: sex={}, race={}, hair={}",
                                 if *is_female { "Female" } else { "Male" },
                                 RACES[*race_index],
                                 HAIRS[*hair_index],
@@ -149,7 +176,10 @@ impl ChargenMenu {
                             // キャラメイク完了後、Stage 62 -> 65 へ進行
                             let cg00_id = fo3_esm::FormId(0x0001F388);
                             vm.set_stage(cg00_id, 62);
-                            let _ = vm.execute_statement("player.addScriptPackage CG00PlayerSection4", None);
+                            let _ = vm.execute_statement(
+                                "player.addScriptPackage CG00PlayerSection4",
+                                None,
+                            );
                             vm.set_stage(cg00_id, 65);
                             let _ = vm.execute_statement("setstage CG00 80", None);
                             self.mode = ChargenMode::None;
@@ -230,7 +260,13 @@ impl ChargenMenu {
                 let field_h = 36.0;
                 batch.add_rect(field_x, field_y, field_w, field_h, [0.05, 0.18, 0.08, 0.95]);
                 batch.add_rect(field_x, field_y, field_w, 1.0, [0.3, 1.0, 0.5, 1.0]);
-                batch.add_rect(field_x, field_y + field_h - 1.0, field_w, 1.0, [0.3, 1.0, 0.5, 1.0]);
+                batch.add_rect(
+                    field_x,
+                    field_y + field_h - 1.0,
+                    field_w,
+                    1.0,
+                    [0.3, 1.0, 0.5, 1.0],
+                );
 
                 let display_text = format!("{}_", name);
                 batch.add_text(
@@ -252,7 +288,12 @@ impl ChargenMenu {
                     [0.3, 1.0, 0.5, 1.0],
                 );
             }
-            ChargenMode::RaceSex { cursor, is_female, race_index, hair_index } => {
+            ChargenMode::RaceSex {
+                cursor,
+                is_female,
+                race_index,
+                hair_index,
+            } => {
                 const RACES: &[&str] = &["Caucasian", "African American", "Asian", "Hispanic"];
                 const HAIRS: &[&str] = &["Default", "Wasteland", "Clean Cut", "Rough", "Ponytail"];
 
@@ -278,10 +319,19 @@ impl ChargenMenu {
                     1.25,
                     [0.2, 1.0, 0.4, 1.0],
                 );
-                batch.add_rect(bx + 30.0, by + 55.0, box_w - 60.0, 1.0, [0.2, 1.0, 0.4, 0.6]);
+                batch.add_rect(
+                    bx + 30.0,
+                    by + 55.0,
+                    box_w - 60.0,
+                    1.0,
+                    [0.2, 1.0, 0.4, 0.6],
+                );
 
                 let items = [
-                    format!("SEX:         < {} >", if *is_female { "FEMALE" } else { "MALE" }),
+                    format!(
+                        "SEX:         < {} >",
+                        if *is_female { "FEMALE" } else { "MALE" }
+                    ),
                     format!("RACE:        < {} >", RACES[*race_index]),
                     format!("HAIR STYLE:  < {} >", HAIRS[*hair_index]),
                     " [DONE - ACCEPT PROJECTION] ".to_string(),
@@ -292,12 +342,32 @@ impl ChargenMenu {
                     let is_selected = idx == *cursor;
                     if is_selected {
                         // 反転選択ハイライト背景
-                        batch.add_rect(bx + 30.0, cy - 4.0, box_w - 60.0, 32.0, [0.2, 0.8, 0.3, 0.35]);
+                        batch.add_rect(
+                            bx + 30.0,
+                            cy - 4.0,
+                            box_w - 60.0,
+                            32.0,
+                            [0.2, 0.8, 0.3, 0.35],
+                        );
                         let label = format!("> {}", text);
-                        batch.add_text(ui_renderer.font(), &label, bx + 35.0, cy, 1.2, [1.0, 1.0, 0.4, 1.0]);
+                        batch.add_text(
+                            ui_renderer.font(),
+                            &label,
+                            bx + 35.0,
+                            cy,
+                            1.2,
+                            [1.0, 1.0, 0.4, 1.0],
+                        );
                     } else {
                         let label = format!("  {}", text);
-                        batch.add_text(ui_renderer.font(), &label, bx + 35.0, cy, 1.15, [0.2, 1.0, 0.4, 0.85]);
+                        batch.add_text(
+                            ui_renderer.font(),
+                            &label,
+                            bx + 35.0,
+                            cy,
+                            1.15,
+                            [0.2, 1.0, 0.4, 0.85],
+                        );
                     }
                     cy += 48.0;
                 }

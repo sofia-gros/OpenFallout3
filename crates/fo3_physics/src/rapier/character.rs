@@ -5,11 +5,11 @@
 //!
 //! 参照元: `knowledge/physics_engine_evaluation_and_architecture.md`
 
+use crate::traits::CharacterState;
 use glam::Vec3;
 use rapier3d::control::{CharacterAutostep, CharacterLength, KinematicCharacterController};
 use rapier3d::na::{Isometry3, Point3, Translation3, UnitQuaternion, Vector3};
 use rapier3d::prelude::*;
-use crate::traits::CharacterState;
 
 /// キャラクタコントローラー設定および状態保持。
 pub struct RapierCharacterController {

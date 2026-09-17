@@ -4,10 +4,10 @@
 //! - `references/openmw/components/vfs/manager.hpp`
 //! - `references/openmw/components/vfs/manager.cpp`
 
+use crate::error::VfsError;
+use fo3_bsa::{BsaArchive, BsaError};
 use std::fs;
 use std::path::{Path, PathBuf};
-use fo3_bsa::{BsaArchive, BsaError};
-use crate::error::VfsError;
 
 /// パス区切り文字を正規化し、小文字化する。
 pub fn normalize_path(path: &str) -> String {
@@ -92,7 +92,9 @@ impl VfsManager {
         for bsa in self.bsa_archives.iter().rev() {
             for f in bsa.list_files() {
                 let norm = normalize_path(f).to_ascii_lowercase();
-                if norm.starts_with(&clean_prefix) && (norm.ends_with(".wav") || norm.ends_with(".ogg")) {
+                if norm.starts_with(&clean_prefix)
+                    && (norm.ends_with(".wav") || norm.ends_with(".ogg"))
+                {
                     return Some(f.to_string());
                 }
             }
@@ -132,7 +134,10 @@ impl VfsManager {
         }
 
         // 大文字小文字の違いに対応するため、ディレクトリ階層を順番に走査
-        let components: Vec<&str> = normalized_relative.split('\\').filter(|c| !c.is_empty()).collect();
+        let components: Vec<&str> = normalized_relative
+            .split('\\')
+            .filter(|c| !c.is_empty())
+            .collect();
         let mut current = root.to_path_buf();
 
         for component in components {

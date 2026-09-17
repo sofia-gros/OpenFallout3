@@ -4,10 +4,10 @@
 //! - `references/openmw/components/esm4/loadinfo.cpp:81-105`
 //! - `references/openmw/components/esm4/script.hpp:330-345`
 
-use std::collections::{HashMap, HashSet};
-use glam::Vec3;
-use fo3_esm::{FormId, TargetCondition};
 use crate::opcodes::functions::*;
+use fo3_esm::{FormId, TargetCondition};
+use glam::Vec3;
+use std::collections::{HashMap, HashSet};
 
 /// 条件式評価に必要なゲーム実行コンテキスト。
 #[derive(Clone, Debug, Default)]
@@ -36,12 +36,20 @@ pub fn evaluate_single_condition(cond: &TargetCondition, ctx: &ConditionContext)
         FN_GET_IS_SEX | FN_GET_PC_IS_SEX => {
             // 対象の性別 (param1: 0 = Male, 1 = Female)
             let current_sex = if ctx.is_female { 1 } else { 0 };
-            if current_sex == cond.param1 { 1.0 } else { 0.0 }
+            if current_sex == cond.param1 {
+                1.0
+            } else {
+                0.0
+            }
         }
         FN_GET_IS_ID => {
             // 話者の Base FormID と比較
             if let Some(speaker_id) = ctx.speaker {
-                if speaker_id.0 == cond.param1 { 1.0 } else { 0.0 }
+                if speaker_id.0 == cond.param1 {
+                    1.0
+                } else {
+                    0.0
+                }
             } else {
                 0.0
             }
@@ -60,17 +68,26 @@ pub fn evaluate_single_condition(cond: &TargetCondition, ctx: &ConditionContext)
             } else {
                 cond.comparison_value as u32
             };
-            let done = ctx.quest_stage_history
+            let done = ctx
+                .quest_stage_history
                 .get(&q_id)
                 .map(|h| h.contains(&target_stage))
                 .unwrap_or(false);
-            if done { 1.0 } else { 0.0 }
+            if done {
+                1.0
+            } else {
+                0.0
+            }
         }
         FN_GET_QUEST_RUNNING => {
             // クエスト実行中判定 (ステージ > 0)
             let q_id = FormId(cond.param1);
             let running = ctx.quest_stages.get(&q_id).map(|&s| s > 0).unwrap_or(false);
-            if running { 1.0 } else { 0.0 }
+            if running {
+                1.0
+            } else {
+                0.0
+            }
         }
         FN_GET_ITEM_COUNT => {
             // アイテム所持数
@@ -95,10 +112,10 @@ pub fn evaluate_single_condition(cond: &TargetCondition, ctx: &ConditionContext)
     match op_type {
         0 => (actual_value - cond.comparison_value).abs() < 1e-4, // ==
         1 => (actual_value - cond.comparison_value).abs() >= 1e-4, // !=
-        2 => actual_value > cond.comparison_value + 1e-4,          // >
-        3 => actual_value >= cond.comparison_value - 1e-4,         // >=
-        4 => actual_value < cond.comparison_value - 1e-4,          // <
-        5 => actual_value <= cond.comparison_value + 1e-4,         // <=
+        2 => actual_value > cond.comparison_value + 1e-4,         // >
+        3 => actual_value >= cond.comparison_value - 1e-4,        // >=
+        4 => actual_value < cond.comparison_value - 1e-4,         // <
+        5 => actual_value <= cond.comparison_value + 1e-4,        // <=
         _ => true,
     }
 }

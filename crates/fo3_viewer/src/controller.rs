@@ -2,12 +2,12 @@
 //!
 //! 参照元: Gamebryo 2.6 カメラ制御 & Havok キャラクタ移動
 
-use std::time::Instant;
-use fo3_physics::{RapierCharacterController, RapierPhysicsWorld};
-use fo3_render::OrbitCamera;
 use crate::camera::PlayerCamera;
 use crate::player::PlayerActor;
 use crate::types::CameraMode;
+use fo3_physics::{RapierCharacterController, RapierPhysicsWorld};
+use fo3_render::OrbitCamera;
+use std::time::Instant;
 
 /// 入力と移動状態を保持するコントローラー。
 pub struct Controller {
@@ -113,7 +113,11 @@ impl Controller {
             }
 
             let is_moving = move_dir.length_squared() > 0.001;
-            let normalized_dir = if is_moving { Some(move_dir.normalize()) } else { None };
+            let normalized_dir = if is_moving {
+                Some(move_dir.normalize())
+            } else {
+                None
+            };
 
             // Fallout 3 実機 GMST 移動速度準拠 (Sneak: 90.0, Walk: 130.0, Run: 300.0)
             let move_speed = if self.key_sneak {
@@ -172,7 +176,8 @@ impl Controller {
 
             // プレイヤーカメラの更新 (しゃがみアイレベル補間 & 足元接地面基準 & 壁クリッピング回避適用)
             self.player_camera.update_crouch(self.key_sneak, dt);
-            self.player_camera.update(feet_pos, Some(&self.physics_world));
+            self.player_camera
+                .update(feet_pos, Some(&self.physics_world));
 
             // OrbitCamera へ視点位置・向きを反映 (レンダリング Uniform 生成用)
             self.camera.override_eye = Some(self.player_camera.current_eye);

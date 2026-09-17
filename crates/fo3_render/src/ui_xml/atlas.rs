@@ -43,7 +43,10 @@ impl TextureAtlas {
             // フォーマット:
             // <filename> <atlas filename>, <atlas idx>, <atlas type>, <woffset>, <hoffset>, <depth offset>, <width>, <height>
             // 例: solid.dds InterfaceShared0.dds, 0, 2D, 0.801025, 0.816650, 0.000000, 0.007324, 0.007324
-            let parts: Vec<&str> = trimmed.split('\t').filter(|s| !s.trim().is_empty()).collect();
+            let parts: Vec<&str> = trimmed
+                .split('\t')
+                .filter(|s| !s.trim().is_empty())
+                .collect();
             if parts.len() < 2 {
                 // タブではなく連続空白の場合もフォールバック
                 let tokens: Vec<&str> = trimmed.split_whitespace().collect();
@@ -53,14 +56,23 @@ impl TextureAtlas {
                     let woffset: f32 = tokens[4].trim_end_matches(',').parse().unwrap_or(0.0);
                     let hoffset: f32 = tokens[5].trim_end_matches(',').parse().unwrap_or(0.0);
                     let width: f32 = tokens[7].trim_end_matches(',').parse().unwrap_or(0.0);
-                    let height: f32 = tokens.get(8).map(|s| s.trim_end_matches(',').parse().unwrap_or(0.0)).unwrap_or(0.0);
+                    let height: f32 = tokens
+                        .get(8)
+                        .map(|s| s.trim_end_matches(',').parse().unwrap_or(0.0))
+                        .unwrap_or(0.0);
 
-                    entries.insert(filename, (atlas_file, AtlasSubTexture {
-                        u_min: woffset,
-                        v_min: hoffset,
-                        u_max: woffset + width,
-                        v_max: hoffset + height,
-                    }));
+                    entries.insert(
+                        filename,
+                        (
+                            atlas_file,
+                            AtlasSubTexture {
+                                u_min: woffset,
+                                v_min: hoffset,
+                                u_max: woffset + width,
+                                v_max: hoffset + height,
+                            },
+                        ),
+                    );
                 }
                 continue;
             }
@@ -75,12 +87,18 @@ impl TextureAtlas {
                 let width: f32 = fields[6].parse().unwrap_or(0.0);
                 let height: f32 = fields[7].parse().unwrap_or(0.0);
 
-                entries.insert(filename, (atlas_file, AtlasSubTexture {
-                    u_min: woffset,
-                    v_min: hoffset,
-                    u_max: woffset + width,
-                    v_max: hoffset + height,
-                }));
+                entries.insert(
+                    filename,
+                    (
+                        atlas_file,
+                        AtlasSubTexture {
+                            u_min: woffset,
+                            v_min: hoffset,
+                            u_max: woffset + width,
+                            v_max: hoffset + height,
+                        },
+                    ),
+                );
             }
         }
 
@@ -96,7 +114,9 @@ impl TextureAtlas {
             .and_then(|n| n.to_str())
             .unwrap_or(&clean);
 
-        self.entries.get(base_name).map(|(atlas, uv)| (atlas.as_str(), *uv))
+        self.entries
+            .get(base_name)
+            .map(|(atlas, uv)| (atlas.as_str(), *uv))
     }
 }
 

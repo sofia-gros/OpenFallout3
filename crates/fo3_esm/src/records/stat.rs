@@ -3,10 +3,10 @@
 //! 建物、家具、小道具、岩などワールド上に配置される静的メッシュの定義。
 //! 参照元: `references/openmw/components/esm4/loadstat.hpp`
 
-use std::io;
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{FormId, ObjectBounds, SUB_EDID, SUB_MODB, SUB_MODL, SUB_OBND};
+use std::io;
 
 /// 静的配置可能オブジェクト定義 (STAT)。
 #[derive(Clone, Debug, PartialEq)]

@@ -17,14 +17,14 @@
 //!
 //! 参照元: `references/openmw/components/esm4/loadinfo.cpp`, `Fallout3.esm:DIAL`, `Fallout3.esm:INFO`, `Fallout3.esm:SOUN`
 
+use fo3_esm::{EsmMasterContext, FormId, InfoRecord};
+use fo3_script::conditions::{evaluate_conditions, ConditionContext};
+use fo3_script::ScriptVm;
+use fo3_vfs::VfsManager;
+use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::sync::Arc;
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
-use fo3_vfs::VfsManager;
-use fo3_script::ScriptVm;
-use fo3_esm::{EsmMasterContext, FormId, InfoRecord};
-use fo3_script::conditions::{evaluate_conditions, ConditionContext};
 
 /// 現在表示中の字幕情報 (実機 `INFO` レコード由来)。
 #[derive(Clone, Debug)]
@@ -85,7 +85,12 @@ impl SoundEngine {
     }
 
     /// 相対パスに基づいて音声 (WAV / OGG) を非同期再生する。
-    pub fn play_sound_file(&mut self, rel_path: &str, vfs: &mut VfsManager, is_voice: bool) -> Option<(Option<f32>, Arc<Sink>)> {
+    pub fn play_sound_file(
+        &mut self,
+        rel_path: &str,
+        vfs: &mut VfsManager,
+        is_voice: bool,
+    ) -> Option<(Option<f32>, Arc<Sink>)> {
         let handle = match self.stream_handle.as_ref() {
             Some(h) => h,
             None => return None,
@@ -102,10 +107,7 @@ impl SoundEngine {
                     Ok(b) => (b, fallback),
                     Err(_) => {
                         // ディレクトリパスや部分プレフィックスから音声ファイルを探索
-                        let candidates = [
-                            fallback.clone(),
-                            normalized.clone(),
-                        ];
+                        let candidates = [fallback.clone(), normalized.clone()];
                         let mut found = None;
                         for cand in &candidates {
                             if let Some(matched) = vfs.find_path_by_prefix(cand) {
@@ -118,7 +120,10 @@ impl SoundEngine {
                         match found {
                             Some(res) => res,
                             None => {
-                                println!("[SoundEngine] 音声ファイルが見つかりません: \"{}\"", rel_path);
+                                println!(
+                                    "[SoundEngine] 音声ファイルが見つかりません: \"{}\"",
+                                    rel_path
+                                );
                                 return None;
                             }
                         }
@@ -127,7 +132,12 @@ impl SoundEngine {
             }
         };
 
-        println!("[SoundEngine] 音声データ再生開始: \"{}\" ({} bytes, is_voice={})", resolved_path, bytes.len(), is_voice);
+        println!(
+            "[SoundEngine] 音声データ再生開始: \"{}\" ({} bytes, is_voice={})",
+            resolved_path,
+            bytes.len(),
+            is_voice
+        );
         let cursor = Cursor::new(bytes);
         match Decoder::new(cursor) {
             Ok(source) => {
@@ -173,7 +183,10 @@ impl SoundEngine {
             let is_voice_finished = sink_opt.as_ref().map(|s| s.empty()).unwrap_or(false);
 
             if sub.remaining <= 0.0 || is_voice_finished {
-                println!("[SoundEngine] Subtitle finished: FormID=0x{:08X}", sub.form_id.0);
+                println!(
+                    "[SoundEngine] Subtitle finished: FormID=0x{:08X}",
+                    sub.form_id.0
+                );
                 if let Some(script_src) = sub.on_complete_script.take() {
                     println!("[SoundEngine] Running ResultScript:\n{}", script_src);
                     let _ = vm.execute_result_script(&script_src, None);
@@ -191,7 +204,9 @@ impl SoundEngine {
         for sound_id in sound_requests {
             let clean = sound_id.trim();
             // a) EDID から SOUN を逆引き
-            let soun_opt = master.soun_edid_map.get(&clean.to_ascii_uppercase())
+            let soun_opt = master
+                .soun_edid_map
+                .get(&clean.to_ascii_uppercase())
                 .and_then(|id| master.soun_map.get(id))
                 .or_else(|| {
                     // FormID からの直接逆引き
@@ -204,7 +219,10 @@ impl SoundEngine {
                 });
 
             if let Some(soun) = soun_opt {
-                println!("[SoundEngine] PlaySound: EDID=\"{}\" -> File=\"{}\"", soun.edid, soun.sound_file);
+                println!(
+                    "[SoundEngine] PlaySound: EDID=\"{}\" -> File=\"{}\"",
+                    soun.edid, soun.sound_file
+                );
                 let _ = self.play_sound_file(&soun.sound_file, vfs, false);
             } else {
                 // 直接ファイルパス指定の場合
@@ -237,25 +255,13 @@ impl SoundEngine {
             };
 
             // 適合する INFO レコードを検索 (未読のものを優先し、Say Once は完全除外)
-            let matched_info: Option<&InfoRecord> = infos.iter().find(|info| {
-                let is_say_once = (info.flags & 0x0004) != 0;
-                if is_say_once && self.spoken_infos.contains(&info.form_id) {
-                    return false;
-                }
-                if self.spoken_infos.contains(&info.form_id) {
-                    return false;
-                }
-                if info.conditions.is_empty() {
-                    true
-                } else {
-                    evaluate_conditions(&info.conditions, &cond_ctx)
-                }
-            }).or_else(|| {
-                // 未読がない場合、Say Once でない候補から再探索
-                // ただし既読 INFO (spoken_infos) は厳格に除外する:
-                // doTalk はラッチ保持されるため、未読行が尽きたトピックで同じ行を
-                // 再選択し続ける無限ループを防ぎ、下位の doTalk フラグ解除処理へ到達させる。
-                infos.iter().find(|info| {
+            let matched_info: Option<&InfoRecord> = infos
+                .iter()
+                .find(|info| {
+                    let is_say_once = (info.flags & 0x0004) != 0;
+                    if is_say_once && self.spoken_infos.contains(&info.form_id) {
+                        return false;
+                    }
                     if self.spoken_infos.contains(&info.form_id) {
                         return false;
                     }
@@ -265,17 +271,35 @@ impl SoundEngine {
                         evaluate_conditions(&info.conditions, &cond_ctx)
                     }
                 })
-            });
+                .or_else(|| {
+                    // 未読がない場合、Say Once でない候補から再探索
+                    // ただし既読 INFO (spoken_infos) は厳格に除外する:
+                    // doTalk はラッチ保持されるため、未読行が尽きたトピックで同じ行を
+                    // 再選択し続ける無限ループを防ぎ、下位の doTalk フラグ解除処理へ到達させる。
+                    infos.iter().find(|info| {
+                        if self.spoken_infos.contains(&info.form_id) {
+                            return false;
+                        }
+                        if info.conditions.is_empty() {
+                            true
+                        } else {
+                            evaluate_conditions(&info.conditions, &cond_ctx)
+                        }
+                    })
+                });
 
             if let Some(info) = matched_info {
                 self.spoken_infos.insert(info.form_id);
 
                 // 話者名の特定 (NPC レコードの FULL 名、または EDID)
-                let speaker_name = speaker_id.and_then(|id| {
-                    master.npc_map.get(&id).map(|npc| {
-                        npc.full_name.clone().unwrap_or_else(|| npc.edid.clone())
+                let speaker_name = speaker_id
+                    .and_then(|id| {
+                        master
+                            .npc_map
+                            .get(&id)
+                            .map(|npc| npc.full_name.clone().unwrap_or_else(|| npc.edid.clone()))
                     })
-                }).unwrap_or_else(|| "NPC".to_string());
+                    .unwrap_or_else(|| "NPC".to_string());
 
                 let subtitle_text = info.response_text.clone();
                 println!(
@@ -300,19 +324,31 @@ impl SoundEngine {
                 } else {
                     // Fallback to text length
                     duration = (subtitle_text.chars().count() as f32 * 0.15).max(3.0);
-                    println!("[SoundEngine] Voice file missing (suffix={}): duration={:.1}s", suffix, duration);
+                    println!(
+                        "[SoundEngine] Voice file missing (suffix={}): duration={:.1}s",
+                        suffix, duration
+                    );
                 }
 
                 // Register Subtitle
-                self.active_subtitles.insert(speaker_id.unwrap_or(FormId(0)), (Subtitle {
-                    form_id: info.form_id,
-                    speaker: speaker_name,
-                    text: subtitle_text,
-                    remaining: duration,
-                    on_complete_script: info.result_script_source.clone(),
-                }, sink_opt));
+                self.active_subtitles.insert(
+                    speaker_id.unwrap_or(FormId(0)),
+                    (
+                        Subtitle {
+                            form_id: info.form_id,
+                            speaker: speaker_name,
+                            text: subtitle_text,
+                            remaining: duration,
+                            on_complete_script: info.result_script_source.clone(),
+                        },
+                        sink_opt,
+                    ),
+                );
             } else {
-                println!("[SoundEngine] トピック \"{}\" に適合する INFO 条件が見つかりませんでした", dial.edid);
+                println!(
+                    "[SoundEngine] トピック \"{}\" に適合する INFO 条件が見つかりませんでした",
+                    dial.edid
+                );
                 // これ以上話す台詞がないため、該当アクターの doTalk フラグをクリア
                 let edid_lower = dial.edid.to_ascii_lowercase();
                 if edid_lower.contains("dad") {
@@ -326,9 +362,3 @@ impl SoundEngine {
         }
     }
 }
-
-
-
-
-
-

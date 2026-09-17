@@ -4,8 +4,8 @@
 //! マテリアル・アルファプロパティ継承、および描画メッシュ (`RenderMesh`) の生成を行う。
 //! 参照元: Gamebryo 2.6 `NiAVObject::UpdateDownwardPass`, `NiNode::AttachChild`
 
-use std::collections::HashMap;
 use glam::Mat4;
+use std::collections::HashMap;
 
 use fo3_gamebryo_core::NiTransform;
 use fo3_nif::{NifBlock, NifFile};
@@ -18,12 +18,12 @@ use crate::texture::GpuTexture;
 
 use crate::scene::actor::{AnimatedRigidMesh, AnimatedSkinMesh};
 use crate::scene::bones::{
-    collect_shape_transforms, compute_rigid_part_local_transform,
-    resolve_bone_world_transforms, resolve_bone_world_transforms_by_name,
+    collect_shape_transforms, compute_rigid_part_local_transform, resolve_bone_world_transforms,
+    resolve_bone_world_transforms_by_name,
 };
 use crate::scene::mesh::{
-    create_render_mesh, create_render_mesh_with_override, find_alpha_property, find_material_property,
-    has_vertex_colors_enabled, to_core_transform, RenderMesh,
+    create_render_mesh, create_render_mesh_with_override, find_alpha_property,
+    find_material_property, has_vertex_colors_enabled, to_core_transform, RenderMesh,
 };
 
 /// アクターパーツのメッシュ走査時に、生成された RenderMesh と
@@ -119,10 +119,15 @@ pub fn traverse_block(
             // 参照元: Gamebryo 2.6 NiAVObject::UpdateDownwardPass
             bone_world_map.insert(block_index, world_transform.to_mat4());
             let current_alpha = find_alpha_property(&node.av.properties, nif).or(parent_alpha);
-            let current_material = find_material_property(&node.av.properties, nif).or(parent_material);
+            let current_material =
+                find_material_property(&node.av.properties, nif).or(parent_material);
             let node_name = nif.get_string(node.av.net.name_index as u32).unwrap_or("");
-            let current_bone_name = if !node_name.is_empty() { Some(node_name) } else { parent_bone_name };
-            
+            let current_bone_name = if !node_name.is_empty() {
+                Some(node_name)
+            } else {
+                parent_bone_name
+            };
+
             for &child in &node.children {
                 traverse_block(
                     child,
@@ -155,9 +160,16 @@ pub fn traverse_block(
             // BSFadeNode もボーン階層に含まれる場合があるため蓄積
             bone_world_map.insert(block_index, world_transform.to_mat4());
             let current_alpha = find_alpha_property(&fade.node.av.properties, nif).or(parent_alpha);
-            let current_material = find_material_property(&fade.node.av.properties, nif).or(parent_material);
-            let node_name = nif.get_string(fade.node.av.net.name_index as u32).unwrap_or("");
-            let current_bone_name = if !node_name.is_empty() { Some(node_name) } else { parent_bone_name };
+            let current_material =
+                find_material_property(&fade.node.av.properties, nif).or(parent_material);
+            let node_name = nif
+                .get_string(fade.node.av.net.name_index as u32)
+                .unwrap_or("");
+            let current_bone_name = if !node_name.is_empty() {
+                Some(node_name)
+            } else {
+                parent_bone_name
+            };
 
             for &child in &fade.node.children {
                 traverse_block(
@@ -191,7 +203,10 @@ pub fn traverse_block(
             if is_dismember_hidden(shape.geom.skin_instance, nif) {
                 return;
             }
-            let name = nif.get_string(shape.geom.av.net.name_index).unwrap_or("").to_string();
+            let name = nif
+                .get_string(shape.geom.av.net.name_index)
+                .unwrap_or("")
+                .to_string();
 
             // 髪の毛パーツにおける帽子 (Hat) / 通常頭髪 (NoHat) の選択的カリング
             // 参照元: Fallout 3 髪 NIF 仕様 (hairbun.nif 等), knowledge/actor_and_skin_mesh.md
@@ -205,7 +220,9 @@ pub fn traverse_block(
                         }
                     } else {
                         // 帽子未着用時は hat を非表示にし、完全な nohat のみを表示
-                        if name_lower == "hat" || (name_lower.contains("hat") && !name_lower.contains("nohat")) {
+                        if name_lower == "hat"
+                            || (name_lower.contains("hat") && !name_lower.contains("nohat"))
+                        {
                             return;
                         }
                     }
@@ -226,14 +243,22 @@ pub fn traverse_block(
                         if inst_idx < nif.blocks.len() {
                             let skin_inst_ref = match &nif.blocks[inst_idx] {
                                 NifBlock::NiSkinInstance(ref inst) => Some(inst),
-                                NifBlock::BSDismemberSkinInstance(ref bdsi) => Some(&bdsi.skin_instance),
+                                NifBlock::BSDismemberSkinInstance(ref bdsi) => {
+                                    Some(&bdsi.skin_instance)
+                                }
                                 _ => None,
                             };
                             if let Some(inst) = skin_inst_ref {
                                 processed_skin = true;
                                 // スケルトンボーン名マップが指定されていれば優先引き当て、なければローカル block_index で解決
-                                let bone_transforms = if let Some(name_map) = skeleton_bone_name_map {
-                                    resolve_bone_world_transforms_by_name(inst, nif, name_map, Some(bone_world_map))
+                                let bone_transforms = if let Some(name_map) = skeleton_bone_name_map
+                                {
+                                    resolve_bone_world_transforms_by_name(
+                                        inst,
+                                        nif,
+                                        name_map,
+                                        Some(bone_world_map),
+                                    )
                                 } else {
                                     resolve_bone_world_transforms(inst, bone_world_map)
                                 };
@@ -289,24 +314,22 @@ pub fn traverse_block(
                                     && skin_data_block >= 0
                                     && (skin_data_block as usize) < nif.blocks.len()
                                 {
-                                    if let (NifBlock::NiSkinPartition(ref sp), NifBlock::NiSkinData(ref sd)) = (
+                                    if let (
+                                        NifBlock::NiSkinPartition(ref sp),
+                                        NifBlock::NiSkinData(ref sd),
+                                    ) = (
                                         &nif.blocks[skin_part_block as usize],
                                         &nif.blocks[skin_data_block as usize],
                                     ) {
                                         let mut meshes = Vec::new();
                                         for partition in &sp.partitions {
-                                            if let Some(mesh) = crate::gpu_skin::create_gpu_skin_mesh_from_partition(
-                                                device,
-                                                eval_data,
-                                                partition,
-                                            ) {
+                                            if let Some(mesh) =
+                                                crate::gpu_skin::create_gpu_skin_mesh_from_partition(
+                                                    device, eval_data, partition,
+                                                )
+                                            {
                                                 let bp = crate::gpu_skin::GpuBonePalette::new(
-                                                    device,
-                                                    context,
-                                                    partition,
-                                                    inst,
-                                                    sd,
-                                                    nif,
+                                                    device, context, partition, inst, sd, nif,
                                                 );
                                                 if let Some(name_map) = skeleton_bone_name_map {
                                                     bp.update(queue, name_map);
@@ -328,21 +351,39 @@ pub fn traverse_block(
                                     None
                                 };
 
-                                let mesh_list: Vec<(Option<GpuMesh>, Option<crate::gpu_skin::GpuBonePalette>)> = if let Some(gpu_skins) = gpu_skin_list {
+                                let mesh_list: Vec<(
+                                    Option<GpuMesh>,
+                                    Option<crate::gpu_skin::GpuBonePalette>,
+                                )> = if let Some(gpu_skins) = gpu_skin_list {
                                     gpu_skins.into_iter().map(|(m, bp)| (Some(m), bp)).collect()
-                                } else if let Some((pos, nrm)) = apply_skinning_cpu_with_bones(eval_data, inst, nif, bone_refs) {
-                                    vec![(GpuMesh::from_tri_shape_skinned(device, eval_data, &pos, &nrm), None)]
+                                } else if let Some((pos, nrm)) =
+                                    apply_skinning_cpu_with_bones(eval_data, inst, nif, bone_refs)
+                                {
+                                    vec![(
+                                        GpuMesh::from_tri_shape_skinned(
+                                            device, eval_data, &pos, &nrm,
+                                        ),
+                                        None,
+                                    )]
                                 } else {
-                                    let use_vc = has_vertex_colors_enabled(&shape.geom.av.properties, nif);
-                                    vec![(GpuMesh::from_tri_shape_with_vc(device, eval_data, use_vc), None)]
+                                    let use_vc =
+                                        has_vertex_colors_enabled(&shape.geom.av.properties, nif);
+                                    vec![(
+                                        GpuMesh::from_tri_shape_with_vc(device, eval_data, use_vc),
+                                        None,
+                                    )]
                                 };
 
                                 for (gpu_mesh, bone_palette) in mesh_list {
                                     if let Some(gpu_mesh) = gpu_mesh {
-                                        let tint = anim_collector.as_ref().and_then(|c| c.tint_color);
-                                        let is_head_shape = name.to_ascii_lowercase().contains("head");
+                                        let tint =
+                                            anim_collector.as_ref().and_then(|c| c.tint_color);
+                                        let is_head_shape =
+                                            name.to_ascii_lowercase().contains("head");
                                         let override_tex = if is_head_shape {
-                                            anim_collector.as_ref().and_then(|c| c.head_diffuse_override)
+                                            anim_collector
+                                                .as_ref()
+                                                .and_then(|c| c.head_diffuse_override)
                                         } else {
                                             None
                                         };
@@ -379,12 +420,13 @@ pub fn traverse_block(
                                                     skin_instance_block: shape.geom.skin_instance,
                                                 });
                                             } else if let Some(bone_name) = collector.attach_bone {
-                                                let local_transform = compute_rigid_part_local_transform(
-                                                    block_index as usize,
-                                                    bone_name,
-                                                    &collector.shape_transforms,
-                                                    &shape.geom.av,
-                                                );
+                                                let local_transform =
+                                                    compute_rigid_part_local_transform(
+                                                        block_index as usize,
+                                                        bone_name,
+                                                        &collector.shape_transforms,
+                                                        &shape.geom.av,
+                                                    );
                                                 collector.anim_rigids.push(AnimatedRigidMesh {
                                                     mesh_index,
                                                     bone_name: bone_name.to_string(),
@@ -400,7 +442,9 @@ pub fn traverse_block(
 
                     if !processed_skin {
                         let use_vc = has_vertex_colors_enabled(&shape.geom.av.properties, nif);
-                        if let Some(gpu_mesh) = GpuMesh::from_tri_shape_with_vc(device, data, use_vc) {
+                        if let Some(gpu_mesh) =
+                            GpuMesh::from_tri_shape_with_vc(device, data, use_vc)
+                        {
                             let tint = anim_collector.as_ref().and_then(|c| c.tint_color);
                             let render_mesh = create_render_mesh_with_override(
                                 device,
@@ -426,7 +470,8 @@ pub fn traverse_block(
                             // 剛体パーツ (目・歯・舌・髪) のダイレクト登録
                             if let Some(ref mut collector) = anim_collector {
                                 let mesh_index = out_meshes.len() - 1;
-                                if let Some(bone_name) = collector.attach_bone.or(parent_bone_name) {
+                                if let Some(bone_name) = collector.attach_bone.or(parent_bone_name)
+                                {
                                     let local_transform = compute_rigid_part_local_transform(
                                         block_index as usize,
                                         bone_name,
@@ -452,7 +497,10 @@ pub fn traverse_block(
             }
             let local_transform = to_core_transform(&strips.geom.av);
             let world_transform = parent_world.compose(&local_transform);
-            let name = nif.get_string(strips.geom.av.net.name_index).unwrap_or("").to_string();
+            let name = nif
+                .get_string(strips.geom.av.net.name_index)
+                .unwrap_or("")
+                .to_string();
 
             if strips.geom.data >= 0 && (strips.geom.data as usize) < nif.blocks.len() {
                 if let NifBlock::NiTriStripsData(ref data) = nif.blocks[strips.geom.data as usize] {

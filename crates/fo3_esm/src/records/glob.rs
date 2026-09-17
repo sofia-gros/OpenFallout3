@@ -3,11 +3,11 @@
 //! 参照元:
 //! - `references/openmw/components/esm4/loadglob.hpp`, `loadglob.cpp`
 
-use std::io::{self, Cursor};
-use byteorder::{LittleEndian, ReadBytesExt};
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{FormId, REC_GLOB};
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Cursor};
 
 /// グローバル変数 (`GLOB`) レコード。
 #[derive(Clone, Debug, PartialEq)]
@@ -82,9 +82,18 @@ mod tests {
         };
 
         let subrecords = vec![
-            Subrecord { type_id: crate::types::FourCC(*b"EDID"), data: b"GameHour\0".to_vec() },
-            Subrecord { type_id: crate::types::FourCC(*b"FNAM"), data: vec![b'f'] },
-            Subrecord { type_id: crate::types::FourCC(*b"FLTV"), data: 8.5f32.to_le_bytes().to_vec() },
+            Subrecord {
+                type_id: crate::types::FourCC(*b"EDID"),
+                data: b"GameHour\0".to_vec(),
+            },
+            Subrecord {
+                type_id: crate::types::FourCC(*b"FNAM"),
+                data: vec![b'f'],
+            },
+            Subrecord {
+                type_id: crate::types::FourCC(*b"FLTV"),
+                data: 8.5f32.to_le_bytes().to_vec(),
+            },
         ];
 
         let glob = GlobRecord::parse(&record_header, &subrecords).expect("Failed to parse GLOB");

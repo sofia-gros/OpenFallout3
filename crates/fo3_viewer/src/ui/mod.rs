@@ -44,7 +44,11 @@ impl ViewerMode {
     }
 
     /// スクリプト VM と連携して UI 入力を処理する。
-    pub fn handle_key_with_vm(&mut self, key: winit::keyboard::KeyCode, vm: &mut fo3_script::ScriptVm) -> bool {
+    pub fn handle_key_with_vm(
+        &mut self,
+        key: winit::keyboard::KeyCode,
+        vm: &mut fo3_script::ScriptVm,
+    ) -> bool {
         match self {
             ViewerMode::Exploring => false,
             ViewerMode::Dialog(ref mut state) => {
@@ -107,7 +111,13 @@ impl ViewerMode {
     }
 
     /// 現在のアクティブな UI (会話またはターミナル) を描画バッチへ記録。
-    pub fn populate_batch(&self, batch: &mut fo3_render::TextBatch, font: &fo3_render::BitmapFont, width: f32, height: f32) {
+    pub fn populate_batch(
+        &self,
+        batch: &mut fo3_render::TextBatch,
+        font: &fo3_render::BitmapFont,
+        width: f32,
+        height: f32,
+    ) {
         match self {
             ViewerMode::Exploring => {}
             ViewerMode::Dialog(ref state) => {

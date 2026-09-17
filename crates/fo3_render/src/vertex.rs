@@ -54,19 +54,26 @@ impl Vertex {
                 },
                 // location 3: color
                 wgpu::VertexAttribute {
-                    offset: (mem::size_of::<[f32; 3]>() * 2 + mem::size_of::<[f32; 2]>()) as wgpu::BufferAddress,
+                    offset: (mem::size_of::<[f32; 3]>() * 2 + mem::size_of::<[f32; 2]>())
+                        as wgpu::BufferAddress,
                     shader_location: 3,
                     format: wgpu::VertexFormat::Float32x4,
                 },
                 // location 4: tangent
                 wgpu::VertexAttribute {
-                    offset: (mem::size_of::<[f32; 3]>() * 2 + mem::size_of::<[f32; 2]>() + mem::size_of::<[f32; 4]>()) as wgpu::BufferAddress,
+                    offset: (mem::size_of::<[f32; 3]>() * 2
+                        + mem::size_of::<[f32; 2]>()
+                        + mem::size_of::<[f32; 4]>())
+                        as wgpu::BufferAddress,
                     shader_location: 4,
                     format: wgpu::VertexFormat::Float32x3,
                 },
                 // location 5: bitangent
                 wgpu::VertexAttribute {
-                    offset: (mem::size_of::<[f32; 3]>() * 3 + mem::size_of::<[f32; 2]>() + mem::size_of::<[f32; 4]>()) as wgpu::BufferAddress,
+                    offset: (mem::size_of::<[f32; 3]>() * 3
+                        + mem::size_of::<[f32; 2]>()
+                        + mem::size_of::<[f32; 4]>())
+                        as wgpu::BufferAddress,
                     shader_location: 5,
                     format: wgpu::VertexFormat::Float32x3,
                 },
@@ -128,31 +135,45 @@ impl SkinnedVertex {
                 },
                 // location 3: color
                 wgpu::VertexAttribute {
-                    offset: (mem::size_of::<[f32; 3]>() * 2 + mem::size_of::<[f32; 2]>()) as wgpu::BufferAddress,
+                    offset: (mem::size_of::<[f32; 3]>() * 2 + mem::size_of::<[f32; 2]>())
+                        as wgpu::BufferAddress,
                     shader_location: 3,
                     format: wgpu::VertexFormat::Float32x4,
                 },
                 // location 4: tangent
                 wgpu::VertexAttribute {
-                    offset: (mem::size_of::<[f32; 3]>() * 2 + mem::size_of::<[f32; 2]>() + mem::size_of::<[f32; 4]>()) as wgpu::BufferAddress,
+                    offset: (mem::size_of::<[f32; 3]>() * 2
+                        + mem::size_of::<[f32; 2]>()
+                        + mem::size_of::<[f32; 4]>())
+                        as wgpu::BufferAddress,
                     shader_location: 4,
                     format: wgpu::VertexFormat::Float32x3,
                 },
                 // location 5: bitangent
                 wgpu::VertexAttribute {
-                    offset: (mem::size_of::<[f32; 3]>() * 3 + mem::size_of::<[f32; 2]>() + mem::size_of::<[f32; 4]>()) as wgpu::BufferAddress,
+                    offset: (mem::size_of::<[f32; 3]>() * 3
+                        + mem::size_of::<[f32; 2]>()
+                        + mem::size_of::<[f32; 4]>())
+                        as wgpu::BufferAddress,
                     shader_location: 5,
                     format: wgpu::VertexFormat::Float32x3,
                 },
                 // location 6: bone_indices
                 wgpu::VertexAttribute {
-                    offset: (mem::size_of::<[f32; 3]>() * 4 + mem::size_of::<[f32; 2]>() + mem::size_of::<[f32; 4]>()) as wgpu::BufferAddress,
+                    offset: (mem::size_of::<[f32; 3]>() * 4
+                        + mem::size_of::<[f32; 2]>()
+                        + mem::size_of::<[f32; 4]>())
+                        as wgpu::BufferAddress,
                     shader_location: 6,
                     format: wgpu::VertexFormat::Uint32x4,
                 },
                 // location 7: bone_weights
                 wgpu::VertexAttribute {
-                    offset: (mem::size_of::<[f32; 3]>() * 4 + mem::size_of::<[f32; 2]>() + mem::size_of::<[f32; 4]>() + mem::size_of::<[u32; 4]>()) as wgpu::BufferAddress,
+                    offset: (mem::size_of::<[f32; 3]>() * 4
+                        + mem::size_of::<[f32; 2]>()
+                        + mem::size_of::<[f32; 4]>()
+                        + mem::size_of::<[u32; 4]>())
+                        as wgpu::BufferAddress,
                     shader_location: 7,
                     format: wgpu::VertexFormat::Float32x4,
                 },
@@ -179,4 +200,3 @@ impl Default for BonePaletteUniform {
         }
     }
 }
-

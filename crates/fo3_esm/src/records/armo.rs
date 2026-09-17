@@ -3,10 +3,10 @@
 //! NPC やプレイヤーが装備する防具・服・ボディパーツの定義。
 //! 参照元: `references/openmw/components/esm4/loadarmo.hpp`, `loadarmo.cpp`
 
-use std::io;
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{FormId, FourCC, ObjectBounds, SUB_EDID, SUB_FULL, SUB_MODL, SUB_OBND};
+use std::io;
 
 pub const SUB_MOD2: FourCC = FourCC(*b"MOD2");
 pub const SUB_MOD3: FourCC = FourCC(*b"MOD3");
@@ -142,7 +142,9 @@ impl ArmorRecord {
     /// 頭部装備（帽子・ヘルメット・眼鏡・マスク等）であるか判定する。
     pub fn is_head(&self) -> bool {
         use armor_flags::*;
-        (self.armor_flags & (FO3_HEAD | FO3_HAIR | FO3_HAT | FO3_HEADBAND | FO3_EYE_GLASSES | FO3_MASK)) != 0
+        (self.armor_flags
+            & (FO3_HEAD | FO3_HAIR | FO3_HAT | FO3_HEADBAND | FO3_EYE_GLASSES | FO3_MASK))
+            != 0
     }
 
     /// 胴体衣装（服・アーマー）であるか判定する。

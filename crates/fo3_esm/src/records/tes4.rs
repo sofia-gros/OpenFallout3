@@ -3,10 +3,10 @@
 //! ESM / ESP ファイルの先頭に必ず存在するメタデータレコード。
 //! 参照元: `references/openmw/components/esm4/loadtes4.hpp`
 
-use std::io::{self, Cursor};
-use byteorder::{LittleEndian, ReadBytesExt};
 use crate::subrecord::Subrecord;
 use crate::types::{SUB_CNAM, SUB_HEDR, SUB_MAST, SUB_SNAM};
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Cursor};
 
 /// TES4 ファイルヘッダー情報。
 #[derive(Clone, Debug, PartialEq)]

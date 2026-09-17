@@ -8,10 +8,10 @@
 //! - Fallout 3 実機 GMST: `f1stPersonCameraHeight` (124.0), `fChaseCameraMax` (400.0),
 //!   `fVanityModeMinDist` (70.0), `fVanityModeMaxDist` (300.0), `fOverShoulderPosX` (30.0)
 
-use std::f32::consts::{FRAC_PI_2, PI};
-use glam::{Mat4, Vec3};
 use fo3_physics::RapierPhysicsWorld;
 use fo3_render::CameraUniform;
+use glam::{Mat4, Vec3};
+use std::f32::consts::{FRAC_PI_2, PI};
 
 /// 一人称時のプレイヤー目線高さ (Gamebryo 2.6 GMST: f1stPersonCameraHeight)
 pub const F_1ST_PERSON_CAMERA_HEIGHT: f32 = 124.0;
@@ -157,7 +157,9 @@ impl PlayerCamera {
             }
             CameraViewMode::Vanity => {
                 self.distance -= delta * 15.0;
-                self.distance = self.distance.clamp(F_VANITY_MODE_MIN_DIST, F_VANITY_MODE_MAX_DIST);
+                self.distance = self
+                    .distance
+                    .clamp(F_VANITY_MODE_MIN_DIST, F_VANITY_MODE_MAX_DIST);
             }
         }
     }
@@ -204,11 +206,7 @@ impl PlayerCamera {
     /// 物理ワールドを参照し、壁クリッピング（壁オクルージョン回避）を行った後の
     /// 最終カメラ位置およびターゲット位置を計算・更新する。
     /// 引数 `feet_pos` はアクターの足元接地面座標。
-    pub fn update(
-        &mut self,
-        feet_pos: Vec3,
-        physics_world: Option<&RapierPhysicsWorld>,
-    ) {
+    pub fn update(&mut self, feet_pos: Vec3, physics_world: Option<&RapierPhysicsWorld>) {
         let focal = self.focal_point(feet_pos);
 
         match self.mode {
@@ -221,7 +219,8 @@ impl PlayerCamera {
                 let right = self.right_vector();
 
                 // 肩越しオフセット (右肩方向 + Zオフセット)
-                let shoulder_offset = right * F_OVER_SHOULDER_POS_X + Vec3::Z * F_OVER_SHOULDER_POS_Z;
+                let shoulder_offset =
+                    right * F_OVER_SHOULDER_POS_X + Vec3::Z * F_OVER_SHOULDER_POS_Z;
                 let origin = focal + shoulder_offset;
 
                 // 理想のカメラ位置 (後方へ distance 離れた位置)
@@ -235,7 +234,8 @@ impl PlayerCamera {
                     if let Some(hit) = physics.cast_ray(origin, dir, max_toi) {
                         // 壁に衝突した場合、衝突点の手前（CAMERA_CLIP_MARGIN）に制限。
                         // ただしプレイヤーの身体内部へめり込まないよう最小距離ガードを適用。
-                        let clipped_dist = (hit.distance - CAMERA_CLIP_MARGIN).max(F_CAMERA_MIN_THIRD_PERSON_DIST);
+                        let clipped_dist =
+                            (hit.distance - CAMERA_CLIP_MARGIN).max(F_CAMERA_MIN_THIRD_PERSON_DIST);
                         actual_dist = actual_dist.min(clipped_dist);
                     }
                 }
@@ -251,7 +251,8 @@ impl PlayerCamera {
                     let dir = (ideal_eye - focal).normalize();
                     let max_toi = self.distance;
                     if let Some(hit) = physics.cast_ray(focal, dir, max_toi) {
-                        let clipped_dist = (hit.distance - CAMERA_CLIP_MARGIN).max(F_CAMERA_MIN_THIRD_PERSON_DIST);
+                        let clipped_dist =
+                            (hit.distance - CAMERA_CLIP_MARGIN).max(F_CAMERA_MIN_THIRD_PERSON_DIST);
                         actual_dist = actual_dist.min(clipped_dist);
                     }
                 }
@@ -272,13 +273,12 @@ impl PlayerCamera {
             CameraViewMode::ThirdPerson => {
                 let forward = self.forward_vector();
                 let right = self.right_vector();
-                let shoulder_offset = right * F_OVER_SHOULDER_POS_X + Vec3::Z * F_OVER_SHOULDER_POS_Z;
+                let shoulder_offset =
+                    right * F_OVER_SHOULDER_POS_X + Vec3::Z * F_OVER_SHOULDER_POS_Z;
                 let target = focal + shoulder_offset + forward * 1000.0;
                 Mat4::look_at_rh(self.current_eye, target, Vec3::Z)
             }
-            CameraViewMode::Vanity => {
-                Mat4::look_at_rh(self.current_eye, focal, Vec3::Z)
-            }
+            CameraViewMode::Vanity => Mat4::look_at_rh(self.current_eye, focal, Vec3::Z),
         }
     }
 
@@ -297,7 +297,12 @@ impl PlayerCamera {
         let vp = self.view_proj_matrix(player_pos);
         CameraUniform {
             view_proj: vp.to_cols_array(),
-            camera_pos: [self.current_eye.x, self.current_eye.y, self.current_eye.z, 1.0],
+            camera_pos: [
+                self.current_eye.x,
+                self.current_eye.y,
+                self.current_eye.z,
+                1.0,
+            ],
         }
     }
 }
@@ -314,7 +319,10 @@ mod tests {
         cam.update(player_pos, None);
 
         // 一人称のカメラ位置は player_pos.z + F_1ST_PERSON_CAMERA_HEIGHT
-        assert_eq!(cam.current_eye, Vec3::new(100.0, 200.0, 50.0 + F_1ST_PERSON_CAMERA_HEIGHT));
+        assert_eq!(
+            cam.current_eye,
+            Vec3::new(100.0, 200.0, 50.0 + F_1ST_PERSON_CAMERA_HEIGHT)
+        );
 
         // 初期 yaw = -PI/2, pitch = 0 -> 前方ベクトルは -Y 方向
         let fwd = cam.forward_vector();
@@ -340,7 +348,11 @@ mod tests {
 
         cam.update(player_pos, None);
         // 三人称のカメラ位置は後方に離れていること
-        assert!(cam.current_eye.distance(Vec3::new(0.0, 0.0, F_1ST_PERSON_CAMERA_HEIGHT)) > 100.0);
+        assert!(
+            cam.current_eye
+                .distance(Vec3::new(0.0, 0.0, F_1ST_PERSON_CAMERA_HEIGHT))
+                > 100.0
+        );
 
         // ズームインして最小距離を下回ると一人称へ切り替わること
         cam.zoom(10.0); // 150 - 150 = 0 -> 最小距離下回り
@@ -392,6 +404,10 @@ mod tests {
         // 理想距離は 200.0 だが、Y=80.0 に壁があるため、カメラは壁手前に制限されていること
         let focal = cam.focal_point(player_pos);
         let actual_dist = cam.current_eye.distance(focal);
-        assert!(actual_dist < 100.0, "壁に遮蔽されてカメラ距離が短縮されていること: actual_dist={}", actual_dist);
+        assert!(
+            actual_dist < 100.0,
+            "壁に遮蔽されてカメラ距離が短縮されていること: actual_dist={}",
+            actual_dist
+        );
     }
 }

@@ -4,10 +4,10 @@
 //!
 //! 参照元: `references/nifxml/nif.xml`, GECK `Message` 仕様, Fallout 3 `Fallout3.esm:MESG`
 
-use std::io;
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{FormId, REC_MESG};
+use std::io;
 
 /// メッセージレコード (`MESG`)。
 #[derive(Clone, Debug, PartialEq)]

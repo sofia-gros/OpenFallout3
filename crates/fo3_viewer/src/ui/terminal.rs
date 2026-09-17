@@ -15,10 +15,7 @@ pub enum TerminalScreen {
     /// メインメニューまたはサブメニュー一覧
     Menu,
     /// ログまたは記事の本文閲覧画面
-    TextView {
-        title: String,
-        body: String,
-    },
+    TextView { title: String, body: String },
 }
 
 /// ターミナル画面の実行状態。
@@ -46,14 +43,16 @@ impl TerminalState {
             .full_name
             .clone()
             .unwrap_or_else(|| "ROBCO INDUSTRIES UNIFIED OPERATING SYSTEM".to_string());
-        let welcome_text = record
-            .description
-            .clone()
-            .unwrap_or_else(|| "ROBCO INDUSTRIES (TM) TERMLINK PROTOCOL\nENTER PASSWORD NOW".to_string());
+        let welcome_text = record.description.clone().unwrap_or_else(|| {
+            "ROBCO INDUSTRIES (TM) TERMLINK PROTOCOL\nENTER PASSWORD NOW".to_string()
+        });
 
         let mut items = record.menu_items.clone();
         // ログアウト項目がなければ追加
-        if !items.iter().any(|it| it.item_text.contains("LOGOUT") || it.item_text.contains("ログアウト")) {
+        if !items
+            .iter()
+            .any(|it| it.item_text.contains("LOGOUT") || it.item_text.contains("ログアウト"))
+        {
             items.push(TermMenuItem {
                 item_text: "ログアウト".to_string(),
                 target_form_id: None,
@@ -103,7 +102,8 @@ impl TerminalState {
         match &self.screen {
             TerminalScreen::Menu => {
                 if let Some(item) = self.menu_items.get(self.selected_index) {
-                    if item.item_text.contains("ログアウト") || item.item_text.contains("LOGOUT") {
+                    if item.item_text.contains("ログアウト") || item.item_text.contains("LOGOUT")
+                    {
                         self.is_closed = true;
                     } else if let Some(ref res) = item.result_text {
                         self.screen = TerminalScreen::TextView {
@@ -134,7 +134,8 @@ impl TerminalState {
                     if let Some(script) = &item.result_script_source {
                         let _ = vm.execute_result_script(script, item.target_form_id);
                     }
-                    if item.item_text.contains("ログアウト") || item.item_text.contains("LOGOUT") {
+                    if item.item_text.contains("ログアウト") || item.item_text.contains("LOGOUT")
+                    {
                         self.is_closed = true;
                     } else if let Some(ref res) = item.result_text {
                         self.screen = TerminalScreen::TextView {
@@ -158,7 +159,13 @@ impl TerminalState {
     /// 実機 `terminal_menu.xml` 準拠のレトロ CRT 画面レンダリングバッチを生成。
     ///
     /// 参照元: `menus/terminal/terminal_menu.xml`
-    pub fn render_to_batch(&self, batch: &mut fo3_render::TextBatch, font: &fo3_render::BitmapFont, screen_w: f32, screen_h: f32) {
+    pub fn render_to_batch(
+        &self,
+        batch: &mut fo3_render::TextBatch,
+        font: &fo3_render::BitmapFont,
+        screen_w: f32,
+        screen_h: f32,
+    ) {
         use fo3_render::ui_colors;
 
         // 全面レトロ CRT 背景 (わずかに緑がかった黒)
@@ -169,11 +176,31 @@ impl TerminalState {
 
         // 1. CRT 上部ヘッダー
         let header_y = 40.0;
-        batch.add_text(font, "ROBCO INDUSTRIES (TM) TERMLINK PROTOCOL", pad_x, header_y, 1.2, ui_colors::TERMINAL_GREEN);
-        batch.add_text(font, &format!("SYSTEM: {}", self.title), pad_x, header_y + 25.0, 1.1, ui_colors::TERMINAL_GREEN);
+        batch.add_text(
+            font,
+            "ROBCO INDUSTRIES (TM) TERMLINK PROTOCOL",
+            pad_x,
+            header_y,
+            1.2,
+            ui_colors::TERMINAL_GREEN,
+        );
+        batch.add_text(
+            font,
+            &format!("SYSTEM: {}", self.title),
+            pad_x,
+            header_y + 25.0,
+            1.1,
+            ui_colors::TERMINAL_GREEN,
+        );
 
         // 区切り線 (ベタ塗り矩形)
-        batch.add_rect(pad_x, header_y + 55.0, content_w, 2.0, ui_colors::TERMINAL_GREEN);
+        batch.add_rect(
+            pad_x,
+            header_y + 55.0,
+            content_w,
+            2.0,
+            ui_colors::TERMINAL_GREEN,
+        );
 
         // 2. 画面コンテンツ
         let body_y = header_y + 75.0;
@@ -181,7 +208,14 @@ impl TerminalState {
         match &self.screen {
             TerminalScreen::Menu => {
                 // ウェルカムメッセージ
-                batch.add_text(font, &self.welcome_text, pad_x, body_y, 1.0, ui_colors::MUTED_GREEN);
+                batch.add_text(
+                    font,
+                    &self.welcome_text,
+                    pad_x,
+                    body_y,
+                    1.0,
+                    ui_colors::MUTED_GREEN,
+                );
 
                 // メニュー項目リスト
                 let list_y = body_y + 60.0;
@@ -196,7 +230,13 @@ impl TerminalState {
                     let is_selected = i == self.selected_index;
                     if is_selected {
                         // 選択中反転ハイライトバー
-                        batch.add_rect(pad_x - 5.0, cur_y - 2.0, content_w + 10.0, item_h, [0.1, 0.5, 0.2, 0.8]);
+                        batch.add_rect(
+                            pad_x - 5.0,
+                            cur_y - 2.0,
+                            content_w + 10.0,
+                            item_h,
+                            [0.1, 0.5, 0.2, 0.8],
+                        );
                         let label = format!("> {}", item.item_text);
                         batch.add_text(font, &label, pad_x, cur_y, 1.1, ui_colors::HIGHLIGHT_WHITE);
                     } else {
@@ -207,7 +247,14 @@ impl TerminalState {
             }
             TerminalScreen::TextView { title, body } => {
                 // サブタイトル
-                batch.add_text(font, &format!("-- {} --", title), pad_x, body_y, 1.2, ui_colors::HIGHLIGHT_WHITE);
+                batch.add_text(
+                    font,
+                    &format!("-- {} --", title),
+                    pad_x,
+                    body_y,
+                    1.2,
+                    ui_colors::HIGHLIGHT_WHITE,
+                );
 
                 // 本文行
                 let mut line_y = body_y + 35.0;
@@ -220,7 +267,14 @@ impl TerminalState {
                 }
 
                 // 下部案内
-                batch.add_text(font, "[ E / T / Esc : 戻る ]", pad_x, screen_h - 50.0, 1.0, ui_colors::MUTED_GREEN);
+                batch.add_text(
+                    font,
+                    "[ E / T / Esc : 戻る ]",
+                    pad_x,
+                    screen_h - 50.0,
+                    1.0,
+                    ui_colors::MUTED_GREEN,
+                );
             }
         }
     }

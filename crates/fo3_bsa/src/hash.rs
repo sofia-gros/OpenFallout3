@@ -97,9 +97,15 @@ mod tests {
         assert_ne!(h1, h2);
 
         // 大文字小文字の正規化
-        assert_eq!(hash_folder("Meshes\\Weapons"), hash_folder("meshes\\weapons"));
+        assert_eq!(
+            hash_folder("Meshes\\Weapons"),
+            hash_folder("meshes\\weapons")
+        );
         // スラッシュの正規化
-        assert_eq!(hash_folder("meshes/weapons"), hash_folder("meshes\\weapons"));
+        assert_eq!(
+            hash_folder("meshes/weapons"),
+            hash_folder("meshes\\weapons")
+        );
 
         // ファイル名ハッシュ
         let f_hash = hash_filename("10mmpistol.nif");

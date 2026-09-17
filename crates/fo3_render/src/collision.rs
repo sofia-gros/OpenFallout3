@@ -63,16 +63,26 @@ pub fn extract_collision_lines(nif: &NifFile) -> Vec<CollisionVertex> {
     let mut vertices = Vec::new();
 
     for body in &col_data.bodies {
-        let offset = Vec3::new(body.translation[0], body.translation[1], body.translation[2]);
+        let offset = Vec3::new(
+            body.translation[0],
+            body.translation[1],
+            body.translation[2],
+        );
         extract_shape_lines(&body.shape, offset, &mut vertices);
     }
 
     vertices
 }
 
-fn extract_shape_lines(shape: &fo3_nif::CollisionShape, offset: Vec3, out: &mut Vec<CollisionVertex>) {
+fn extract_shape_lines(
+    shape: &fo3_nif::CollisionShape,
+    offset: Vec3,
+    out: &mut Vec<CollisionVertex>,
+) {
     match shape {
-        fo3_nif::CollisionShape::TriMesh { vertices, indices, .. } => {
+        fo3_nif::CollisionShape::TriMesh {
+            vertices, indices, ..
+        } => {
             let col = [0.0, 1.0, 0.4, 1.0]; // 明るいグリーン
             for tri in indices {
                 let i0 = tri[0] as usize;
@@ -89,7 +99,11 @@ fn extract_shape_lines(shape: &fo3_nif::CollisionShape, offset: Vec3, out: &mut 
                 }
             }
         }
-        fo3_nif::CollisionShape::Box { half_extents, center, .. } => {
+        fo3_nif::CollisionShape::Box {
+            half_extents,
+            center,
+            ..
+        } => {
             let ext = Vec3::new(half_extents[0], half_extents[1], half_extents[2]);
             let c = Vec3::new(center[0], center[1], center[2]) + offset;
             let col = [0.0, 0.8, 1.0, 1.0]; // シアン
@@ -108,7 +122,8 @@ fn extract_shape_lines(shape: &fo3_nif::CollisionShape, offset: Vec3, out: &mut 
         }
         fo3_nif::CollisionShape::ConvexHull { vertices, .. } => {
             let col = [1.0, 0.5, 0.0, 1.0]; // オレンジ
-            let verts: Vec<Vec3> = vertices.iter()
+            let verts: Vec<Vec3> = vertices
+                .iter()
                 .map(|v| Vec3::new(v[0], v[1], v[2]) + offset)
                 .collect();
 
@@ -131,8 +146,14 @@ fn extract_shape_lines(shape: &fo3_nif::CollisionShape, offset: Vec3, out: &mut 
 
 #[inline]
 fn add_line(out: &mut Vec<CollisionVertex>, p0: Vec3, p1: Vec3, color: [f32; 4]) {
-    out.push(CollisionVertex { position: [p0.x, p0.y, p0.z], color });
-    out.push(CollisionVertex { position: [p1.x, p1.y, p1.z], color });
+    out.push(CollisionVertex {
+        position: [p0.x, p0.y, p0.z],
+        color,
+    });
+    out.push(CollisionVertex {
+        position: [p1.x, p1.y, p1.z],
+        color,
+    });
 }
 
 /// 直方体の 12 本のエッジを追加。
@@ -191,7 +212,13 @@ fn add_sphere_lines(out: &mut Vec<CollisionVertex>, center: Vec3, radius: f32, c
 }
 
 /// カプセルの端点・接続線を追加。
-fn add_capsule_lines(out: &mut Vec<CollisionVertex>, p1: Vec3, p2: Vec3, radius: f32, color: [f32; 4]) {
+fn add_capsule_lines(
+    out: &mut Vec<CollisionVertex>,
+    p1: Vec3,
+    p2: Vec3,
+    radius: f32,
+    color: [f32; 4],
+) {
     add_sphere_lines(out, p1, radius, color);
     add_sphere_lines(out, p2, radius, color);
 

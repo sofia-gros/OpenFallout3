@@ -9,28 +9,30 @@ pub mod shader;
 pub mod skin;
 
 pub use animation::{
-    ControlledBlock, NiBSplineBasisData, NiBSplineCompTransformInterpolator,
-    NiBSplineData, NiControllerSequence, NiStringPalette, NiTransformData, NiTransformController,
+    ControlledBlock, NiBSplineBasisData, NiBSplineCompTransformInterpolator, NiBSplineData,
+    NiControllerSequence, NiStringPalette, NiTransformController, NiTransformData,
     NiTransformInterpolator,
 };
 pub use bhk::{
-    BhkBlendCollisionObject, BhkBoxShape, BhkCapsuleShape, BhkCollisionObject,
-    BhkConvexListShape, BhkConvexTransformShape, BhkConvexVerticesShape,
-    BhkListShape, BhkMoppBvTreeShape, BhkNiTriStripsShape, BhkPackedNiTriStripsShape,
-    BhkRigidBody, BhkSimpleShapePhantom, BhkSphereShape, BhkTransformShape,
-    BhkWorldObjectCommon, Fallout3HavokMaterial, Fallout3Layer,
+    BhkBlendCollisionObject, BhkBoxShape, BhkCapsuleShape, BhkCollisionObject, BhkConvexListShape,
+    BhkConvexTransformShape, BhkConvexVerticesShape, BhkListShape, BhkMoppBvTreeShape,
+    BhkNiTriStripsShape, BhkPackedNiTriStripsShape, BhkRigidBody, BhkSimpleShapePhantom,
+    BhkSphereShape, BhkTransformShape, BhkWorldObjectCommon, Fallout3HavokMaterial, Fallout3Layer,
     HkPackedNiTriStripsData, HkSubPartData, HkTriangleData,
 };
 pub use extra::{BSBound, BSXFlags, NiFloatExtraData, NiIntegerExtraData, NiStringExtraData};
-pub use geometry::{NiGeometry, NiGeometryDataCommon, NiTriShape, NiTriShapeData, NiTriStrips, NiTriStripsData};
+pub use geometry::{
+    NiGeometry, NiGeometryDataCommon, NiTriShape, NiTriShapeData, NiTriStrips, NiTriStripsData,
+};
 pub use node::{BSFadeNode, NiAVObject, NiNode, NiObjectNET};
 pub use shader::{
-    BSShaderNoLightingProperty, BSShaderPPLightingProperty, BSShaderTextureSet,
-    NiAlphaProperty, NiMaterialProperty, NiStencilProperty,
+    BSShaderNoLightingProperty, BSShaderPPLightingProperty, BSShaderTextureSet, NiAlphaProperty,
+    NiMaterialProperty, NiStencilProperty,
 };
-pub use skin::{BoneData, BoneVertData, BSDismemberSkinInstance, BodyPartList, NiSkinData, NiSkinInstance, NiSkinPartition, SkinPartition};
-
-
+pub use skin::{
+    BSDismemberSkinInstance, BodyPartList, BoneData, BoneVertData, NiSkinData, NiSkinInstance,
+    NiSkinPartition, SkinPartition,
+};
 
 /// パースされた NIF ブロックの列挙型。
 #[derive(Clone, Debug, PartialEq)]
@@ -67,7 +69,6 @@ pub enum NifBlock {
     NiBSplineBasisData(NiBSplineBasisData),
     NiBSplineData(NiBSplineData),
     NiBSplineCompTransformInterpolator(NiBSplineCompTransformInterpolator),
-
 
     // Havok コリジョンブロック
     BhkCollisionObject(BhkCollisionObject),

@@ -1,7 +1,7 @@
-use std::collections::HashMap;
 use fo3_esm::types::FormId;
 use fo3_esm::EsmMasterContext;
 use fo3_script::ScriptVm;
+use std::collections::HashMap;
 
 pub struct ActorAiState {
     pub form_id: FormId,
@@ -27,18 +27,26 @@ impl AiManager {
     }
 
     /// アクターをAI管理下に登録する
-    pub fn register_actor(&mut self, form_id: FormId, base_form_id: FormId, master: &EsmMasterContext) {
+    pub fn register_actor(
+        &mut self,
+        form_id: FormId,
+        base_form_id: FormId,
+        master: &EsmMasterContext,
+    ) {
         let mut base_packages = Vec::new();
         if let Some(npc) = master.npc_map.get(&base_form_id) {
             base_packages.clone_from(&npc.ai_packages);
         }
-        self.actors.insert(form_id, ActorAiState {
+        self.actors.insert(
             form_id,
-            base_form_id,
-            base_packages,
-            script_packages: Vec::new(),
-            current_package: None,
-        });
+            ActorAiState {
+                form_id,
+                base_form_id,
+                base_packages,
+                script_packages: Vec::new(),
+                current_package: None,
+            },
+        );
     }
 
     /// 毎フレーム呼ばれ、全アクターのAIパッケージの条件を評価する
@@ -47,7 +55,11 @@ impl AiManager {
             let mut active_pack = None;
 
             // スクリプトパッケージを優先して評価
-            for pkg_id in state.script_packages.iter().chain(state.base_packages.iter()) {
+            for pkg_id in state
+                .script_packages
+                .iter()
+                .chain(state.base_packages.iter())
+            {
                 if let Some(pack) = master.pack_map.get(pkg_id) {
                     if pack.conditions.is_empty() {
                         active_pack = Some(*pkg_id);
@@ -81,7 +93,11 @@ impl AiManager {
                     if let Some(pack) = master.pack_map.get(&pack_id) {
                         if let Some(topic_id) = pack.topic_id {
                             // Topic FormID から EDID を逆引き
-                            if let Some((dial, _)) = master.topic_map.values().find(|(d, _)| d.form_id == topic_id) {
+                            if let Some((dial, _)) = master
+                                .topic_map
+                                .values()
+                                .find(|(d, _)| d.form_id == topic_id)
+                            {
                                 println!("[AiManager] NPC 0x{:08X} のパッケージ 0x{:08X} が発火。Topic: {}", state.form_id.0, pack_id.0, dial.edid);
                                 vm.say_queue.push((Some(state.form_id), dial.edid.clone()));
                             }

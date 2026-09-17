@@ -2,8 +2,8 @@
 //!
 //! シェーダー、バインドグループレイアウト、ブレンド設定、深度テストの初期化および管理。
 
-use bytemuck::{Pod, Zeroable};
 use crate::vertex::{SkinnedVertex, Vertex};
+use bytemuck::{Pod, Zeroable};
 
 /// モデル、マテリアル、発光およびアルファテスト用 Uniform バッファ構造体 (112 バイト)。
 ///
@@ -41,7 +41,13 @@ impl ModelUniform {
         material_prop: Option<&fo3_nif::NiMaterialProperty>,
         has_glow_map: bool,
     ) -> Self {
-        Self::new_with_tint(world_mat, alpha_prop, material_prop, has_glow_map, [1.0, 1.0, 1.0, 1.0])
+        Self::new_with_tint(
+            world_mat,
+            alpha_prop,
+            material_prop,
+            has_glow_map,
+            [1.0, 1.0, 1.0, 1.0],
+        )
     }
 
     /// ワールド変換行列、NiAlphaProperty、NiMaterialProperty、およびティントカラーから ModelUniform を構築する。
@@ -68,13 +74,21 @@ impl ModelUniform {
                     mat.specular_color.r,
                     mat.specular_color.g,
                     mat.specular_color.b,
-                    if mat.glossiness > 0.0 { mat.glossiness } else { 32.0 },
+                    if mat.glossiness > 0.0 {
+                        mat.glossiness
+                    } else {
+                        32.0
+                    },
                 ],
                 [
                     mat.emissive_color.r,
                     mat.emissive_color.g,
                     mat.emissive_color.b,
-                    if mat.emissive_mult > 0.0 { mat.emissive_mult } else { 1.0 },
+                    if mat.emissive_mult > 0.0 {
+                        mat.emissive_mult
+                    } else {
+                        1.0
+                    },
                 ],
             )
         } else {
@@ -118,10 +132,38 @@ impl RenderContext {
 
         // Group 0: Camera Uniform (binding 0) + Lighting Uniform (binding 1)
         // 参照元: Gamebryo 2.6 NiCamera, NiLight, NiDirectionalLight, NiPointLight
-        let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Camera & Lighting Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Camera & Lighting Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        // Group 1: Model Uniform
+        let model_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Model Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
@@ -130,78 +172,53 @@ impl RenderContext {
                         min_binding_size: None,
                     },
                     count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        // Group 1: Model Uniform
-        let model_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Model Bind Group Layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
+                }],
+            });
 
         // Group 2: Diffuse Texture (0) + Sampler (1) + Normal Map Texture (2) + Glow Map Texture (3)
         // 参照元: references/openmw/components/nifosg/nifloader.cpp:L2401-2426, references/nifxml/nif.xml:L6307
-        let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Texture Bind Group Layout (Diffuse + Normal + Glow)"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Texture Bind Group Layout (Diffuse + Normal + Glow)"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-            ],
-        });
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                ],
+            });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
@@ -210,7 +227,7 @@ impl RenderContext {
                 &model_bind_group_layout,
                 &texture_bind_group_layout,
             ],
-            push_constant_ranges: &[ ],
+            push_constant_ranges: &[],
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -300,14 +317,12 @@ impl RenderContext {
             source: wgpu::ShaderSource::Wgsl(include_str!("collision_shader.wgsl").into()),
         });
 
-        let collision_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Collision Pipeline Layout"),
-            bind_group_layouts: &[
-                &camera_bind_group_layout,
-                &model_bind_group_layout,
-            ],
-            push_constant_ranges: &[],
-        });
+        let collision_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Collision Pipeline Layout"),
+                bind_group_layouts: &[&camera_bind_group_layout, &model_bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
         let collision_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Collision Line Render Pipeline"),
@@ -351,10 +366,10 @@ impl RenderContext {
 
         // Group 3: Bone Palette Uniform (binding 0)
         // 参照元: Gamebryo 2.6 ハードウェアスキニング (NiSkinPartition)
-        let bone_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Bone Palette Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
+        let bone_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Bone Palette Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
@@ -363,20 +378,20 @@ impl RenderContext {
                         min_binding_size: None,
                     },
                     count: None,
-                },
-            ],
-        });
+                }],
+            });
 
-        let skinned_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Skinned Render Pipeline Layout"),
-            bind_group_layouts: &[
-                &camera_bind_group_layout,
-                &model_bind_group_layout,
-                &texture_bind_group_layout,
-                &bone_bind_group_layout,
-            ],
-            push_constant_ranges: &[],
-        });
+        let skinned_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Skinned Render Pipeline Layout"),
+                bind_group_layouts: &[
+                    &camera_bind_group_layout,
+                    &model_bind_group_layout,
+                    &texture_bind_group_layout,
+                    &bone_bind_group_layout,
+                ],
+                push_constant_ranges: &[],
+            });
 
         let skinned_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Skinned Mesh Shader"),
@@ -423,45 +438,46 @@ impl RenderContext {
             cache: None,
         });
 
-        let transparent_skinned_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Transparent Skinned Mesh Render Pipeline"),
-            layout: Some(&skinned_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &skinned_shader,
-                entry_point: Some("vs_main"),
-                buffers: &[SkinnedVertex::desc()],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &skinned_shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: Self::DEPTH_FORMAT,
-                depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
+        let transparent_skinned_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Transparent Skinned Mesh Render Pipeline"),
+                layout: Some(&skinned_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &skinned_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[SkinnedVertex::desc()],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &skinned_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: Self::DEPTH_FORMAT,
+                    depth_write_enabled: false,
+                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            });
 
         RenderContext {
             pipeline,
@@ -478,7 +494,11 @@ impl RenderContext {
     }
 
     /// ウィンドウサイズに合わせた深度テクスチャビューを作成。
-    pub fn create_depth_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
+    pub fn create_depth_texture(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+    ) -> wgpu::TextureView {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Depth Texture"),
             size: wgpu::Extent3d {
@@ -536,4 +556,3 @@ mod tests {
         );
     }
 }
-

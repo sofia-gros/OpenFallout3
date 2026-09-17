@@ -9,17 +9,17 @@
 //! - 実機アーカイブ: `Fallout - Meshes.bsa` (`characters\_male\locomotion\*.kf`, `characters\_1stperson\skeleton.nif`)
 //! - Gamebryo 2.6 `NiControllerSequence` & マルチパーツアクター仕様
 
-use std::collections::HashMap;
-use std::f32::consts::PI;
-use std::sync::Arc;
-use glam::{Quat, Vec3};
+use crate::camera::CameraViewMode;
 use fo3_gamebryo_core::NiTransform;
 use fo3_nif::NifFile;
 use fo3_render::animation::{AnimationClip, AnimationPlayer, SkeletonPose};
 use fo3_render::scene::actor::RenderActorInstance;
 use fo3_render::RenderMesh;
 use fo3_vfs::VfsManager;
-use crate::camera::CameraViewMode;
+use glam::{Quat, Vec3};
+use std::collections::HashMap;
+use std::f32::consts::PI;
+use std::sync::Arc;
 
 /// ロコモーションの移動・行動ステート
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -461,14 +461,21 @@ pub fn build_player_actor(
 
     let third_mesh_start = scene.meshes.len();
     let initial_transform = NiTransform {
-        rotation: glam::Mat3::from_quat(Quat::from_rotation_z(spawn_yaw - std::f32::consts::FRAC_PI_2)),
+        rotation: glam::Mat3::from_quat(Quat::from_rotation_z(
+            spawn_yaw - std::f32::consts::FRAC_PI_2,
+        )),
         translation: spawn_pos,
         scale: 1.0,
     };
 
     // 初期待機アニメーション (mtidle.kf)
-    let idle_kf = nif_cache.get_or_load("meshes\\characters\\_male\\locomotion\\mtidle.kf", vfs).ok();
-    let idle_clip = idle_kf.as_ref().and_then(|kf| AnimationClip::from_kf(kf)).map(Arc::new);
+    let idle_kf = nif_cache
+        .get_or_load("meshes\\characters\\_male\\locomotion\\mtidle.kf", vfs)
+        .ok();
+    let idle_clip = idle_kf
+        .as_ref()
+        .and_then(|kf| AnimationClip::from_kf(kf))
+        .map(Arc::new);
 
     let third_actor_idx = scene.add_actor(
         device,
@@ -516,11 +523,18 @@ pub fn build_player_actor(
         if !first_parts.is_empty() {
             let first_mesh_start = scene.meshes.len();
             // 実機 Fallout 3 一人称待機 KF (meshes\characters\_1stperson\mtidle.kf)
-            let first_idle_kf = nif_cache.get_or_load("meshes\\characters\\_1stperson\\mtidle.kf", vfs).ok();
-            let first_idle_clip = first_idle_kf.as_ref().and_then(|kf| AnimationClip::from_kf(kf)).map(Arc::new);
+            let first_idle_kf = nif_cache
+                .get_or_load("meshes\\characters\\_1stperson\\mtidle.kf", vfs)
+                .ok();
+            let first_idle_clip = first_idle_kf
+                .as_ref()
+                .and_then(|kf| AnimationClip::from_kf(kf))
+                .map(Arc::new);
 
             let first_transform = NiTransform {
-                rotation: glam::Mat3::from_quat(Quat::from_rotation_z(spawn_yaw - std::f32::consts::FRAC_PI_2)),
+                rotation: glam::Mat3::from_quat(Quat::from_rotation_z(
+                    spawn_yaw - std::f32::consts::FRAC_PI_2,
+                )),
                 translation: spawn_pos,
                 scale: 1.0,
             };

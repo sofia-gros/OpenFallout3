@@ -5,8 +5,8 @@
 //! - `references/nifxml/nif.xml:L2022` (`TexCoord`)
 //! - `references/nifxml/nif.xml:L2043` (`Triangle`)
 
-use std::io::{self, Read};
 use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Read};
 
 /// 3次元浮動小数点ベクトル。
 ///
@@ -160,7 +160,12 @@ pub struct Quaternion {
 
 impl Default for Quaternion {
     fn default() -> Self {
-        Quaternion { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }
+        Quaternion {
+            w: 1.0,
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        }
     }
 }
 
@@ -180,7 +185,12 @@ impl Quaternion {
 
     /// glam::Quat から作成する。
     pub fn from_glam(q: glam::Quat) -> Self {
-        Quaternion { w: q.w, x: q.x, y: q.y, z: q.z }
+        Quaternion {
+            w: q.w,
+            x: q.x,
+            y: q.y,
+            z: q.z,
+        }
     }
 }
 
@@ -197,7 +207,11 @@ pub struct NiQuatTransform {
 impl Default for NiQuatTransform {
     fn default() -> Self {
         NiQuatTransform {
-            translation: Vector3 { x: 0.0, y: 0.0, z: 0.0 },
+            translation: Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
             rotation: Quaternion::default(),
             scale: 1.0,
         }
@@ -209,7 +223,11 @@ impl NiQuatTransform {
         let translation = Vector3::read(reader)?;
         let rotation = Quaternion::read(reader)?;
         let scale = reader.read_f32::<LittleEndian>()?;
-        Ok(NiQuatTransform { translation, rotation, scale })
+        Ok(NiQuatTransform {
+            translation,
+            rotation,
+            scale,
+        })
     }
 }
 
@@ -324,7 +342,10 @@ impl KeyGroup<f32> {
             let time = reader.read_f32::<LittleEndian>()?;
             let value = reader.read_f32::<LittleEndian>()?;
             let (forward, backward) = if interpolation == KeyType::Quadratic {
-                (Some(reader.read_f32::<LittleEndian>()?), Some(reader.read_f32::<LittleEndian>()?))
+                (
+                    Some(reader.read_f32::<LittleEndian>()?),
+                    Some(reader.read_f32::<LittleEndian>()?),
+                )
             } else {
                 (None, None)
             };
@@ -333,9 +354,18 @@ impl KeyGroup<f32> {
             } else {
                 None
             };
-            keys.push(Key { time, value, forward, backward, tbc });
+            keys.push(Key {
+                time,
+                value,
+                forward,
+                backward,
+                tbc,
+            });
         }
-        Ok(KeyGroup { interpolation, keys })
+        Ok(KeyGroup {
+            interpolation,
+            keys,
+        })
     }
 }
 
@@ -360,9 +390,17 @@ impl KeyGroup<Vector3> {
             } else {
                 None
             };
-            keys.push(Key { time, value, forward, backward, tbc });
+            keys.push(Key {
+                time,
+                value,
+                forward,
+                backward,
+                tbc,
+            });
         }
-        Ok(KeyGroup { interpolation, keys })
+        Ok(KeyGroup {
+            interpolation,
+            keys,
+        })
     }
 }
-

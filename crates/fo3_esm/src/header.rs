@@ -4,9 +4,9 @@
 //! レコードヘッダー、グループヘッダー、サブレコードヘッダーの定義。
 //! 参照元: `references/openmw/components/esm4/reader.hpp:L62-97`
 
-use std::io::{self, Read};
-use byteorder::{LittleEndian, ReadBytesExt};
 use crate::types::{FormId, FourCC};
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Read};
 
 /// レコードヘッダー (24 バイト)。
 ///

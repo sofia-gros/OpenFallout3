@@ -6,8 +6,8 @@
 //! - `references/openmw/components/esm4/loadwrld.cpp`
 //! - `knowledge/worldspace_cells.md`
 
-use crate::types::{FormId, SUB_CNAM, SUB_DATA, SUB_EDID, SUB_FULL, SUB_NAM2, SUB_WNAM};
 use crate::subrecord::Subrecord;
+use crate::types::{FormId, SUB_CNAM, SUB_DATA, SUB_EDID, SUB_FULL, SUB_NAM2, SUB_WNAM};
 
 /// ワールドスペースレコード。
 #[derive(Clone, Debug, PartialEq)]
@@ -46,17 +46,23 @@ impl WorldRecord {
                 }
                 SUB_WNAM => {
                     if sub.data.len() >= 4 {
-                        parent_world = Some(FormId(u32::from_le_bytes(sub.data[0..4].try_into().unwrap())));
+                        parent_world = Some(FormId(u32::from_le_bytes(
+                            sub.data[0..4].try_into().unwrap(),
+                        )));
                     }
                 }
                 SUB_CNAM => {
                     if sub.data.len() >= 4 {
-                        climate = Some(FormId(u32::from_le_bytes(sub.data[0..4].try_into().unwrap())));
+                        climate = Some(FormId(u32::from_le_bytes(
+                            sub.data[0..4].try_into().unwrap(),
+                        )));
                     }
                 }
                 SUB_NAM2 => {
                     if sub.data.len() >= 4 {
-                        water = Some(FormId(u32::from_le_bytes(sub.data[0..4].try_into().unwrap())));
+                        water = Some(FormId(u32::from_le_bytes(
+                            sub.data[0..4].try_into().unwrap(),
+                        )));
                     }
                 }
                 _ => {}

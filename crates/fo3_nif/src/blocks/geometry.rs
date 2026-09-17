@@ -9,10 +9,10 @@
 //! - `references/nifxml/nif.xml:L5292` (`NiTriStrips`)
 //! - `references/nifxml/nif.xml:L5296` (`NiTriStripsData`)
 
-use std::io::{self, Read};
-use byteorder::{LittleEndian, ReadBytesExt};
 use crate::blocks::node::NiAVObject;
 use crate::types::{BoundingSphere, Color4, TexCoord, Triangle, Vector3};
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Read};
 
 /// マテリアル関連のメタデータ。
 ///

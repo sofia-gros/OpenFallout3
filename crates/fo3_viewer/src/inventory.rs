@@ -7,8 +7,8 @@
 //! - `references/openmw/components/esm4/loadrefr.cpp:103-127`
 //! - `knowledge/gamebryo_resource_management_and_caching.md`
 
-use std::collections::HashMap;
 use fo3_esm::FormId;
+use std::collections::HashMap;
 
 /// 所持品内の単一アイテムエントリ。
 #[derive(Clone, Debug, PartialEq)]

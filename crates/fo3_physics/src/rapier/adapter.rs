@@ -5,15 +5,19 @@
 //!
 //! 参照元: `knowledge/havok_collision_blocks.md`, `references/nifxml/nif.xml:L3029-3207`
 
+use crate::collision_layers::layer_to_interaction_groups;
 use fo3_nif::collision::{CollisionShape, RigidBodyData};
 use rapier3d::na::{Isometry3, Point3, Quaternion, Translation3, UnitQuaternion};
 use rapier3d::prelude::*;
-use crate::collision_layers::layer_to_interaction_groups;
 
 /// NIF コリジョン形状を Rapier3D の SharedShape に変換する。
 pub fn collision_shape_to_rapier(shape: &CollisionShape) -> Option<SharedShape> {
     match shape {
-        CollisionShape::Box { half_extents, center, .. } => {
+        CollisionShape::Box {
+            half_extents,
+            center,
+            ..
+        } => {
             let hx = half_extents[0].max(0.001);
             let hy = half_extents[1].max(0.001);
             let hz = half_extents[2].max(0.001);
@@ -48,7 +52,9 @@ pub fn collision_shape_to_rapier(shape: &CollisionShape) -> Option<SharedShape> 
                 .collect();
             SharedShape::convex_hull(&points)
         }
-        CollisionShape::TriMesh { vertices, indices, .. } => {
+        CollisionShape::TriMesh {
+            vertices, indices, ..
+        } => {
             let points: Vec<Point3<Real>> = vertices
                 .iter()
                 .map(|v| Point3::new(v[0], v[1], v[2]))
@@ -125,7 +131,9 @@ fn collect_flattened_shapes(
                 collect_flattened_shapes(child, parent_iso, merged_verts, merged_tris, other_parts);
             }
         }
-        CollisionShape::TriMesh { vertices, indices, .. } => {
+        CollisionShape::TriMesh {
+            vertices, indices, ..
+        } => {
             let base_idx = merged_verts.len() as u32;
             for v in vertices {
                 let p = parent_iso.transform_point(&Point3::new(v[0], v[1], v[2]));
@@ -135,7 +143,11 @@ fn collect_flattened_shapes(
                 merged_tris.push([tri[0] + base_idx, tri[1] + base_idx, tri[2] + base_idx]);
             }
         }
-        CollisionShape::Box { half_extents, center, .. } => {
+        CollisionShape::Box {
+            half_extents,
+            center,
+            ..
+        } => {
             let hx = half_extents[0].max(0.001);
             let hy = half_extents[1].max(0.001);
             let hz = half_extents[2].max(0.001);
@@ -201,11 +213,7 @@ pub fn rigid_body_data_to_rapier(
     ));
 
     let local_iso = Isometry3::from_parts(
-        Translation3::new(
-            rb.translation[0],
-            rb.translation[1],
-            rb.translation[2],
-        ),
+        Translation3::new(rb.translation[0], rb.translation[1], rb.translation[2]),
         nif_quat,
     );
     let scene_iso = Isometry3::from_parts(

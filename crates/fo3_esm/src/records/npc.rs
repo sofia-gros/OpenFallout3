@@ -3,13 +3,13 @@
 //! 人間やグールなど NPC のベースアクター定義。
 //! 参照元: `references/openmw/components/esm4/loadnpc.hpp`, `loadnpc.cpp`
 
-use std::io;
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{
     FormId, FourCC, ObjectBounds, SUB_CNTO, SUB_DOFT, SUB_EDID, SUB_ENAM, SUB_FGGA, SUB_FGGS,
     SUB_FGTS, SUB_FULL, SUB_HCLR, SUB_HNAM, SUB_OBND, SUB_PKID,
 };
+use std::io;
 
 pub const SUB_ACBS: FourCC = FourCC(*b"ACBS");
 pub const SUB_RNAM: FourCC = FourCC(*b"RNAM");
@@ -352,4 +352,3 @@ mod tests {
         assert_eq!(hair.flags, 0x02);
     }
 }
-

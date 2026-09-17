@@ -9,10 +9,10 @@
 //! - Gamebryo 2.6 `bhkRigidBody` (`MO_SYS_KEYFRAMED`) 位置同期
 //! - `knowledge/gamebryo_resource_management_and_caching.md`
 
-use glam::{Mat4, Quat, Vec3};
+use fo3_nif::NifFile;
 use fo3_physics::RigidBodyHandle;
 use fo3_render::animation::AnimationClip;
-use fo3_nif::NifFile;
+use glam::{Mat4, Quat, Vec3};
 use std::f32::consts::PI;
 use std::sync::Arc;
 
@@ -183,21 +183,22 @@ impl InteractiveAnimator {
 
         for part in &self.moving_parts {
             // 1. NIF シーケンスによる補間が利用可能か判定
-            let (part_pos, part_rot) = if let (Some(ref clip), Some(ref nif)) = (&self.open_clip, &self.nif) {
-                // シーケンス内タイムライン時刻
-                let t = self.progress * clip.duration;
-                if let Some(transform) = clip.sample_bone_transform(&part.node_name, t, nif) {
-                    let local_rot = transform.rotation.unwrap_or(Quat::IDENTITY);
-                    let local_pos = transform.translation.unwrap_or(Vec3::ZERO);
-                    let world_rot = self.base_rotation * local_rot;
-                    let world_pos = self.base_translation + (self.base_rotation * local_pos);
-                    (world_pos, world_rot)
+            let (part_pos, part_rot) =
+                if let (Some(ref clip), Some(ref nif)) = (&self.open_clip, &self.nif) {
+                    // シーケンス内タイムライン時刻
+                    let t = self.progress * clip.duration;
+                    if let Some(transform) = clip.sample_bone_transform(&part.node_name, t, nif) {
+                        let local_rot = transform.rotation.unwrap_or(Quat::IDENTITY);
+                        let local_pos = transform.translation.unwrap_or(Vec3::ZERO);
+                        let world_rot = self.base_rotation * local_rot;
+                        let world_pos = self.base_translation + (self.base_rotation * local_pos);
+                        (world_pos, world_rot)
+                    } else {
+                        self.evaluate_hinge(part)
+                    }
                 } else {
                     self.evaluate_hinge(part)
-                }
-            } else {
-                self.evaluate_hinge(part)
-            };
+                };
 
             let world_mat = Mat4::from_rotation_translation(part_rot, part_pos);
             results.push((

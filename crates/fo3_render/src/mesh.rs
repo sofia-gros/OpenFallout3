@@ -4,11 +4,11 @@
 //! GPU 用の頂点バッファ・インデックスバッファへの変換および保持を担当。
 //! 参照元: `references/openmw/components/nifosg/nifloader.cpp:L1600-1623`
 
+use crate::vertex::Vertex;
 use fo3_gamebryo_core::NiBound;
 use fo3_nif::{NiGeometryDataCommon, NiTriShapeData, NiTriStripsData};
 use glam::Vec3;
 use wgpu::util::DeviceExt;
-use crate::vertex::Vertex;
 
 /// トライアングルストリップ列を三角形リスト (TriangleList) のインデックス配列に展開する。
 ///
@@ -22,8 +22,16 @@ pub fn strips_to_triangles(strips: &[Vec<u16>]) -> Vec<u16> {
         }
         for i in 0..strip.len() - 2 {
             let a = strip[i];
-            let b = if i % 2 == 0 { strip[i + 1] } else { strip[i + 2] };
-            let c = if i % 2 == 0 { strip[i + 2] } else { strip[i + 1] };
+            let b = if i % 2 == 0 {
+                strip[i + 1]
+            } else {
+                strip[i + 2]
+            };
+            let c = if i % 2 == 0 {
+                strip[i + 2]
+            } else {
+                strip[i + 1]
+            };
             // 縮退三角形を除外
             if a != b && b != c && a != c {
                 indices.push(a);
@@ -43,7 +51,10 @@ pub fn build_vertices(common: &NiGeometryDataCommon) -> Vec<Vertex> {
 /// 頂点カラー有効フラグを指定して GPU 頂点配列を構築する。
 /// `use_vertex_colors` が false の場合、NiGeometryDataCommon に vertex_colors が存在しても無視して白色 (1,1,1,1) を適用する。
 /// 参照元: `references/nifxml/nif.xml:L6414` (`SLSF2_Vertex_Colors`), Fallout 3 髪の毛メッシュ
-pub fn build_vertices_with_color_flag(common: &NiGeometryDataCommon, use_vertex_colors: bool) -> Vec<Vertex> {
+pub fn build_vertices_with_color_flag(
+    common: &NiGeometryDataCommon,
+    use_vertex_colors: bool,
+) -> Vec<Vertex> {
     let n = common.num_vertices as usize;
     let mut vertices = Vec::with_capacity(n);
 
@@ -55,13 +66,21 @@ pub fn build_vertices_with_color_flag(common: &NiGeometryDataCommon, use_vertex_
 
     for i in 0..n {
         let pos = if i < common.vertices.len() {
-            [common.vertices[i].x, common.vertices[i].y, common.vertices[i].z]
+            [
+                common.vertices[i].x,
+                common.vertices[i].y,
+                common.vertices[i].z,
+            ]
         } else {
             [0.0, 0.0, 0.0]
         };
 
         let normal = if has_normals && i < common.normals.len() {
-            [common.normals[i].x, common.normals[i].y, common.normals[i].z]
+            [
+                common.normals[i].x,
+                common.normals[i].y,
+                common.normals[i].z,
+            ]
         } else {
             [0.0, 0.0, 1.0]
         };
@@ -84,13 +103,21 @@ pub fn build_vertices_with_color_flag(common: &NiGeometryDataCommon, use_vertex_
         };
 
         let tangent = if has_tangents && i < common.tangents.len() {
-            [common.tangents[i].x, common.tangents[i].y, common.tangents[i].z]
+            [
+                common.tangents[i].x,
+                common.tangents[i].y,
+                common.tangents[i].z,
+            ]
         } else {
             [0.0, 0.0, 0.0]
         };
 
         let bitangent = if has_bitangents && i < common.bitangents.len() {
-            [common.bitangents[i].x, common.bitangents[i].y, common.bitangents[i].z]
+            [
+                common.bitangents[i].x,
+                common.bitangents[i].y,
+                common.bitangents[i].z,
+            ]
         } else {
             [0.0, 0.0, 0.0]
         };
@@ -142,7 +169,11 @@ impl GpuMesh {
     }
 
     /// 頂点カラー有効フラグを指定して NiTriShapeData から GpuMesh を生成する。
-    pub fn from_tri_shape_with_vc(device: &wgpu::Device, data: &NiTriShapeData, use_vertex_colors: bool) -> Option<Self> {
+    pub fn from_tri_shape_with_vc(
+        device: &wgpu::Device,
+        data: &NiTriShapeData,
+        use_vertex_colors: bool,
+    ) -> Option<Self> {
         let vertices = build_vertices_with_color_flag(&data.common, use_vertex_colors);
         if vertices.is_empty() {
             return None;
@@ -180,13 +211,15 @@ impl GpuMesh {
         skinned_normals: &[[f32; 3]],
     ) -> Option<Self> {
         let n = data.common.num_vertices as usize;
-        if n == 0 { return None; }
+        if n == 0 {
+            return None;
+        }
 
         let common = &data.common;
-        let has_uv       = !common.uv_sets.is_empty() && !common.uv_sets[0].is_empty();
-        let has_colors   = !common.vertex_colors.is_empty();
+        let has_uv = !common.uv_sets.is_empty() && !common.uv_sets[0].is_empty();
+        let has_colors = !common.vertex_colors.is_empty();
         let has_tangents = !common.tangents.is_empty();
-        let has_bitangs  = !common.bitangents.is_empty();
+        let has_bitangs = !common.bitangents.is_empty();
 
         let mut vertices = Vec::with_capacity(n);
         for i in 0..n {
@@ -210,24 +243,39 @@ impl GpuMesh {
 
             let uv = if has_uv && i < common.uv_sets[0].len() {
                 [common.uv_sets[0][i].u, common.uv_sets[0][i].v]
-            } else { [0.0, 0.0] };
+            } else {
+                [0.0, 0.0]
+            };
 
             let color = if has_colors && i < common.vertex_colors.len() {
                 let c = &common.vertex_colors[i];
                 [c.r, c.g, c.b, c.a]
-            } else { [1.0, 1.0, 1.0, 1.0] };
+            } else {
+                [1.0, 1.0, 1.0, 1.0]
+            };
 
             let tangent = if has_tangents && i < common.tangents.len() {
                 let t = &common.tangents[i];
                 [t.x, t.y, t.z]
-            } else { [0.0, 0.0, 0.0] };
+            } else {
+                [0.0, 0.0, 0.0]
+            };
 
             let bitangent = if has_bitangs && i < common.bitangents.len() {
                 let b = &common.bitangents[i];
                 [b.x, b.y, b.z]
-            } else { [0.0, 0.0, 0.0] };
+            } else {
+                [0.0, 0.0, 0.0]
+            };
 
-            vertices.push(crate::vertex::Vertex { position: pos, normal, uv, color, tangent, bitangent });
+            vertices.push(crate::vertex::Vertex {
+                position: pos,
+                normal,
+                uv,
+                color,
+                tangent,
+                bitangent,
+            });
         }
 
         let mut indices = Vec::with_capacity(data.triangles.len() * 3);
@@ -236,7 +284,9 @@ impl GpuMesh {
             indices.push(tri.v2);
             indices.push(tri.v3);
         }
-        if indices.is_empty() { return None; }
+        if indices.is_empty() {
+            return None;
+        }
 
         let bound = calculate_vertices_bound(&vertices);
         Self::create(device, &vertices, &indices, bound)
@@ -248,7 +298,11 @@ impl GpuMesh {
     }
 
     /// 頂点カラー有効フラグを指定して NiTriStripsData から GpuMesh を生成する。
-    pub fn from_tri_strips_with_vc(device: &wgpu::Device, data: &NiTriStripsData, use_vertex_colors: bool) -> Option<Self> {
+    pub fn from_tri_strips_with_vc(
+        device: &wgpu::Device,
+        data: &NiTriStripsData,
+        use_vertex_colors: bool,
+    ) -> Option<Self> {
         let vertices = build_vertices_with_color_flag(&data.common, use_vertex_colors);
         if vertices.is_empty() {
             return None;
@@ -297,7 +351,11 @@ impl GpuMesh {
                 let normal = if let Some(ref norms) = land.normals {
                     if idx < norms.len() {
                         let n = norms[idx];
-                        [n[0] as f32 / 127.0, n[1] as f32 / 127.0, n[2] as f32 / 127.0]
+                        [
+                            n[0] as f32 / 127.0,
+                            n[1] as f32 / 127.0,
+                            n[2] as f32 / 127.0,
+                        ]
                     } else {
                         [0.0, 0.0, 1.0]
                     }
@@ -308,7 +366,12 @@ impl GpuMesh {
                 let color = if let Some(ref cols) = land.vertex_colors {
                     if idx < cols.len() {
                         let c = cols[idx];
-                        [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 1.0]
+                        [
+                            c[0] as f32 / 255.0,
+                            c[1] as f32 / 255.0,
+                            c[2] as f32 / 255.0,
+                            1.0,
+                        ]
                     } else {
                         [1.0, 1.0, 1.0, 1.0]
                     }
@@ -406,7 +469,11 @@ impl GpuMesh {
                 let normal = if let Some(ref norms) = land.normals {
                     if idx < norms.len() {
                         let n = norms[idx];
-                        [n[0] as f32 / 127.0, n[1] as f32 / 127.0, n[2] as f32 / 127.0]
+                        [
+                            n[0] as f32 / 127.0,
+                            n[1] as f32 / 127.0,
+                            n[2] as f32 / 127.0,
+                        ]
                     } else {
                         [0.0, 0.0, 1.0]
                     }
@@ -417,7 +484,12 @@ impl GpuMesh {
                 let color = if let Some(ref cols) = land.vertex_colors {
                     if idx < cols.len() {
                         let c = cols[idx];
-                        [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 1.0]
+                        [
+                            c[0] as f32 / 255.0,
+                            c[1] as f32 / 255.0,
+                            c[2] as f32 / 255.0,
+                            1.0,
+                        ]
                     } else {
                         [1.0, 1.0, 1.0, 1.0]
                     }
@@ -532,7 +604,11 @@ impl GpuMesh {
                 let normal = if let Some(ref norms) = land.normals {
                     if idx < norms.len() {
                         let n = norms[idx];
-                        [n[0] as f32 / 127.0, n[1] as f32 / 127.0, n[2] as f32 / 127.0]
+                        [
+                            n[0] as f32 / 127.0,
+                            n[1] as f32 / 127.0,
+                            n[2] as f32 / 127.0,
+                        ]
                     } else {
                         [0.0, 0.0, 1.0]
                     }
@@ -577,7 +653,12 @@ impl GpuMesh {
         Self::create(device, &vertices, &indices, bound)
     }
 
-    fn create(device: &wgpu::Device, vertices: &[Vertex], indices: &[u16], bound: fo3_gamebryo_core::NiBound) -> Option<Self> {
+    fn create(
+        device: &wgpu::Device,
+        vertices: &[Vertex],
+        indices: &[u16],
+        bound: fo3_gamebryo_core::NiBound,
+    ) -> Option<Self> {
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Mesh Vertex Buffer"),
             contents: bytemuck::cast_slice(vertices),
@@ -612,33 +693,64 @@ impl GpuMesh {
         skinned_normals: &[[f32; 3]],
     ) {
         let n = data.common.num_vertices as usize;
-        if n == 0 { return; }
+        if n == 0 {
+            return;
+        }
         let common = &data.common;
-        let has_uv       = !common.uv_sets.is_empty() && !common.uv_sets[0].is_empty();
-        let has_colors   = !common.vertex_colors.is_empty();
+        let has_uv = !common.uv_sets.is_empty() && !common.uv_sets[0].is_empty();
+        let has_colors = !common.vertex_colors.is_empty();
         let has_tangents = !common.tangents.is_empty();
-        let has_bitangs  = !common.bitangents.is_empty();
+        let has_bitangs = !common.bitangents.is_empty();
 
         let mut vertices = Vec::with_capacity(n);
         for i in 0..n {
-            let pos = if i < skinned_positions.len() { skinned_positions[i] }
-                else if i < common.vertices.len() { let v = &common.vertices[i]; [v.x, v.y, v.z] }
-                else { [0.0, 0.0, 0.0] };
-            let normal = if i < skinned_normals.len() { skinned_normals[i] }
-                else if i < common.normals.len() { let nm = &common.normals[i]; [nm.x, nm.y, nm.z] }
-                else { [0.0, 0.0, 1.0] };
-            let uv = if has_uv && i < common.uv_sets[0].len() { [common.uv_sets[0][i].u, common.uv_sets[0][i].v] }
-                else { [0.0, 0.0] };
+            let pos = if i < skinned_positions.len() {
+                skinned_positions[i]
+            } else if i < common.vertices.len() {
+                let v = &common.vertices[i];
+                [v.x, v.y, v.z]
+            } else {
+                [0.0, 0.0, 0.0]
+            };
+            let normal = if i < skinned_normals.len() {
+                skinned_normals[i]
+            } else if i < common.normals.len() {
+                let nm = &common.normals[i];
+                [nm.x, nm.y, nm.z]
+            } else {
+                [0.0, 0.0, 1.0]
+            };
+            let uv = if has_uv && i < common.uv_sets[0].len() {
+                [common.uv_sets[0][i].u, common.uv_sets[0][i].v]
+            } else {
+                [0.0, 0.0]
+            };
             let color = if has_colors && i < common.vertex_colors.len() {
-                let c = &common.vertex_colors[i]; [c.r, c.g, c.b, c.a]
-            } else { [1.0, 1.0, 1.0, 1.0] };
+                let c = &common.vertex_colors[i];
+                [c.r, c.g, c.b, c.a]
+            } else {
+                [1.0, 1.0, 1.0, 1.0]
+            };
             let tangent = if has_tangents && i < common.tangents.len() {
-                let t = &common.tangents[i]; [t.x, t.y, t.z]
-            } else { [0.0, 0.0, 0.0] };
+                let t = &common.tangents[i];
+                [t.x, t.y, t.z]
+            } else {
+                [0.0, 0.0, 0.0]
+            };
             let bitangent = if has_bitangs && i < common.bitangents.len() {
-                let b = &common.bitangents[i]; [b.x, b.y, b.z]
-            } else { [0.0, 0.0, 0.0] };
-            vertices.push(crate::vertex::Vertex { position: pos, normal, uv, color, tangent, bitangent });
+                let b = &common.bitangents[i];
+                [b.x, b.y, b.z]
+            } else {
+                [0.0, 0.0, 0.0]
+            };
+            vertices.push(crate::vertex::Vertex {
+                position: pos,
+                normal,
+                uv,
+                color,
+                tangent,
+                bitangent,
+            });
         }
 
         // 新バッファを作成してスワップ（サイズが同一のため実質インプレース相当）

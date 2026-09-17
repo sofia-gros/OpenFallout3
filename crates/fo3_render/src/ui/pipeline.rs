@@ -3,8 +3,8 @@
 //! スクリーン空間ピクセル座標によるテキストおよび矩形の最前面オーバーレイ描画。
 //! 参照元: `Fallout - Misc.bsa` (`menus\dialog\dialog_menu.xml`)
 
-use wgpu::util::DeviceExt;
 use super::font::{BitmapFont, TextBatch, UiVertex};
+use wgpu::util::DeviceExt;
 
 /// UI 画面解像度 Uniform。
 #[repr(C)]
@@ -28,7 +28,11 @@ pub struct UiRenderer {
 
 impl UiRenderer {
     /// 新規 UI レンダラーを生成。
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, surface_format: wgpu::TextureFormat) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        surface_format: wgpu::TextureFormat,
+    ) -> Self {
         let font = BitmapFont::create_embedded_fallback();
 
         // フォントアトラステクスチャを作成
@@ -255,17 +259,21 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             return;
         }
 
-        self.vertex_buffer = Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("UI Vertex Buffer"),
-            contents: bytemuck::cast_slice(&batch.vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        }));
+        self.vertex_buffer = Some(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("UI Vertex Buffer"),
+                contents: bytemuck::cast_slice(&batch.vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            }),
+        );
 
-        self.index_buffer = Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("UI Index Buffer"),
-            contents: bytemuck::cast_slice(&batch.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        }));
+        self.index_buffer = Some(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("UI Index Buffer"),
+                contents: bytemuck::cast_slice(&batch.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            }),
+        );
     }
 
     /// UI を描画パスに記録。

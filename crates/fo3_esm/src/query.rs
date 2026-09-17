@@ -13,7 +13,9 @@ use std::io::{self, Read, Seek, SeekFrom};
 
 use crate::header::GroupHeader;
 use crate::reader::{EsmEntry, EsmReader};
-use crate::records::{CellRecord, DialRecord, InfoRecord, LandRecord, RefrRecord, TermRecord, WorldRecord};
+use crate::records::{
+    CellRecord, DialRecord, InfoRecord, LandRecord, RefrRecord, TermRecord, WorldRecord,
+};
 use crate::types::{
     FormId, REC_ACHR, REC_ACRE, REC_CELL, REC_DIAL, REC_INFO, REC_LAND, REC_REFR, REC_TERM,
     REC_WRLD,
@@ -38,8 +40,8 @@ impl<R: Read + Seek> EsmReader<R> {
             match entry {
                 EsmEntry::Group(group) => {
                     let rtype = group.target_record_type();
-                    let group_end =
-                        self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                    let group_end = self.reader.stream_position()?
+                        + (group.group_size as u64 - GroupHeader::SIZE as u64);
                     if rtype == Some(REC_CELL) {
                         if let Some(res) = self.search_cell_in_stream(group_end, target_edid)? {
                             return Ok(Some(res));
@@ -127,8 +129,8 @@ impl<R: Read + Seek> EsmReader<R> {
                             if pos < group_end {
                                 if let Some(next_entry) = self.read_next_entry()? {
                                     if let EsmEntry::Group(child_group) = next_entry {
-                                        let child_size =
-                                            child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        let child_size = child_group.group_size as u64
+                                            - GroupHeader::SIZE as u64;
                                         let child_end = self.reader.stream_position()? + child_size;
                                         self.collect_children_in_group(
                                             child_end, &mut refrs, &mut land,
@@ -197,21 +199,24 @@ impl<R: Read + Seek> EsmReader<R> {
             match entry {
                 EsmEntry::Group(group) => {
                     let rtype = group.target_record_type();
-                    let group_end =
-                        self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                    let group_end = self.reader.stream_position()?
+                        + (group.group_size as u64 - GroupHeader::SIZE as u64);
                     if rtype == Some(REC_WRLD) {
                         while self.reader.stream_position()? < group_end {
                             if let Some(inner) = self.read_next_entry()? {
                                 match inner {
                                     EsmEntry::Record(rec_hdr, subs) => {
                                         if rec_hdr.type_id == REC_WRLD {
-                                            let world =
-                                                WorldRecord::from_subrecords(rec_hdr.form_id, &subs);
+                                            let world = WorldRecord::from_subrecords(
+                                                rec_hdr.form_id,
+                                                &subs,
+                                            );
                                             if world.edid.eq_ignore_ascii_case(target_edid) {
                                                 let next_pos = self.reader.stream_position()?;
                                                 if let Some(next_entry) = self.read_next_entry()? {
                                                     if let EsmEntry::Group(child_grp) = next_entry {
-                                                        let child_start = self.reader.stream_position()?;
+                                                        let child_start =
+                                                            self.reader.stream_position()?;
                                                         let child_end = child_start
                                                             + (child_grp.group_size as u64
                                                                 - GroupHeader::SIZE as u64);
@@ -276,13 +281,14 @@ impl<R: Read + Seek> EsmReader<R> {
         )?;
 
         // 有効セル（REFR または LAND または EDID を保持するセル）のみを抽出
-        let mut all_valid_cells: Vec<(CellRecord, Vec<RefrRecord>, Option<LandRecord>)> = cell_order
-            .into_iter()
-            .filter_map(|id| cell_map.remove(&id))
-            .filter(|(cell, refrs, land)| {
-                !refrs.is_empty() || land.is_some() || !cell.edid.is_empty()
-            })
-            .collect();
+        let mut all_valid_cells: Vec<(CellRecord, Vec<RefrRecord>, Option<LandRecord>)> =
+            cell_order
+                .into_iter()
+                .filter_map(|id| cell_map.remove(&id))
+                .filter(|(cell, refrs, land)| {
+                    !refrs.is_empty() || land.is_some() || !cell.edid.is_empty()
+                })
+                .collect();
 
         // 独立ワールド空間 (MegatonWorld 等: 有効セル数 25 件以下) なら全景（パーシステントセル含む）を一括返却
         if all_valid_cells.len() <= 25 {
@@ -348,8 +354,10 @@ impl<R: Read + Seek> EsmReader<R> {
                     // Group Type 3: Exterior Cell Block (X, Y block)
                     if group.group_type == 3 {
                         if let Some((cx, cy)) = center_grid {
-                            let block_y = i16::from_le_bytes([group.label[0], group.label[1]]) as i32;
-                            let block_x = i16::from_le_bytes([group.label[2], group.label[3]]) as i32;
+                            let block_y =
+                                i16::from_le_bytes([group.label[0], group.label[1]]) as i32;
+                            let block_x =
+                                i16::from_le_bytes([group.label[2], group.label[3]]) as i32;
                             let min_gx = block_x * 8;
                             let max_gx = min_gx + 7;
                             let min_gy = block_y * 8;
@@ -408,13 +416,17 @@ impl<R: Read + Seek> EsmReader<R> {
         target_edid: &str,
         radius: i32,
     ) -> io::Result<Option<Vec<(CellRecord, Vec<RefrRecord>, Option<LandRecord>)>>> {
-        if let Some((center_cell, center_refrs, center_land)) = self.find_cell_by_edid(target_edid)? {
+        if let Some((center_cell, center_refrs, center_land)) =
+            self.find_cell_by_edid(target_edid)?
+        {
             if center_cell.is_interior() {
                 return Ok(Some(vec![(center_cell, center_refrs, center_land)]));
             }
 
             if let Some((grid_x, grid_y)) = center_cell.grid {
-                if let Some((_world, group_start, group_end)) = self.find_world_by_edid("Wasteland")? {
+                if let Some((_world, group_start, group_end)) =
+                    self.find_world_by_edid("Wasteland")?
+                {
                     let (_, cells) = self.read_cells_in_world_region(
                         group_start,
                         group_end,
@@ -438,7 +450,14 @@ impl<R: Read + Seek> EsmReader<R> {
     pub fn find_cell_containing_refr(
         &mut self,
         target_refr_id: FormId,
-    ) -> io::Result<Option<(CellRecord, Vec<RefrRecord>, Option<LandRecord>, Option<WorldRecord>)>> {
+    ) -> io::Result<
+        Option<(
+            CellRecord,
+            Vec<RefrRecord>,
+            Option<LandRecord>,
+            Option<WorldRecord>,
+        )>,
+    > {
         let start_pos = 24 + self.header_record.data_size as u64;
         self.reader.seek(SeekFrom::Start(start_pos))?;
 
@@ -449,8 +468,8 @@ impl<R: Read + Seek> EsmReader<R> {
             match entry {
                 EsmEntry::Group(group) => {
                     let rtype = group.target_record_type();
-                    let group_end =
-                        self.reader.stream_position()? + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                    let group_end = self.reader.stream_position()?
+                        + (group.group_size as u64 - GroupHeader::SIZE as u64);
                     if rtype == Some(REC_CELL) {
                         if let Some((cell, refrs, land)) =
                             self.search_cell_with_refr_in_stream(group_end, target_refr_id)?
@@ -608,7 +627,9 @@ impl<R: Read + Seek> EsmReader<R> {
                             if let Some(inner) = self.read_next_entry()? {
                                 match inner {
                                     EsmEntry::Record(rec_hdr, subs) => {
-                                        if rec_hdr.type_id == REC_TERM && rec_hdr.form_id == target_form_id {
+                                        if rec_hdr.type_id == REC_TERM
+                                            && rec_hdr.form_id == target_form_id
+                                        {
                                             return TermRecord::parse(&rec_hdr, &subs).map(Some);
                                         }
                                     }
@@ -689,11 +710,18 @@ impl<R: Read + Seek> EsmReader<R> {
                                                     if d.edid.eq_ignore_ascii_case("GREETING") {
                                                         if is_speaker_match(&info) {
                                                             if specific_greeting.is_none() {
-                                                                specific_greeting = Some(info.clone());
+                                                                specific_greeting =
+                                                                    Some(info.clone());
                                                             }
-                                                        } else if info.speaker_npc.is_none() && !info.conditions.iter().any(|c| c.function_index == 0x0048) {
+                                                        } else if info.speaker_npc.is_none()
+                                                            && !info
+                                                                .conditions
+                                                                .iter()
+                                                                .any(|c| c.function_index == 0x0048)
+                                                        {
                                                             if generic_greeting.is_none() {
-                                                                generic_greeting = Some(info.clone());
+                                                                generic_greeting =
+                                                                    Some(info.clone());
                                                             }
                                                         }
                                                     } else if d.is_topic() {
@@ -707,22 +735,44 @@ impl<R: Read + Seek> EsmReader<R> {
                                     }
                                     EsmEntry::Group(g) => {
                                         // Grp_TopicChild (サブグループ) 内の INFO レコードを走査
-                                        let sub_size = g.group_size as u64 - GroupHeader::SIZE as u64;
+                                        let sub_size =
+                                            g.group_size as u64 - GroupHeader::SIZE as u64;
                                         let sub_end = self.reader.stream_position()? + sub_size;
                                         while self.reader.stream_position()? < sub_end {
                                             if let Some(inner_entry) = self.read_next_entry()? {
-                                                if let EsmEntry::Record(rec_hdr, subs) = inner_entry {
+                                                if let EsmEntry::Record(rec_hdr, subs) = inner_entry
+                                                {
                                                     if rec_hdr.type_id == REC_INFO {
-                                                        if let Ok(info) = InfoRecord::parse(&rec_hdr, &subs) {
+                                                        if let Ok(info) =
+                                                            InfoRecord::parse(&rec_hdr, &subs)
+                                                        {
                                                             if let Some(ref d) = current_dial {
-                                                                if d.edid.eq_ignore_ascii_case("GREETING") {
+                                                                if d.edid.eq_ignore_ascii_case(
+                                                                    "GREETING",
+                                                                ) {
                                                                     if is_speaker_match(&info) {
-                                                                        if specific_greeting.is_none() {
-                                                                            specific_greeting = Some(info.clone());
+                                                                        if specific_greeting
+                                                                            .is_none()
+                                                                        {
+                                                                            specific_greeting =
+                                                                                Some(info.clone());
                                                                         }
-                                                                    } else if info.speaker_npc.is_none() && !info.conditions.iter().any(|c| c.function_index == 0x0046) {
-                                                                        if generic_greeting.is_none() {
-                                                                            generic_greeting = Some(info.clone());
+                                                                    } else if info
+                                                                        .speaker_npc
+                                                                        .is_none()
+                                                                        && !info
+                                                                            .conditions
+                                                                            .iter()
+                                                                            .any(|c| {
+                                                                                c.function_index
+                                                                                    == 0x0046
+                                                                            })
+                                                                    {
+                                                                        if generic_greeting
+                                                                            .is_none()
+                                                                        {
+                                                                            generic_greeting =
+                                                                                Some(info.clone());
                                                                         }
                                                                     }
                                                                 } else if d.is_topic() {

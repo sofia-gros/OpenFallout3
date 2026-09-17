@@ -4,9 +4,9 @@
 //! - `references/openmw/components/fontloader/fontloader.cpp:394-440` (Gamebryo/Bethesda .fnt バイナリ形式)
 //! - `Fallout - Misc.bsa` (`menus\dialog\dialog_menu.xml`, `menus\terminal\terminal_menu.xml`)
 
-use std::io::{self, Read};
 use bytemuck::{Pod, Zeroable};
 use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Read};
 
 /// UI 描画用頂点。
 /// スクリーンピクセル座標 (X, Y)、テクスチャ座標 (U, V)、RGBA カラーを持つ。
@@ -84,12 +84,20 @@ impl BitmapFont {
     /// 実機 `.fnt` バイナリデータからフォントメトリクスをパースする。
     ///
     /// 参照元: `references/openmw/components/fontloader/fontloader.cpp:410-440`
-    pub fn parse_fnt(mut reader: impl Read, tex_width: u32, tex_height: u32, texture_rgba: Vec<u8>) -> io::Result<Self> {
+    pub fn parse_fnt(
+        mut reader: impl Read,
+        tex_width: u32,
+        tex_height: u32,
+        texture_rgba: Vec<u8>,
+    ) -> io::Result<Self> {
         let font_size = reader.read_f32::<LittleEndian>()?;
         let magic1 = reader.read_i32::<LittleEndian>()?;
         let magic2 = reader.read_i32::<LittleEndian>()?;
         if magic1 != 1 || magic2 != 1 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid .fnt magic header"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Invalid .fnt magic header",
+            ));
         }
 
         let mut name_buf = [0u8; 284];
@@ -239,48 +247,120 @@ fn render_simple_char(ch: u8, x: u32, y: u32, stride: u32, buf: &mut [u8]) {
 
 fn get_digit_pattern(ch: u8) -> [u8; 7] {
     match ch {
-        b'0' => [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
-        b'1' => [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
-        b'2' => [0b01110, 0b10001, 0b00001, 0b00110, 0b01000, 0b10000, 0b11111],
-        b'3' => [0b11110, 0b00001, 0b00010, 0b01100, 0b00010, 0b00001, 0b11110],
-        b'4' => [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010],
-        b'5' => [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110],
-        b'6' => [0b01110, 0b10000, 0b11110, 0b10001, 0b10001, 0b10001, 0b01110],
-        b'7' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000],
-        b'8' => [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110],
-        b'9' => [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00001, 0b01110],
+        b'0' => [
+            0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+        ],
+        b'1' => [
+            0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        ],
+        b'2' => [
+            0b01110, 0b10001, 0b00001, 0b00110, 0b01000, 0b10000, 0b11111,
+        ],
+        b'3' => [
+            0b11110, 0b00001, 0b00010, 0b01100, 0b00010, 0b00001, 0b11110,
+        ],
+        b'4' => [
+            0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+        ],
+        b'5' => [
+            0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
+        ],
+        b'6' => [
+            0b01110, 0b10000, 0b11110, 0b10001, 0b10001, 0b10001, 0b01110,
+        ],
+        b'7' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+        ],
+        b'8' => [
+            0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+        ],
+        b'9' => [
+            0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00001, 0b01110,
+        ],
         _ => [0; 7],
     }
 }
 
 fn get_alpha_pattern(ch: u8) -> [u8; 7] {
     match ch {
-        b'A' => [0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
-        b'B' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110],
-        b'C' => [0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110],
-        b'D' => [0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110],
-        b'E' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111],
-        b'F' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000],
-        b'G' => [0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01110],
-        b'H' => [0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
-        b'I' => [0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
-        b'J' => [0b00111, 0b00010, 0b00010, 0b00010, 0b00010, 0b10010, 0b01100],
-        b'K' => [0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001],
-        b'L' => [0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111],
-        b'M' => [0b10001, 0b11011, 0b10101, 0b10001, 0b10001, 0b10001, 0b10001],
-        b'N' => [0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001],
-        b'O' => [0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
-        b'P' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000],
-        b'Q' => [0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10011, 0b01111],
-        b'R' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001],
-        b'S' => [0b01110, 0b10001, 0b10000, 0b01110, 0b00001, 0b10001, 0b01110],
-        b'T' => [0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100],
-        b'U' => [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
-        b'V' => [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100],
-        b'W' => [0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 0b10001],
-        b'X' => [0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001],
-        b'Y' => [0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100],
-        b'Z' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111],
+        b'A' => [
+            0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ],
+        b'B' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110,
+        ],
+        b'C' => [
+            0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110,
+        ],
+        b'D' => [
+            0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110,
+        ],
+        b'E' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111,
+        ],
+        b'F' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000,
+        ],
+        b'G' => [
+            0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01110,
+        ],
+        b'H' => [
+            0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ],
+        b'I' => [
+            0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        ],
+        b'J' => [
+            0b00111, 0b00010, 0b00010, 0b00010, 0b00010, 0b10010, 0b01100,
+        ],
+        b'K' => [
+            0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001,
+        ],
+        b'L' => [
+            0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111,
+        ],
+        b'M' => [
+            0b10001, 0b11011, 0b10101, 0b10001, 0b10001, 0b10001, 0b10001,
+        ],
+        b'N' => [
+            0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001,
+        ],
+        b'O' => [
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ],
+        b'P' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000,
+        ],
+        b'Q' => [
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10011, 0b01111,
+        ],
+        b'R' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001,
+        ],
+        b'S' => [
+            0b01110, 0b10001, 0b10000, 0b01110, 0b00001, 0b10001, 0b01110,
+        ],
+        b'T' => [
+            0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        b'U' => [
+            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ],
+        b'V' => [
+            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100,
+        ],
+        b'W' => [
+            0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 0b10001,
+        ],
+        b'X' => [
+            0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001,
+        ],
+        b'Y' => [
+            0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        b'Z' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111,
+        ],
         _ => [0; 7],
     }
 }
@@ -317,19 +397,47 @@ impl TextBatch {
         let base_idx = self.vertices.len() as u32;
         let [u0, v0, u1, v1] = uv;
 
-        self.vertices.push(UiVertex { position: [x, y], tex_coord: [u0, v0], color });
-        self.vertices.push(UiVertex { position: [x + w, y], tex_coord: [u1, v0], color });
-        self.vertices.push(UiVertex { position: [x + w, y + h], tex_coord: [u1, v1], color });
-        self.vertices.push(UiVertex { position: [x, y + h], tex_coord: [u0, v1], color });
+        self.vertices.push(UiVertex {
+            position: [x, y],
+            tex_coord: [u0, v0],
+            color,
+        });
+        self.vertices.push(UiVertex {
+            position: [x + w, y],
+            tex_coord: [u1, v0],
+            color,
+        });
+        self.vertices.push(UiVertex {
+            position: [x + w, y + h],
+            tex_coord: [u1, v1],
+            color,
+        });
+        self.vertices.push(UiVertex {
+            position: [x, y + h],
+            tex_coord: [u0, v1],
+            color,
+        });
 
         self.indices.extend_from_slice(&[
-            base_idx, base_idx + 1, base_idx + 2,
-            base_idx, base_idx + 2, base_idx + 3,
+            base_idx,
+            base_idx + 1,
+            base_idx + 2,
+            base_idx,
+            base_idx + 2,
+            base_idx + 3,
         ]);
     }
 
     /// 文字列を指定座標に描画。スマートクォート等の記号を正規化して文字化けを防止する。
-    pub fn add_text(&mut self, font: &BitmapFont, text: &str, mut x: f32, y: f32, scale: f32, color: [f32; 4]) {
+    pub fn add_text(
+        &mut self,
+        font: &BitmapFont,
+        text: &str,
+        mut x: f32,
+        y: f32,
+        scale: f32,
+        color: [f32; 4],
+    ) {
         for c in text.chars() {
             let b = normalize_ui_char(c);
             let metric = &font.glyphs[b as usize];
@@ -339,14 +447,34 @@ impl TextBatch {
             let base_idx = self.vertices.len() as u32;
             let [u0, v0, u1, v1] = metric.uv_rect;
 
-            self.vertices.push(UiVertex { position: [x, y], tex_coord: [u0, v0], color });
-            self.vertices.push(UiVertex { position: [x + gw, y], tex_coord: [u1, v0], color });
-            self.vertices.push(UiVertex { position: [x + gw, y + gh], tex_coord: [u1, v1], color });
-            self.vertices.push(UiVertex { position: [x, y + gh], tex_coord: [u0, v1], color });
+            self.vertices.push(UiVertex {
+                position: [x, y],
+                tex_coord: [u0, v0],
+                color,
+            });
+            self.vertices.push(UiVertex {
+                position: [x + gw, y],
+                tex_coord: [u1, v0],
+                color,
+            });
+            self.vertices.push(UiVertex {
+                position: [x + gw, y + gh],
+                tex_coord: [u1, v1],
+                color,
+            });
+            self.vertices.push(UiVertex {
+                position: [x, y + gh],
+                tex_coord: [u0, v1],
+                color,
+            });
 
             self.indices.extend_from_slice(&[
-                base_idx, base_idx + 1, base_idx + 2,
-                base_idx, base_idx + 2, base_idx + 3,
+                base_idx,
+                base_idx + 1,
+                base_idx + 2,
+                base_idx,
+                base_idx + 2,
+                base_idx + 3,
             ]);
 
             x += metric.advance_x * scale;

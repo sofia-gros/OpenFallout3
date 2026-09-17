@@ -19,7 +19,9 @@ impl AudioPipeReader {
     fn run(mut self) {
         let mut chunk = vec![0u8; 4096];
         loop {
-            if self.stop.load(Ordering::Relaxed) { break; }
+            if self.stop.load(Ordering::Relaxed) {
+                break;
+            }
             match self.stdout.read(&mut chunk) {
                 Ok(0) => break,
                 Ok(n) => {
@@ -56,10 +58,18 @@ impl Iterator for PcmStreamSource {
 }
 
 impl rodio::Source for PcmStreamSource {
-    fn current_frame_len(&self) -> Option<usize> { None }
-    fn channels(&self) -> u16 { 2 }
-    fn sample_rate(&self) -> u32 { 44100 }
-    fn total_duration(&self) -> Option<Duration> { None }
+    fn current_frame_len(&self) -> Option<usize> {
+        None
+    }
+    fn channels(&self) -> u16 {
+        2
+    }
+    fn sample_rate(&self) -> u32 {
+        44100
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        None
+    }
 }
 
 struct VideoPipeReader {
@@ -74,10 +84,14 @@ impl VideoPipeReader {
     fn run(mut self) {
         let mut frame_buf = vec![0u8; self.frame_size];
         loop {
-            if self.stop.load(Ordering::Relaxed) { break; }
+            if self.stop.load(Ordering::Relaxed) {
+                break;
+            }
             let mut bytes_read = 0;
             while bytes_read < self.frame_size {
-                if self.stop.load(Ordering::Relaxed) { break; }
+                if self.stop.load(Ordering::Relaxed) {
+                    break;
+                }
                 match self.stdout.read(&mut frame_buf[bytes_read..]) {
                     Ok(0) => {
                         self.eof.store(true, Ordering::Release);
@@ -129,12 +143,17 @@ impl BinkPlayer {
         let mut child = Command::new("ffmpeg")
             .args([
                 "-re",
-                "-loglevel", "quiet",
-                "-i", file_path,
+                "-loglevel",
+                "quiet",
+                "-i",
+                file_path,
                 "-an",
-                "-f", "rawvideo",
-                "-pix_fmt", "rgba",
-                "-s", &format!("{}x{}", target_width, target_height),
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgba",
+                "-s",
+                &format!("{}x{}", target_width, target_height),
                 "pipe:1",
             ])
             .stdout(Stdio::piped())
@@ -179,7 +198,10 @@ impl BinkPlayer {
         let (audio_process, audio_thread, audio_stop, audio_eof, audio_buffer, audio_sink) =
             Self::open_audio(file_path, audio_handle);
 
-        println!("[BinkPlayer] {} ({}x{}) のインウィンドウ再生を開始 (非同期)", file_path, target_width, target_height);
+        println!(
+            "[BinkPlayer] {} ({}x{}) のインウィンドウ再生を開始 (非同期)",
+            file_path, target_width, target_height
+        );
 
         Some(Self {
             _process: Some(child),
@@ -225,12 +247,17 @@ impl BinkPlayer {
         let mut child = match Command::new("ffmpeg")
             .args([
                 "-re",
-                "-loglevel", "quiet",
-                "-i", file_path,
+                "-loglevel",
+                "quiet",
+                "-i",
+                file_path,
                 "-vn",
-                "-ac", "2",
-                "-ar", "44100",
-                "-f", "s16le",
+                "-ac",
+                "2",
+                "-ar",
+                "44100",
+                "-f",
+                "s16le",
                 "pipe:1",
             ])
             .stdout(Stdio::piped())
@@ -302,7 +329,11 @@ impl BinkPlayer {
                     bytes_per_row: Some(self.width * 4),
                     rows_per_image: Some(self.height),
                 },
-                wgpu::Extent3d { width: self.width, height: self.height, depth_or_array_layers: 1 },
+                wgpu::Extent3d {
+                    width: self.width,
+                    height: self.height,
+                    depth_or_array_layers: 1,
+                },
             );
             true
         } else {
@@ -320,14 +351,14 @@ impl Drop for BinkPlayer {
     fn drop(&mut self) {
         self.audio_stop.store(true, Ordering::Relaxed);
         self.video_stop.store(true, Ordering::Relaxed);
-        
+
         if let Some(mut p) = self._audio_process.take() {
             let _ = p.kill();
         }
         if let Some(t) = self._audio_thread.take() {
             let _ = t.join();
         }
-        
+
         if let Some(mut p) = self._process.take() {
             let _ = p.kill();
         }

@@ -3,14 +3,14 @@
 //! セル空間内に配置された静的・動的オブジェクトの実体参照レコード。
 //! 参照元: `references/openmw/components/esm4/loadrefr.hpp`, `loadrefr.cpp`
 
-use std::io::{self, Cursor};
-use byteorder::{LittleEndian, ReadBytesExt};
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{
-    FormId, FourCC, SUB_DATA, SUB_EDID, SUB_NAME, SUB_SCRI, SUB_TNAM, SUB_XCNT, SUB_XESP,
-    SUB_XLOC, SUB_XMRK, SUB_XOWN, SUB_XRNK, SUB_XSCL, SUB_XTEL,
+    FormId, FourCC, SUB_DATA, SUB_EDID, SUB_NAME, SUB_SCRI, SUB_TNAM, SUB_XCNT, SUB_XESP, SUB_XLOC,
+    SUB_XMRK, SUB_XOWN, SUB_XRNK, SUB_XSCL, SUB_XTEL,
 };
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Cursor};
 
 /// ドアのテレポート先遷移情報 (`XTEL` サブレコード)。
 ///
@@ -158,10 +158,24 @@ impl RefrRecord {
                     // 参照元: references/openmw/components/esm4/loadrefr.cpp:248-270
                     if sub.data.len() >= 8 {
                         let lock_level = sub.data[0];
-                        let key_id = u32::from_le_bytes([sub.data[4], sub.data[5], sub.data[6], sub.data[7]]);
-                        let key = if key_id != 0 { Some(FormId(key_id)) } else { None };
+                        let key_id = u32::from_le_bytes([
+                            sub.data[4],
+                            sub.data[5],
+                            sub.data[6],
+                            sub.data[7],
+                        ]);
+                        let key = if key_id != 0 {
+                            Some(FormId(key_id))
+                        } else {
+                            None
+                        };
                         let flags = if sub.data.len() >= 12 {
-                            u32::from_le_bytes([sub.data[8], sub.data[9], sub.data[10], sub.data[11]])
+                            u32::from_le_bytes([
+                                sub.data[8],
+                                sub.data[9],
+                                sub.data[10],
+                                sub.data[11],
+                            ])
                         } else {
                             0
                         };
@@ -175,8 +189,18 @@ impl RefrRecord {
                 SUB_XESP => {
                     // 参照元: references/openmw/components/esm4/reference.hpp:39-49
                     if sub.data.len() >= 8 {
-                        let parent_id = u32::from_le_bytes([sub.data[0], sub.data[1], sub.data[2], sub.data[3]]);
-                        let flags = u32::from_le_bytes([sub.data[4], sub.data[5], sub.data[6], sub.data[7]]);
+                        let parent_id = u32::from_le_bytes([
+                            sub.data[0],
+                            sub.data[1],
+                            sub.data[2],
+                            sub.data[3],
+                        ]);
+                        let flags = u32::from_le_bytes([
+                            sub.data[4],
+                            sub.data[5],
+                            sub.data[6],
+                            sub.data[7],
+                        ]);
                         enable_parent = Some(EnableParent {
                             parent: FormId(parent_id),
                             flags,

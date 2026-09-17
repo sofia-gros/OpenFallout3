@@ -6,10 +6,10 @@
 //! 参照元: `references/bevyout/src/vsa/openmw_esm4/idle.rs:L5-22, L120-193`
 //!         `knowledge/phase11_ai_package_and_quest_progression.md` (セクション 4.3)
 
-use std::io;
-use byteorder::{ByteOrder, LittleEndian};
 use crate::subrecord::Subrecord;
 use crate::types::{FormId, SUB_ANAM, SUB_CNAM, SUB_DATA, SUB_EDID, SUB_MODL};
+use byteorder::{ByteOrder, LittleEndian};
+use std::io;
 
 /// IDLE (Idle Animation) レコード。
 /// アニメーション群 (立っている・座る・歩き回る等) のうち 1 個のアニメーション定義。

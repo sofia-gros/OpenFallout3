@@ -51,7 +51,10 @@ pub enum ExprOp {
     /// 定数値の代入 (`<copy> 123 </copy>`)
     Const(f32),
     /// 他ノード Trait の取得 (`<copy src="..." trait="..."/>`)
-    CopyTrait { source: TraitSource, trait_name: String },
+    CopyTrait {
+        source: TraitSource,
+        trait_name: String,
+    },
     /// 加算 (`<add> ... </add>`)
     Add(Box<ExprOp>),
     /// 減算 (`<sub> ... </sub>`)
@@ -71,9 +74,15 @@ pub enum ExprOp {
     /// 論理否定 (`<not src="..." trait="..."/>`)
     Not(Box<ExprOp>),
     /// 条件成立時のみ加算 (`<onlyif src="..." trait="..."/>`)
-    OnlyIf { condition: Box<ExprOp>, operand: Option<Box<ExprOp>> },
+    OnlyIf {
+        condition: Box<ExprOp>,
+        operand: Option<Box<ExprOp>>,
+    },
     /// 条件不成立時のみ加算 (`<onlyifnot src="..." trait="..."/>`)
-    OnlyIfNot { condition: Box<ExprOp>, operand: Option<Box<ExprOp>> },
+    OnlyIfNot {
+        condition: Box<ExprOp>,
+        operand: Option<Box<ExprOp>>,
+    },
 }
 
 /// プロパティ値 (Trait)。
@@ -115,21 +124,27 @@ impl MenuNode {
 
     /// 数値プロパティを設定する。
     pub fn set_num(&mut self, trait_name: &str, val: f32) {
-        self.traits.insert(trait_name.to_lowercase(), TraitValue::Number(val));
+        self.traits
+            .insert(trait_name.to_lowercase(), TraitValue::Number(val));
     }
 
     /// 文字列プロパティを設定する。
     pub fn set_str(&mut self, trait_name: &str, val: &str) {
-        self.traits.insert(trait_name.to_lowercase(), TraitValue::String(val.to_string()));
+        self.traits.insert(
+            trait_name.to_lowercase(),
+            TraitValue::String(val.to_string()),
+        );
     }
 
     /// 真偽値プロパティを設定する。
     pub fn set_bool(&mut self, trait_name: &str, val: bool) {
-        self.traits.insert(trait_name.to_lowercase(), TraitValue::Bool(val));
+        self.traits
+            .insert(trait_name.to_lowercase(), TraitValue::Bool(val));
     }
 
     /// 動的計算式を設定する。
     pub fn set_expr(&mut self, trait_name: &str, ops: Vec<ExprOp>) {
-        self.traits.insert(trait_name.to_lowercase(), TraitValue::Expression(ops));
+        self.traits
+            .insert(trait_name.to_lowercase(), TraitValue::Expression(ops));
     }
 }

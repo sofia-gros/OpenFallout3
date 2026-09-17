@@ -3,10 +3,10 @@
 //! Fallout 3 実機アセットのスクリプト (`SCPT`) および会話・ターミナルの Result Script を決定論的に実行する。
 //! 参照元: `references/bevyout/docs/plans/M7_SCRIPTING_ARCHITECTURE_ROADMAP.md`
 
-use std::collections::{HashMap, HashSet};
-use fo3_esm::{EsmMasterContext, FormId, ScptRecord};
 use crate::opcodes::functions::*;
 use crate::quest::QuestManager;
+use fo3_esm::{EsmMasterContext, FormId, ScptRecord};
+use std::collections::{HashMap, HashSet};
 
 /// スクリプト実行時エラー。
 #[derive(Debug, Clone, PartialEq)]
@@ -21,7 +21,9 @@ impl std::fmt::Display for ScriptError {
         match self {
             ScriptError::UnknownCommand(cmd) => write!(f, "Unknown command or variable: {}", cmd),
             ScriptError::ParseError(msg) => write!(f, "Parse error: {}", msg),
-            ScriptError::InvalidArguments(msg) => write!(f, "Invalid arguments for function: {}", msg),
+            ScriptError::InvalidArguments(msg) => {
+                write!(f, "Invalid arguments for function: {}", msg)
+            }
         }
     }
 }
@@ -170,7 +172,8 @@ impl ScriptVm {
 
     /// マスター ESM コンテキストから全定義を一括初期化する。
     pub fn initialize_from_master(&mut self, master: &EsmMasterContext) {
-        self.quest_manager.register_all_quests(master.quest_map.clone(), master.quest_edid_map.clone());
+        self.quest_manager
+            .register_all_quests(master.quest_map.clone(), master.quest_edid_map.clone());
         self.scripts = master.script_map.clone();
         for (edid, &form_id) in &master.quest_edid_map {
             self.edid_map.insert(edid.clone(), form_id);
@@ -185,7 +188,10 @@ impl ScriptVm {
     /// 文字列 (0x16進数, 10進数, または EditorID) から FormID を解決。
     pub fn resolve_form_id(&self, s: &str) -> Result<FormId, ScriptError> {
         let clean = s.trim();
-        if let Some(hex) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) {
+        if let Some(hex) = clean
+            .strip_prefix("0x")
+            .or_else(|| clean.strip_prefix("0X"))
+        {
             u32::from_str_radix(hex, 16)
                 .map(FormId)
                 .map_err(|e| ScriptError::ParseError(e.to_string()))
@@ -196,7 +202,10 @@ impl ScriptVm {
         } else if let Some(form_id) = self.quest_manager.resolve_quest_id(clean) {
             Ok(form_id)
         } else {
-            Err(ScriptError::ParseError(format!("Unknown FormID/EditorID: {}", clean)))
+            Err(ScriptError::ParseError(format!(
+                "Unknown FormID/EditorID: {}",
+                clean
+            )))
         }
     }
 
@@ -209,7 +218,8 @@ impl ScriptVm {
         self.quest_stages.insert(quest_id, stage);
         if let Some(script) = self.quest_manager.set_stage(quest_id, stage as u16, None) {
             // Result Script を即時実行せず遅延キューへ積む
-            self.pending_stage_scripts.push_back((quest_id, stage as u16, script));
+            self.pending_stage_scripts
+                .push_back((quest_id, stage as u16, script));
         }
     }
 
@@ -257,7 +267,11 @@ impl ScriptVm {
     /// - `player.additem 0x000abcde 1`
     /// - `CG00DadREF.evp` (dot 記法: prefix が subject EDID)
     /// - `Unlock`
-    pub fn execute_statement(&mut self, line: &str, self_id: Option<FormId>) -> Result<(), ScriptError> {
+    pub fn execute_statement(
+        &mut self,
+        line: &str,
+        self_id: Option<FormId>,
+    ) -> Result<(), ScriptError> {
         let no_comment = if let Some(pos) = line.find(';') {
             &line[..pos]
         } else {
@@ -302,7 +316,9 @@ impl ScriptVm {
             "setstage" => {
                 if parts.len() >= 3 {
                     let q_id = self.resolve_form_id(parts[1])?;
-                    let stage = parts[2].parse::<u32>().map_err(|e| ScriptError::ParseError(e.to_string()))?;
+                    let stage = parts[2]
+                        .parse::<u32>()
+                        .map_err(|e| ScriptError::ParseError(e.to_string()))?;
                     self.set_stage(q_id, stage);
                 }
             }
@@ -310,9 +326,12 @@ impl ScriptVm {
                 // SetObjectiveDisplayed <QuestID> <ObjectiveIndex> <Flag>
                 if parts.len() >= 4 {
                     let q_id = self.resolve_form_id(parts[1])?;
-                    let obj_idx = parts[2].parse::<u32>().map_err(|e| ScriptError::ParseError(e.to_string()))?;
+                    let obj_idx = parts[2]
+                        .parse::<u32>()
+                        .map_err(|e| ScriptError::ParseError(e.to_string()))?;
                     let flag = parts[3].parse::<u32>().unwrap_or(0) != 0;
-                    self.quest_manager.set_objective_displayed(q_id, obj_idx, flag);
+                    self.quest_manager
+                        .set_objective_displayed(q_id, obj_idx, flag);
                 }
             }
             "set" => {
@@ -323,7 +342,9 @@ impl ScriptVm {
                     let val = self.eval_expr(&expr, self_id);
                     let lower_var = var_name.to_ascii_lowercase();
                     // グローバル変数                    // 変数解決 (case-insensitive 検索)
-                    let global_key = self.globals.keys()
+                    let global_key = self
+                        .globals
+                        .keys()
                         .find(|k| k.eq_ignore_ascii_case(var_name))
                         .cloned();
                     if let Some(k) = global_key {
@@ -331,7 +352,11 @@ impl ScriptVm {
                     } else if let Some((prefix, sub)) = lower_var.split_once('.') {
                         // 2. Cross reference set (e.g. CG00.timer)
                         let mut target_q_id = None;
-                        if let Some(q_id) = self.edid_map.get(prefix).or_else(|| self.edid_map.get(&prefix.to_ascii_uppercase())) {
+                        if let Some(q_id) = self
+                            .edid_map
+                            .get(prefix)
+                            .or_else(|| self.edid_map.get(&prefix.to_ascii_uppercase()))
+                        {
                             if self.quest_manager.quests.contains_key(q_id) {
                                 target_q_id = Some(*q_id);
                             }
@@ -350,7 +375,8 @@ impl ScriptVm {
                         // 3. Local variable set
                         if let Some(q_id) = self_id {
                             if self.quest_manager.quests.contains_key(&q_id) {
-                                self.quest_manager.set_quest_variable(q_id, &lower_var, val as f64);
+                                self.quest_manager
+                                    .set_quest_variable(q_id, &lower_var, val as f64);
                             }
                         }
                         self.locals.insert(lower_var, val);
@@ -367,30 +393,86 @@ impl ScriptVm {
                     self.player_controls.pov = false;
                     self.player_controls.cam_switch = false;
                 } else {
-                    if let Some(p) = parts.get(1) { if *p == "1" { self.player_controls.movement = false; } }
-                    if let Some(p) = parts.get(2) { if *p == "1" { self.player_controls.looking = false; } }
-                    if let Some(p) = parts.get(3) { if *p == "1" { self.player_controls.pipboy = false; } }
-                    if let Some(p) = parts.get(4) { if *p == "1" { self.player_controls.fight = false; } }
-                    if let Some(p) = parts.get(5) { if *p == "1" { self.player_controls.pov = false; } }
-                    if let Some(p) = parts.get(6) { if *p == "1" { self.player_controls.cam_switch = false; } }
+                    if let Some(p) = parts.get(1) {
+                        if *p == "1" {
+                            self.player_controls.movement = false;
+                        }
+                    }
+                    if let Some(p) = parts.get(2) {
+                        if *p == "1" {
+                            self.player_controls.looking = false;
+                        }
+                    }
+                    if let Some(p) = parts.get(3) {
+                        if *p == "1" {
+                            self.player_controls.pipboy = false;
+                        }
+                    }
+                    if let Some(p) = parts.get(4) {
+                        if *p == "1" {
+                            self.player_controls.fight = false;
+                        }
+                    }
+                    if let Some(p) = parts.get(5) {
+                        if *p == "1" {
+                            self.player_controls.pov = false;
+                        }
+                    }
+                    if let Some(p) = parts.get(6) {
+                        if *p == "1" {
+                            self.player_controls.cam_switch = false;
+                        }
+                    }
                 }
-                self.player_controls_enabled = self.player_controls.movement && self.player_controls.looking;
-                println!("[Script] DisablePlayerControls: プレイヤー操作無効化 (flags: {:?})", self.player_controls);
+                self.player_controls_enabled =
+                    self.player_controls.movement && self.player_controls.looking;
+                println!(
+                    "[Script] DisablePlayerControls: プレイヤー操作無効化 (flags: {:?})",
+                    self.player_controls
+                );
             }
             "enableplayercontrols" => {
                 // 参照元: GECK Wiki `EnablePlayerControls [bMovement] [bLooking] [bPipboy] [bFight] [bPOV] [bCamSwitch]`
                 if parts.len() == 1 {
                     self.player_controls = PlayerControlFlags::default();
                 } else {
-                    if let Some(p) = parts.get(1) { if *p == "1" { self.player_controls.movement = true; } }
-                    if let Some(p) = parts.get(2) { if *p == "1" { self.player_controls.looking = true; } }
-                    if let Some(p) = parts.get(3) { if *p == "1" { self.player_controls.pipboy = true; } }
-                    if let Some(p) = parts.get(4) { if *p == "1" { self.player_controls.fight = true; } }
-                    if let Some(p) = parts.get(5) { if *p == "1" { self.player_controls.pov = true; } }
-                    if let Some(p) = parts.get(6) { if *p == "1" { self.player_controls.cam_switch = true; } }
+                    if let Some(p) = parts.get(1) {
+                        if *p == "1" {
+                            self.player_controls.movement = true;
+                        }
+                    }
+                    if let Some(p) = parts.get(2) {
+                        if *p == "1" {
+                            self.player_controls.looking = true;
+                        }
+                    }
+                    if let Some(p) = parts.get(3) {
+                        if *p == "1" {
+                            self.player_controls.pipboy = true;
+                        }
+                    }
+                    if let Some(p) = parts.get(4) {
+                        if *p == "1" {
+                            self.player_controls.fight = true;
+                        }
+                    }
+                    if let Some(p) = parts.get(5) {
+                        if *p == "1" {
+                            self.player_controls.pov = true;
+                        }
+                    }
+                    if let Some(p) = parts.get(6) {
+                        if *p == "1" {
+                            self.player_controls.cam_switch = true;
+                        }
+                    }
                 }
-                self.player_controls_enabled = self.player_controls.movement && self.player_controls.looking;
-                println!("[Script] EnablePlayerControls: プレイヤー操作有効化 (flags: {:?})", self.player_controls);
+                self.player_controls_enabled =
+                    self.player_controls.movement && self.player_controls.looking;
+                println!(
+                    "[Script] EnablePlayerControls: プレイヤー操作有効化 (flags: {:?})",
+                    self.player_controls
+                );
             }
             "imod" => {
                 if parts.len() >= 2 {
@@ -403,7 +485,8 @@ impl ScriptVm {
                 if parts.len() >= 2 {
                     let imod_name = parts[1];
                     println!("[Script] rimod (ImageSpaceModifier 解除): {}", imod_name);
-                    self.active_imods.retain(|m| !m.eq_ignore_ascii_case(imod_name));
+                    self.active_imods
+                        .retain(|m| !m.eq_ignore_ascii_case(imod_name));
                 }
             }
             "playsound" => {
@@ -430,7 +513,10 @@ impl ScriptVm {
                 if parts.len() >= 2 {
                     let pkg_name = parts[1].to_string();
                     let target = self_id.unwrap_or(FormId(0x00000014));
-                    println!("[Script] AddScriptPackage: {} (target={:?})", pkg_name, target);
+                    println!(
+                        "[Script] AddScriptPackage: {} (target={:?})",
+                        pkg_name, target
+                    );
                     self.script_package_requests.push((Some(target), pkg_name));
                 }
             }
@@ -473,11 +559,21 @@ impl ScriptVm {
                 // SetObjectiveCompleted <QuestID> <ObjectiveIndex> <Flag>
                 if parts.len() >= 4 {
                     let q_id = self.resolve_form_id(parts[1])?;
-                    let obj_idx = parts[2].parse::<u32>().map_err(|e| ScriptError::ParseError(e.to_string()))?;
-                    let obj_text = self.quest_manager.get_objective_text(q_id, obj_idx).unwrap_or("");
-                    println!("[QuestManager] クエスト 0x{:08X} 目標 {} (\"{}\") 完了", q_id.0, obj_idx, obj_text);
+                    let obj_idx = parts[2]
+                        .parse::<u32>()
+                        .map_err(|e| ScriptError::ParseError(e.to_string()))?;
+                    let obj_text = self
+                        .quest_manager
+                        .get_objective_text(q_id, obj_idx)
+                        .unwrap_or("");
+                    println!(
+                        "[QuestManager] クエスト 0x{:08X} 目標 {} (\"{}\") 完了",
+                        q_id.0, obj_idx, obj_text
+                    );
                     if !obj_text.is_empty() {
-                        self.quest_manager.notifications.push(format!("[Objective Completed] {}", obj_text));
+                        self.quest_manager
+                            .notifications
+                            .push(format!("[Objective Completed] {}", obj_text));
                     }
                 }
             }
@@ -508,18 +604,28 @@ impl ScriptVm {
             "moveto" => {
                 if parts.len() >= 2 {
                     let target_marker = parts[1].to_string();
-                    println!("[Script] MoveTo 要求: subject={:?}, target={}", effective_self_id, target_marker);
-                    self.teleport_requests.push((effective_self_id, target_marker));
+                    println!(
+                        "[Script] MoveTo 要求: subject={:?}, target={}",
+                        effective_self_id, target_marker
+                    );
+                    self.teleport_requests
+                        .push((effective_self_id, target_marker));
                 }
             }
             "evaluatepackage" | "evp" => {
-                println!("[Script] EvaluatePackage (AI パッケージ再評価要求): subject={:?}", effective_self_id);
+                println!(
+                    "[Script] EvaluatePackage (AI パッケージ再評価要求): subject={:?}",
+                    effective_self_id
+                );
                 self.evaluate_package_requests.push(effective_self_id);
             }
             "say" => {
                 if parts.len() >= 2 {
                     let topic = parts[1].to_string();
-                    println!("[Script] Say (台詞発言要求): topic={:?}, speaker={:?}", topic, effective_self_id);
+                    println!(
+                        "[Script] Say (台詞発言要求): topic={:?}, speaker={:?}",
+                        topic, effective_self_id
+                    );
                     self.say_queue.push((effective_self_id, topic));
                 }
             }
@@ -531,11 +637,17 @@ impl ScriptVm {
                     // parts[1] = Target (話しかける相手の FormID/EditorID)
                     // Speaker は自分自身 (self_id) が Target に向かって発話
                     let _target_id = self.resolve_form_id(parts[1]).ok();
-                    println!("[Script] SayTo (台詞発言要求): topic={:?}, speaker={:?}, target_str={:?}", topic, effective_self_id, parts[1]);
+                    println!(
+                        "[Script] SayTo (台詞発言要求): topic={:?}, speaker={:?}, target_str={:?}",
+                        topic, effective_self_id, parts[1]
+                    );
                     self.say_queue.push((effective_self_id, topic));
                 } else if parts.len() == 2 {
                     let topic = parts[1].to_string();
-                    println!("[Script] SayTo (台詞発言要求): topic={:?}, speaker={:?}", topic, effective_self_id);
+                    println!(
+                        "[Script] SayTo (台詞発言要求): topic={:?}, speaker={:?}",
+                        topic, effective_self_id
+                    );
                     self.say_queue.push((effective_self_id, topic));
                 }
             }
@@ -619,7 +731,7 @@ impl ScriptVm {
 
             let left_val = self.eval_expr(left_str, self_id);
             let right_val = self.eval_expr(right_str, self_id);
-            
+
             match op {
                 "==" => (left_val - right_val).abs() < 1e-4,
                 "!=" => (left_val - right_val).abs() >= 1e-4,
@@ -659,7 +771,11 @@ impl ScriptVm {
         if lower == "getbuttonpressed" {
             // 参照元: GECK Wiki `GetButtonPressed`
             // ボタンが押されていればインデックス (0, 1, ...) を返し、直後に -1 にリセットされる。未押下は -1。
-            return self.last_button_pressed.take().map(|b| b as f32).unwrap_or(-1.0);
+            return self
+                .last_button_pressed
+                .take()
+                .map(|b| b as f32)
+                .unwrap_or(-1.0);
         }
         if lower == "getinchargen" {
             // 参照元: GECK Wiki `GetInCharGen`
@@ -688,7 +804,11 @@ impl ScriptVm {
         if let Some((prefix, sub)) = lower.split_once('.') {
             // "QuestID.var" の形式
             let mut target_q_id = None;
-            if let Some(q_id) = self.edid_map.get(prefix).or_else(|| self.edid_map.get(&prefix.to_ascii_uppercase())) {
+            if let Some(q_id) = self
+                .edid_map
+                .get(prefix)
+                .or_else(|| self.edid_map.get(&prefix.to_ascii_uppercase()))
+            {
                 if self.quest_manager.quests.contains_key(q_id) {
                     target_q_id = Some(*q_id);
                 }
@@ -721,7 +841,11 @@ impl ScriptVm {
 
         // 4. グローバル変数 (case-insensitive 検索)
         // 参照元: GECK Wiki — スクリプト変数は大文字小文字を区別しない
-        if let Some((_, &v)) = self.globals.iter().find(|(k, _)| k.eq_ignore_ascii_case(trimmed)) {
+        if let Some((_, &v)) = self
+            .globals
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(trimmed))
+        {
             return v;
         }
 
@@ -730,7 +854,11 @@ impl ScriptVm {
 
     /// 複数行のスクリプトブロック (If / ElseIf / Else / EndIf / Return / Activate 対応) を実行する。
     /// 戻り値: スクリプト内で明示的に `Activate` 命令が実行されたかどうか
-    pub fn execute_block(&mut self, lines: &[String], self_id: Option<FormId>) -> Result<bool, ScriptError> {
+    pub fn execute_block(
+        &mut self,
+        lines: &[String],
+        self_id: Option<FormId>,
+    ) -> Result<bool, ScriptError> {
         let mut activated = false;
         // if スタック: (現在の分岐が実行中か, すでにこの if 系列のいずれかの分岐が実行されたか)
         let mut if_stack: Vec<(bool, bool)> = Vec::new();
@@ -827,7 +955,11 @@ impl ScriptVm {
     }
 
     /// 会話やターミナルの Result Script (テキスト) を実行。
-    pub fn execute_result_script(&mut self, script: &str, self_id: Option<FormId>) -> Result<(), ScriptError> {
+    pub fn execute_result_script(
+        &mut self,
+        script: &str,
+        self_id: Option<FormId>,
+    ) -> Result<(), ScriptError> {
         let lines: Vec<String> = script.lines().map(|s| s.to_string()).collect();
         self.execute_block(&lines, self_id)?;
         Ok(())
@@ -836,7 +968,11 @@ impl ScriptVm {
     /// コンパイル済みバイトコード (`SCDA`) をデコードして実行。
     ///
     /// 参照元: `references/bevyout/src/vsa/scripts/record.rs`
-    pub fn execute_bytecode(&mut self, bytecode: &[u8], self_id: Option<FormId>) -> Result<(), ScriptError> {
+    pub fn execute_bytecode(
+        &mut self,
+        bytecode: &[u8],
+        self_id: Option<FormId>,
+    ) -> Result<(), ScriptError> {
         let mut pc = 0;
         while pc + 2 <= bytecode.len() {
             let op = u16::from_le_bytes(bytecode[pc..pc + 2].try_into().unwrap());
@@ -845,16 +981,20 @@ impl ScriptVm {
             match op {
                 FN_SET_STAGE => {
                     if pc + 8 <= bytecode.len() {
-                        let q_id = FormId(u32::from_le_bytes(bytecode[pc..pc + 4].try_into().unwrap()));
-                        let stage = u32::from_le_bytes(bytecode[pc + 4..pc + 8].try_into().unwrap());
+                        let q_id =
+                            FormId(u32::from_le_bytes(bytecode[pc..pc + 4].try_into().unwrap()));
+                        let stage =
+                            u32::from_le_bytes(bytecode[pc + 4..pc + 8].try_into().unwrap());
                         self.set_stage(q_id, stage);
                         pc += 8;
                     }
                 }
                 FN_ADD_ITEM => {
                     if pc + 8 <= bytecode.len() {
-                        let item_id = FormId(u32::from_le_bytes(bytecode[pc..pc + 4].try_into().unwrap()));
-                        let count = u32::from_le_bytes(bytecode[pc + 4..pc + 8].try_into().unwrap());
+                        let item_id =
+                            FormId(u32::from_le_bytes(bytecode[pc..pc + 4].try_into().unwrap()));
+                        let count =
+                            u32::from_le_bytes(bytecode[pc + 4..pc + 8].try_into().unwrap());
                         self.add_item(item_id, count);
                         pc += 8;
                     }
@@ -889,12 +1029,16 @@ impl ScriptVm {
 /// 文字列から FormID をパース (0x16進数または10進数)。
 fn parse_form_id(s: &str) -> Result<FormId, ScriptError> {
     let clean = s.trim();
-    if let Some(hex) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) {
+    if let Some(hex) = clean
+        .strip_prefix("0x")
+        .or_else(|| clean.strip_prefix("0X"))
+    {
         u32::from_str_radix(hex, 16)
             .map(FormId)
             .map_err(|e| ScriptError::ParseError(e.to_string()))
     } else {
-        clean.parse::<u32>()
+        clean
+            .parse::<u32>()
             .map(FormId)
             .map_err(|e| ScriptError::ParseError(e.to_string()))
     }
@@ -911,11 +1055,13 @@ mod tests {
         let item_id = FormId(0x0000000F); // Caps
 
         // SetStage テスト
-        vm.execute_statement("SetStage 0x00014E89 10", None).unwrap();
+        vm.execute_statement("SetStage 0x00014E89 10", None)
+            .unwrap();
         assert_eq!(vm.get_stage(quest_id), 10);
 
         // AddItem テスト
-        vm.execute_statement("player.additem 0x0000000F 100", None).unwrap();
+        vm.execute_statement("player.additem 0x0000000F 100", None)
+            .unwrap();
         assert_eq!(vm.get_item_count(item_id), 100);
 
         // Unlock テスト
@@ -935,7 +1081,8 @@ mod tests {
         assert_eq!(vm.get_stage(quest_id), 30);
         assert!(vm.quest_manager.get_stage_done(quest_id, 30));
 
-        vm.execute_statement("SetObjectiveDisplayed MQ01 10 1", None).unwrap();
+        vm.execute_statement("SetObjectiveDisplayed MQ01 10 1", None)
+            .unwrap();
         assert!(vm.quest_manager.is_objective_displayed(quest_id, 10));
 
         // ステージスクリプト自動連鎖実行テスト
@@ -949,7 +1096,9 @@ mod tests {
         test_quest.stages.push(fo3_esm::QuestStage {
             index: 20,
             flags: 0,
-            script_source: Some("player.additem 0x0000000F 25\nSetObjectiveDisplayed MQ01 20 1".to_string()),
+            script_source: Some(
+                "player.additem 0x0000000F 25\nSetObjectiveDisplayed MQ01 20 1".to_string(),
+            ),
         });
         test_quest.objectives.push(fo3_esm::QuestObjective {
             index: 20,
@@ -970,6 +1119,10 @@ mod tests {
 
         assert_eq!(vm.get_item_count(item_id), 175); // 150 + 25
         assert!(vm.quest_manager.is_objective_displayed(q_mq01, 20));
-        assert!(vm.quest_manager.notifications.iter().any(|n| n.contains("Speak to Colin Moriarty")));
+        assert!(vm
+            .quest_manager
+            .notifications
+            .iter()
+            .any(|n| n.contains("Speak to Colin Moriarty")));
     }
 }

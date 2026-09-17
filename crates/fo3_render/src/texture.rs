@@ -3,8 +3,8 @@
 //! DDS (DirectDraw Surface) テクスチャの読み込みと wgpu へのアップロード、
 //! およびフォールバック用デフォルトテクスチャの生成。
 
-use std::io::Cursor;
 use ddsfile::{Dds, PixelFormatFlags};
+use std::io::Cursor;
 
 /// GPU 上のテクスチャリソース。
 pub struct GpuTexture {
@@ -264,10 +264,7 @@ impl GpuTexture {
     pub fn create_default_normal(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let size = 2;
         let normal_pixels: [u8; 16] = [
-            128, 128, 255, 0,
-            128, 128, 255, 0,
-            128, 128, 255, 0,
-            128, 128, 255, 0,
+            128, 128, 255, 0, 128, 128, 255, 0, 128, 128, 255, 0, 128, 128, 255, 0,
         ];
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -325,12 +322,7 @@ impl GpuTexture {
     /// 発光加算を行わないメッシュで使用。
     pub fn create_default_black(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let size = 2;
-        let black_pixels: [u8; 16] = [
-            0, 0, 0, 255,
-            0, 0, 0, 255,
-            0, 0, 0, 255,
-            0, 0, 0, 255,
-        ];
+        let black_pixels: [u8; 16] = [0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255];
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Default Black Texture"),
@@ -373,6 +365,46 @@ impl GpuTexture {
             address_mode_v: wgpu::AddressMode::Repeat,
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        GpuTexture {
+            texture,
+            view,
+            sampler,
+        }
+    }
+
+    /// RTT (Render-To-Texture) 用のカラーアタッチメントテクスチャを作成します
+    pub fn create_render_target(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+        label: Option<&str>,
+    ) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label,
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("RTT Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
 

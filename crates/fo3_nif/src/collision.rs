@@ -235,7 +235,9 @@ fn extract_shape(shape_idx: usize, nif: &NifFile) -> Option<CollisionShape> {
         }
         NifBlock::BhkPackedNiTriStripsShape(packed) => {
             if packed.data >= 0 && (packed.data as usize) < nif.blocks.len() {
-                if let NifBlock::HkPackedNiTriStripsData(ref data) = nif.blocks[packed.data as usize] {
+                if let NifBlock::HkPackedNiTriStripsData(ref data) =
+                    nif.blocks[packed.data as usize]
+                {
                     // hkPackedNiTriStripsData の頂点は Havok 物理単位 (メートル) で格納されているため、
                     // HAVOK_SCALE (1.0 / 0.142875 ≈ 6.999125) を乗算して Gamebryo ゲーム単位に変換する。
                     // 参照元: references/nifskope/src/gl/gltools.cpp:L327 (hkScale660), references/nifskope/src/gl/glnode.cpp:L883
@@ -247,7 +249,13 @@ fn extract_shape(shape_idx: usize, nif: &NifFile) -> Option<CollisionShape> {
                     let indices: Vec<[u32; 3]> = data
                         .triangles
                         .iter()
-                        .map(|t| [t.triangle[0] as u32, t.triangle[1] as u32, t.triangle[2] as u32])
+                        .map(|t| {
+                            [
+                                t.triangle[0] as u32,
+                                t.triangle[1] as u32,
+                                t.triangle[2] as u32,
+                            ]
+                        })
                         .collect();
 
                     let material = data
@@ -281,13 +289,11 @@ fn extract_shape(shape_idx: usize, nif: &NifFile) -> Option<CollisionShape> {
                 material: Fallout3HavokMaterial::from(box_shape.material),
             })
         }
-        NifBlock::BhkSphereShape(sphere) => {
-            Some(CollisionShape::Sphere {
-                center: [0.0, 0.0, 0.0],
-                radius: sphere.radius * HAVOK_SCALE,
-                material: Fallout3HavokMaterial::from(sphere.material),
-            })
-        }
+        NifBlock::BhkSphereShape(sphere) => Some(CollisionShape::Sphere {
+            center: [0.0, 0.0, 0.0],
+            radius: sphere.radius * HAVOK_SCALE,
+            material: Fallout3HavokMaterial::from(sphere.material),
+        }),
         NifBlock::BhkCapsuleShape(capsule) => {
             let p1 = [
                 capsule.first_point.x * HAVOK_SCALE,
@@ -342,10 +348,16 @@ fn extract_shape(shape_idx: usize, nif: &NifFile) -> Option<CollisionShape> {
             let mut all_tris = Vec::new();
             for &data_idx in &ss.strips_data {
                 if data_idx >= 0 && (data_idx as usize) < nif.blocks.len() {
-                    if let NifBlock::NiTriStripsData(ref strips_data) = nif.blocks[data_idx as usize] {
+                    if let NifBlock::NiTriStripsData(ref strips_data) =
+                        nif.blocks[data_idx as usize]
+                    {
                         let base_v = all_verts.len() as u32;
                         for v in &strips_data.common.vertices {
-                            all_verts.push([v.x * HAVOK_SCALE, v.y * HAVOK_SCALE, v.z * HAVOK_SCALE]);
+                            all_verts.push([
+                                v.x * HAVOK_SCALE,
+                                v.y * HAVOK_SCALE,
+                                v.z * HAVOK_SCALE,
+                            ]);
                         }
                         for strip in &strips_data.strips {
                             for j in 0..strip.len().saturating_sub(2) {
@@ -354,9 +366,17 @@ fn extract_shape(shape_idx: usize, nif: &NifFile) -> Option<CollisionShape> {
                                 let i2 = strip[j + 2];
                                 if i0 != i1 && i1 != i2 && i0 != i2 {
                                     if j % 2 == 0 {
-                                        all_tris.push([base_v + i0 as u32, base_v + i1 as u32, base_v + i2 as u32]);
+                                        all_tris.push([
+                                            base_v + i0 as u32,
+                                            base_v + i1 as u32,
+                                            base_v + i2 as u32,
+                                        ]);
                                     } else {
-                                        all_tris.push([base_v + i1 as u32, base_v + i0 as u32, base_v + i2 as u32]);
+                                        all_tris.push([
+                                            base_v + i1 as u32,
+                                            base_v + i0 as u32,
+                                            base_v + i2 as u32,
+                                        ]);
                                     }
                                 }
                             }
@@ -485,4 +505,3 @@ fn apply_transform_to_shape(shape: CollisionShape, m: &[f32; 16]) -> CollisionSh
         }
     }
 }
-

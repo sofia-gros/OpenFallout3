@@ -9,10 +9,10 @@
 //! - `references/openmw/components/esm4/loadlvli.cpp:57` (`ESM::fourCC("LVLO")`)
 //! - `references/openmw/components/esm4/inventory.hpp:38` (`LVLO` struct)
 
-use std::io;
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{FormId, SUB_EDID, SUB_LVLD, SUB_LVLF, SUB_LVLO};
+use std::io;
 
 /// レベルドアイテムリスト内の個別エントリ (LVLO)。
 ///
@@ -71,7 +71,12 @@ impl LvliRecord {
                     // 参照元: references/openmw/components/esm4/loadlvli.cpp:60-76
                     if sub.data.len() >= 12 {
                         let level = i16::from_le_bytes([sub.data[0], sub.data[1]]);
-                        let item = u32::from_le_bytes([sub.data[4], sub.data[5], sub.data[6], sub.data[7]]);
+                        let item = u32::from_le_bytes([
+                            sub.data[4],
+                            sub.data[5],
+                            sub.data[6],
+                            sub.data[7],
+                        ]);
                         let count = i16::from_le_bytes([sub.data[8], sub.data[9]]);
                         entries.push(LvloEntry {
                             level,
@@ -80,7 +85,12 @@ impl LvliRecord {
                         });
                     } else if sub.data.len() >= 8 {
                         let level = i16::from_le_bytes([sub.data[0], sub.data[1]]);
-                        let item = u32::from_le_bytes([sub.data[2], sub.data[3], sub.data[4], sub.data[5]]);
+                        let item = u32::from_le_bytes([
+                            sub.data[2],
+                            sub.data[3],
+                            sub.data[4],
+                            sub.data[5],
+                        ]);
                         let count = i16::from_le_bytes([sub.data[6], sub.data[7]]);
                         entries.push(LvloEntry {
                             level,

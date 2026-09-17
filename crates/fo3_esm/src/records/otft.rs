@@ -3,10 +3,10 @@
 //! NPC が着用する衣装セットの定義。インベントリ (INAM) に含まれる防具等の FormID リストを持つ。
 //! 参照元: `references/openmw/components/esm4/loadotft.hpp`, `loadotft.cpp`
 
-use std::io;
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{FormId, SUB_EDID, SUB_INAM};
+use std::io;
 
 /// 衣装定義レコード (OTFT)。
 #[derive(Clone, Debug, PartialEq)]

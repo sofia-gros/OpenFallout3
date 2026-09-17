@@ -4,12 +4,12 @@
 //! - `references/openmw/components/bsa/compressedbsafile.cpp:L67-L328`
 //! - `knowledge/bsa_v104_format.md`
 
+use byteorder::{LittleEndian, ReadBytesExt};
+use flate2::read::ZlibDecoder;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
-use byteorder::{LittleEndian, ReadBytesExt};
-use flate2::read::ZlibDecoder;
 
 use crate::hash::{hash_filename, hash_folder};
 use crate::header::{archive_flags, BsaError, BsaHeader, FILE_SIZE_FLAG_COMPRESSION};
@@ -69,7 +69,11 @@ impl BsaArchive {
             let hash = reader.read_u64::<LittleEndian>()?;
             let count = reader.read_u32::<LittleEndian>()?;
             let offset = reader.read_u32::<LittleEndian>()?;
-            temp_folders.push(TempFolder { hash, count, _offset: offset });
+            temp_folders.push(TempFolder {
+                hash,
+                count,
+                _offset: offset,
+            });
         }
 
         // 3. 各フォルダの名前とファイルレコード群の読み込み
@@ -230,7 +234,8 @@ impl BsaArchive {
         let compressed = (file_entry.size & FILE_SIZE_FLAG_COMPRESSION != 0)
             ^ ((self.header.flags & archive_flags::COMPRESS) != 0);
 
-        self.reader.seek(SeekFrom::Start(file_entry.offset as u64))?;
+        self.reader
+            .seek(SeekFrom::Start(file_entry.offset as u64))?;
 
         // EmbeddedNames フラグがある場合、先頭のファイル名バイトをスキップ
         if (self.header.flags & archive_flags::EMBEDDED_NAMES) != 0 {

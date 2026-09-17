@@ -311,7 +311,8 @@ impl InfoRecord {
                 b"DNAM" => {
                     // Fallout 3: スピーチチャレンジ難易度
                     if sub.data.len() >= 4 {
-                        speech_challenge = Some(u32::from_le_bytes(sub.data[..4].try_into().unwrap()));
+                        speech_challenge =
+                            Some(u32::from_le_bytes(sub.data[..4].try_into().unwrap()));
                     }
                 }
                 b"RNAM" => {
@@ -339,7 +340,11 @@ impl InfoRecord {
                         let response_number = if sub.data.len() >= 9 { sub.data[8] } else { 0 };
                         let idle_anim = if sub.data.len() >= 16 {
                             let id = u32::from_le_bytes(sub.data[12..16].try_into().unwrap());
-                            if id != 0 { Some(FormId(id)) } else { None }
+                            if id != 0 {
+                                Some(FormId(id))
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         };
@@ -354,7 +359,10 @@ impl InfoRecord {
                 b"CTDA" => {
                     if let Some(cond) = TargetCondition::parse(&sub.data) {
                         // 参照元: `references/openmw/components/esm4/script.hpp:114` (FUN_GetIsID = 72 = 0x0048)
-                        if cond.function_index == 0x0048 && speaker_npc.is_none() && cond.param1 != 0 {
+                        if cond.function_index == 0x0048
+                            && speaker_npc.is_none()
+                            && cond.param1 != 0
+                        {
                             speaker_npc = Some(FormId(cond.param1));
                         }
                         conditions.push(cond);

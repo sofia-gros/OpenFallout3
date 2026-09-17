@@ -20,10 +20,10 @@
 //! - NiSkinData の `skin_transform` (ルートオフセット) と各ボーンの `bone_transform` を適用
 //! - 結果として T-Pose (バインドポーズ) での正しい頂点位置を得る
 
-use glam::{Mat4, Vec3, Vec4};
-use fo3_nif::{NiSkinInstance, NifBlock, NifFile};
-use fo3_nif::NiTriShapeData;
 use fo3_nif::types::{Matrix33, Vector3};
+use fo3_nif::NiTriShapeData;
+use fo3_nif::{NiSkinInstance, NifBlock, NifFile};
+use glam::{Mat4, Vec3, Vec4};
 
 /// バインドポーズ行列（逆スキン変換）を行列として組み立てる。
 ///
@@ -93,8 +93,8 @@ pub fn apply_skinning_cpu_with_bones(
 
     let n_verts = geo_data.common.vertices.len();
     let mut out_positions: Vec<Vec4> = vec![Vec4::ZERO; n_verts];
-    let mut out_normals:   Vec<Vec4> = vec![Vec4::ZERO; n_verts];
-    let mut written: Vec<bool>       = vec![false; n_verts];
+    let mut out_normals: Vec<Vec4> = vec![Vec4::ZERO; n_verts];
+    let mut written: Vec<bool> = vec![false; n_verts];
 
     // スキニング完全式（NifSkope glmesh.cpp:L645 参照）:
     //   boneMat_bone = mMatrixInSkeletonSpace * mInvBindMatrix (列ベクトル形式 M * v)
@@ -148,14 +148,20 @@ pub fn apply_skinning_cpu_with_bones(
 
         let n_part_verts = partition.num_vertices as usize;
         for vi in 0..n_part_verts {
-            if vi >= partition.vertex_map.len() { break; }
+            if vi >= partition.vertex_map.len() {
+                break;
+            }
             let geo_idx = partition.vertex_map[vi] as usize;
-            if geo_idx >= n_verts { continue; }
+            if geo_idx >= n_verts {
+                continue;
+            }
 
             let src_pos = if geo_idx < geo_data.common.vertices.len() {
                 let v = &geo_data.common.vertices[geo_idx];
                 Vec4::new(v.x, v.y, v.z, 1.0)
-            } else { continue; };
+            } else {
+                continue;
+            };
 
             let src_nrm = if geo_idx < geo_data.common.normals.len() {
                 let n = &geo_data.common.normals[geo_idx];
@@ -180,43 +186,55 @@ pub fn apply_skinning_cpu_with_bones(
             let n_inf = (partition.num_weights_per_vertex as usize).min(4);
             for k in 0..n_inf {
                 let w = weights[k];
-                if w < 1e-6 { continue; }
+                if w < 1e-6 {
+                    continue;
+                }
                 let bi = bone_idxs[k] as usize;
-                if bi >= bone_matrices.len() { continue; }
+                if bi >= bone_matrices.len() {
+                    continue;
+                }
                 let mat = bone_matrices[bi];
                 blended_pos += w * (mat * src_pos);
                 blended_nrm += w * (mat * src_nrm);
             }
 
             out_positions[geo_idx] = blended_pos;
-            out_normals[geo_idx]   = blended_nrm;
+            out_normals[geo_idx] = blended_nrm;
             written[geo_idx] = true;
         }
     }
 
-    let result_positions: Vec<[f32; 3]> = (0..n_verts).map(|i| {
-        if written[i] {
-            [out_positions[i].x, out_positions[i].y, out_positions[i].z]
-        } else if i < geo_data.common.vertices.len() {
-            let v = &geo_data.common.vertices[i];
-            [v.x, v.y, v.z]
-        } else {
-            [0.0, 0.0, 0.0]
-        }
-    }).collect();
+    let result_positions: Vec<[f32; 3]> = (0..n_verts)
+        .map(|i| {
+            if written[i] {
+                [out_positions[i].x, out_positions[i].y, out_positions[i].z]
+            } else if i < geo_data.common.vertices.len() {
+                let v = &geo_data.common.vertices[i];
+                [v.x, v.y, v.z]
+            } else {
+                [0.0, 0.0, 0.0]
+            }
+        })
+        .collect();
 
-    let result_normals: Vec<[f32; 3]> = (0..n_verts).map(|i| {
-        if written[i] {
-            let n = Vec3::new(out_normals[i].x, out_normals[i].y, out_normals[i].z);
-            let len = n.length();
-            if len > 1e-6 { [n.x / len, n.y / len, n.z / len] } else { [0.0, 0.0, 1.0] }
-        } else if i < geo_data.common.normals.len() {
-            let n = &geo_data.common.normals[i];
-            [n.x, n.y, n.z]
-        } else {
-            [0.0, 0.0, 1.0]
-        }
-    }).collect();
+    let result_normals: Vec<[f32; 3]> = (0..n_verts)
+        .map(|i| {
+            if written[i] {
+                let n = Vec3::new(out_normals[i].x, out_normals[i].y, out_normals[i].z);
+                let len = n.length();
+                if len > 1e-6 {
+                    [n.x / len, n.y / len, n.z / len]
+                } else {
+                    [0.0, 0.0, 1.0]
+                }
+            } else if i < geo_data.common.normals.len() {
+                let n = &geo_data.common.normals[i];
+                [n.x, n.y, n.z]
+            } else {
+                [0.0, 0.0, 1.0]
+            }
+        })
+        .collect();
 
     Some((result_positions, result_normals))
 }

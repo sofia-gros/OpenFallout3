@@ -66,11 +66,7 @@ pub struct DialogState {
 impl DialogState {
     /// 新しい会話ダイアログ状態を生成する。
     /// 初期状態は NPC の Greeting セリフ表示フェーズ (`DialogPhase::ShowingSpeech`)。
-    pub fn new(
-        npc_name: &str,
-        initial_greeting: &str,
-        mut raw_choices: Vec<DialogChoice>,
-    ) -> Self {
+    pub fn new(npc_name: &str, initial_greeting: &str, mut raw_choices: Vec<DialogChoice>) -> Self {
         // 会話終了 ("さようなら" / Goodbye) 選択肢が末尾に無ければ自動付加
         if !raw_choices.iter().any(|c| c.is_goodbye) {
             raw_choices.push(DialogChoice {
@@ -162,7 +158,13 @@ impl DialogState {
     ///
     /// 参照元:
     /// - `menus/dialog/dialog_menu.xml` (`DM_SpeakerNameLabel`, `DM_CenterHeight`, `DM_TextBackground`, `DM_SpeakerText`, `DM_TopicList`)
-    pub fn render_to_batch(&self, batch: &mut TextBatch, font: &BitmapFont, screen_w: f32, screen_h: f32) {
+    pub fn render_to_batch(
+        &self,
+        batch: &mut TextBatch,
+        font: &BitmapFont,
+        screen_w: f32,
+        screen_h: f32,
+    ) {
         let atlas = self.menu_runtime.as_ref().and_then(|rt| rt.atlas.as_ref());
 
         // 実機 dialog_menu.xml: 画面中央 72% 幅 (最大 900px, 最小 560px)
@@ -175,7 +177,14 @@ impl DialogState {
         let label_w = font.measure_text_width(name_label, 1.15);
         let label_x = (screen_w - label_w - 70.0).max(bg_x);
         let label_y = (screen_h * 0.10).max(35.0);
-        batch.add_text(font, name_label, label_x, label_y, 1.15, ui_colors::PIPBOY_GREEN);
+        batch.add_text(
+            font,
+            name_label,
+            label_x,
+            label_y,
+            1.15,
+            ui_colors::PIPBOY_GREEN,
+        );
 
         match self.phase {
             DialogPhase::ShowingSpeech => {
@@ -193,7 +202,14 @@ impl DialogState {
                 // NPC セリフ本文
                 let text_x = box_x + 30.0;
                 let text_y = box_y + (box_h - 16.0) * 0.5;
-                batch.add_text(font, &self.current_speech, text_x, text_y, 1.05, ui_colors::PIPBOY_GREEN);
+                batch.add_text(
+                    font,
+                    &self.current_speech,
+                    text_x,
+                    text_y,
+                    1.05,
+                    ui_colors::PIPBOY_GREEN,
+                );
             }
             DialogPhase::ShowingTopics => {
                 self.render_topics_list(batch, font, atlas, bg_x, bg_w, center_y);
@@ -220,7 +236,15 @@ impl DialogState {
         batch.add_rect(bg_x, box_y, bg_w, box_h, [0.0, 0.0, 0.0, 0.75]);
 
         // 上下ブラケット (top_bracket.xml / bottom_bracket.xml 準拠)
-        render_dialog_brackets(batch, atlas, bg_x, box_y, box_y + box_h, bg_w, ui_colors::PIPBOY_GREEN);
+        render_dialog_brackets(
+            batch,
+            atlas,
+            bg_x,
+            box_y,
+            box_y + box_h,
+            bg_w,
+            ui_colors::PIPBOY_GREEN,
+        );
 
         // スクロール計算
         let max_visible = 6;
@@ -233,10 +257,24 @@ impl DialogState {
 
         // スクロールインジケーター矢印 (実機 list_box.xml: 左端)
         if start_idx > 0 {
-            batch.add_text(font, "^", bg_x + 10.0, box_y + 12.0, 1.2, ui_colors::PIPBOY_GREEN);
+            batch.add_text(
+                font,
+                "^",
+                bg_x + 10.0,
+                box_y + 12.0,
+                1.2,
+                ui_colors::PIPBOY_GREEN,
+            );
         }
         if end_idx < self.choices.len() {
-            batch.add_text(font, "v", bg_x + 10.0, box_y + box_h - 22.0, 1.2, ui_colors::PIPBOY_GREEN);
+            batch.add_text(
+                font,
+                "v",
+                bg_x + 10.0,
+                box_y + box_h - 22.0,
+                1.2,
+                ui_colors::PIPBOY_GREEN,
+            );
         }
 
         let list_start_y = box_y + 16.0;
@@ -251,25 +289,74 @@ impl DialogState {
             if is_selected {
                 // 選択項目ハイライト (実機 list_box.xml -> box.xml: 4辺の緑色枠線 + 極薄フィル)
                 let border_thick = 1.5;
-                let box_color = [ui_colors::PIPBOY_GREEN[0], ui_colors::PIPBOY_GREEN[1], ui_colors::PIPBOY_GREEN[2], 0.95];
+                let box_color = [
+                    ui_colors::PIPBOY_GREEN[0],
+                    ui_colors::PIPBOY_GREEN[1],
+                    ui_colors::PIPBOY_GREEN[2],
+                    0.95,
+                ];
                 // top
-                batch.add_rect(content_x - 10.0, item_y - 3.0, content_w, border_thick, box_color);
+                batch.add_rect(
+                    content_x - 10.0,
+                    item_y - 3.0,
+                    content_w,
+                    border_thick,
+                    box_color,
+                );
                 // bottom
-                batch.add_rect(content_x - 10.0, item_y + item_h - 6.0, content_w, border_thick, box_color);
+                batch.add_rect(
+                    content_x - 10.0,
+                    item_y + item_h - 6.0,
+                    content_w,
+                    border_thick,
+                    box_color,
+                );
                 // left
-                batch.add_rect(content_x - 10.0, item_y - 3.0, border_thick, item_h - 3.0, box_color);
+                batch.add_rect(
+                    content_x - 10.0,
+                    item_y - 3.0,
+                    border_thick,
+                    item_h - 3.0,
+                    box_color,
+                );
                 // right
-                batch.add_rect(content_x - 10.0 + content_w - border_thick, item_y - 3.0, border_thick, item_h - 3.0, box_color);
+                batch.add_rect(
+                    content_x - 10.0 + content_w - border_thick,
+                    item_y - 3.0,
+                    border_thick,
+                    item_h - 3.0,
+                    box_color,
+                );
                 // 極薄半透明フィル (_fill_alpha: 40)
-                batch.add_rect(content_x - 10.0, item_y - 3.0, content_w, item_h - 3.0, [0.05, 0.25, 0.12, 0.12]);
+                batch.add_rect(
+                    content_x - 10.0,
+                    item_y - 3.0,
+                    content_w,
+                    item_h - 3.0,
+                    [0.05, 0.25, 0.12, 0.12],
+                );
 
                 // 選択項目テキスト (鮮やかな実機 Pip-Boy Green, プレフィックスなし)
                 let text_color = [0.22, 1.0, 0.45, 1.0];
-                batch.add_text(font, &choice.prompt, content_x + 6.0, item_y + 2.0, 1.05, text_color);
+                batch.add_text(
+                    font,
+                    &choice.prompt,
+                    content_x + 6.0,
+                    item_y + 2.0,
+                    1.05,
+                    text_color,
+                );
             } else {
                 // 非選択項目テキスト (実機 _line_alpha: 128 準拠の半透明 Pip-Boy Green)
                 let text_color = [0.18, 0.88, 0.38, 0.60];
-                batch.add_text(font, &choice.prompt, content_x + 6.0, item_y + 2.0, 1.0, text_color);
+                batch.add_text(
+                    font,
+                    &choice.prompt,
+                    content_x + 6.0,
+                    item_y + 2.0,
+                    1.0,
+                    text_color,
+                );
             }
         }
     }
@@ -314,7 +401,13 @@ fn render_dialog_brackets(
     } else {
         // フォールバック: 上端の垂直バー (決して全高を囲まない)
         batch.add_rect(x, top_y, line_thick, bracket_vert_h * 0.5, color);
-        batch.add_rect(x + width - line_thick, top_y, line_thick, bracket_vert_h * 0.5, color);
+        batch.add_rect(
+            x + width - line_thick,
+            top_y,
+            line_thick,
+            bracket_vert_h * 0.5,
+            color,
+        );
     }
 
     // 2. Bottom Bracket (bottom_bracket.xml)
@@ -341,11 +434,22 @@ fn render_dialog_brackets(
         );
     } else {
         // フォールバック: 下端の垂直バー (決して全高を囲まない)
-        batch.add_rect(x, bottom_y - bracket_vert_h * 0.5, line_thick, bracket_vert_h * 0.5, color);
-        batch.add_rect(x + width - line_thick, bottom_y - bracket_vert_h * 0.5, line_thick, bracket_vert_h * 0.5, color);
+        batch.add_rect(
+            x,
+            bottom_y - bracket_vert_h * 0.5,
+            line_thick,
+            bracket_vert_h * 0.5,
+            color,
+        );
+        batch.add_rect(
+            x + width - line_thick,
+            bottom_y - bracket_vert_h * 0.5,
+            line_thick,
+            bracket_vert_h * 0.5,
+            color,
+        );
     }
 }
-
 
 #[cfg(test)]
 mod tests {

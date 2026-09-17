@@ -6,8 +6,6 @@
 //! - `references/openmw/components/esm4/loaddial.hpp`, `loadinfo.hpp`
 //! - `menus/dialog/dialog_menu.xml`, `menus/terminal/terminal_menu.xml`
 
-use fo3_esm::{EsmMasterContext, FormId, PackRecord};
-use fo3_script::{evaluate_conditions, ConditionContext};
 use crate::anim::AnimState;
 use crate::app::ViewerState;
 use crate::interact::InteractableKind;
@@ -15,6 +13,8 @@ use crate::interactive_anim::InteractiveAnimator;
 use crate::loader::load_scene;
 use crate::types::{update_window_title, ViewerTarget};
 use crate::ui::{DialogChoice, DialogState, TerminalState, ViewerMode};
+use fo3_esm::{EsmMasterContext, FormId, PackRecord};
+use fo3_script::{evaluate_conditions, ConditionContext};
 
 /// フォーカス中オブジェクトに対するインタラクトアクション (`E` キー) を実行する。
 pub fn perform_interact(app: &mut ViewerState) {
@@ -32,7 +32,10 @@ pub fn perform_interact(app: &mut ViewerState) {
     // 参照元: references/openmw/apps/openmw/mwworld/refdata.cpp (Flag_SuppressActivate)
     let target_id = FormId(focused.form_id);
     let player_id = FormId(0x00000014);
-    if let Ok(suppressed) = app.dispatcher.dispatch_activate(target_id, player_id, &mut app.vm) {
+    if let Ok(suppressed) = app
+        .dispatcher
+        .dispatch_activate(target_id, player_id, &mut app.vm)
+    {
         if suppressed {
             println!("  - スクリプト (OnActivate) によりアクティベートが抑制・処理されました。");
             return;
@@ -40,10 +43,17 @@ pub fn perform_interact(app: &mut ViewerState) {
     }
 
     match &focused.kind {
-        InteractableKind::Door { teleport, lock, is_open } => {
+        InteractableKind::Door {
+            teleport,
+            lock,
+            is_open,
+        } => {
             if let Some(l) = lock {
                 if !app.vm.is_unlocked(FormId(focused.form_id)) {
-                    println!("  - このドアは施錠されています (難易度: {})。鍵または開錠が必要です。", l.lock_level);
+                    println!(
+                        "  - このドアは施錠されています (難易度: {})。鍵または開錠が必要です。",
+                        l.lock_level
+                    );
                     return;
                 }
             }
@@ -65,12 +75,18 @@ pub fn perform_interact(app: &mut ViewerState) {
                 };
 
                 let next_target = if let Some((ref c, ref parent_world)) = dest_cell_info {
-                    println!("  - テレポート先セルを解決: \"{}\" (FormID: 0x{:08X})", c.edid, c.form_id.0);
+                    println!(
+                        "  - テレポート先セルを解決: \"{}\" (FormID: 0x{:08X})",
+                        c.edid, c.form_id.0
+                    );
                     if c.is_interior() || parent_world.is_none() {
                         ViewerTarget::Cell(c.edid.clone())
                     } else {
                         let world = parent_world.as_ref().unwrap();
-                        println!("  - 所属ワールドスペースを解決: \"{}\" (FormID: 0x{:08X}, 親: {:?})", world.edid, world.form_id.0, world.parent_world);
+                        println!(
+                            "  - 所属ワールドスペースを解決: \"{}\" (FormID: 0x{:08X}, 親: {:?})",
+                            world.edid, world.form_id.0, world.parent_world
+                        );
                         ViewerTarget::World(world.edid.clone(), c.grid)
                     }
                 } else {
@@ -108,8 +124,14 @@ pub fn perform_interact(app: &mut ViewerState) {
                 let marker_pos = glam::Vec3::new(tp.dest_pos[0], tp.dest_pos[1], tp.dest_pos[2]);
                 let ray_origin = marker_pos + glam::Vec3::new(0.0, 0.0, 100.0);
                 let ray_dir = glam::Vec3::new(0.0, 0.0, -1.0);
-                let spawn_pos = if let Some(hit) = loaded.physics_world.cast_ray(ray_origin, ray_dir, 200.0) {
-                    println!("  - テレポート先床面コリジョン検出: Z = {:.1} -> スポーン中心 Z = {:.1}", hit.point.z, hit.point.z + 65.0);
+                let spawn_pos = if let Some(hit) =
+                    loaded.physics_world.cast_ray(ray_origin, ray_dir, 200.0)
+                {
+                    println!(
+                        "  - テレポート先床面コリジョン検出: Z = {:.1} -> スポーン中心 Z = {:.1}",
+                        hit.point.z,
+                        hit.point.z + 65.0
+                    );
                     glam::Vec3::new(marker_pos.x, marker_pos.y, hit.point.z + 65.0)
                 } else {
                     println!("  - テレポート先床面レイキャスト未ヒット: デフォルトオフセット (+65.0) で配置");
@@ -152,23 +174,36 @@ pub fn perform_interact(app: &mut ViewerState) {
 
                 // インタラクティブ対象の状態を更新
                 if let Some(obj) = app.interactables.iter_mut().find(|o| o.form_id == form_id) {
-                    if let InteractableKind::Door { ref mut is_open, .. } = obj.kind {
+                    if let InteractableKind::Door {
+                        ref mut is_open, ..
+                    } = obj.kind
+                    {
                         *is_open = target_open;
                     }
                 }
                 if let Some(ref mut obj) = app.focused_interactable {
                     if obj.form_id == form_id {
-                        if let InteractableKind::Door { ref mut is_open, .. } = obj.kind {
+                        if let InteractableKind::Door {
+                            ref mut is_open, ..
+                        } = obj.kind
+                        {
                             *is_open = target_open;
                         }
                     }
                 }
             }
         }
-        InteractableKind::Container { form_id: _, lock, is_open } => {
+        InteractableKind::Container {
+            form_id: _,
+            lock,
+            is_open,
+        } => {
             if let Some(l) = lock {
                 if !app.vm.is_unlocked(FormId(focused.form_id)) {
-                    println!("  - このコンテナは施錠されています (難易度: {})。鍵または開錠が必要です。", l.lock_level);
+                    println!(
+                        "  - このコンテナは施錠されています (難易度: {})。鍵または開錠が必要です。",
+                        l.lock_level
+                    );
                     return;
                 }
             }
@@ -181,29 +216,39 @@ pub fn perform_interact(app: &mut ViewerState) {
             );
             let form_id = focused.form_id;
             if let Some(binding) = app.refr_bindings.get(&form_id) {
-                let anim = app.animators.entry(form_id).or_insert_with(|| {
-                    InteractiveAnimator::from_binding(binding, currently_open)
-                });
+                let anim = app
+                    .animators
+                    .entry(form_id)
+                    .or_insert_with(|| InteractiveAnimator::from_binding(binding, currently_open));
                 anim.toggle();
             }
 
             // インタラクティブ対象の状態を更新
             if let Some(obj) = app.interactables.iter_mut().find(|o| o.form_id == form_id) {
-                if let InteractableKind::Container { ref mut is_open, .. } = obj.kind {
+                if let InteractableKind::Container {
+                    ref mut is_open, ..
+                } = obj.kind
+                {
                     *is_open = target_open;
                 }
             }
             if let Some(ref mut obj) = app.focused_interactable {
                 if obj.form_id == form_id {
-                    if let InteractableKind::Container { ref mut is_open, .. } = obj.kind {
+                    if let InteractableKind::Container {
+                        ref mut is_open, ..
+                    } = obj.kind
+                    {
                         *is_open = target_open;
                     }
                 }
             }
         }
-        InteractableKind::Item { form_id: base_form_id } => {
+        InteractableKind::Item {
+            form_id: base_form_id,
+        } => {
             // アイテムをプレイヤーインベントリおよび VM 所持品へ追加
-            app.inventory.add_item(FormId(*base_form_id), 1, &focused.name);
+            app.inventory
+                .add_item(FormId(*base_form_id), 1, &focused.name);
             app.vm.add_item(FormId(*base_form_id), 1);
             let total = app.inventory.get_count(FormId(*base_form_id));
             println!(
@@ -238,15 +283,23 @@ pub fn perform_interact(app: &mut ViewerState) {
             }
 
             // インタラクト候補から削除
-            app.interactables.retain(|obj| obj.form_id != focused.form_id);
+            app.interactables
+                .retain(|obj| obj.form_id != focused.form_id);
             app.focused_interactable = None;
         }
-        InteractableKind::Actor { form_id: actor_form_id, base_form_id, is_dead } => {
+        InteractableKind::Actor {
+            form_id: actor_form_id,
+            base_form_id,
+            is_dead,
+        } => {
             if *is_dead {
                 println!("  - アクター \"{}\" の所持品を調べます。", focused.name);
                 return;
             }
-            println!("  - アクター \"{}\" (Base: 0x{:08X}, REFR: 0x{:08X}) との会話を開始します...", focused.name, base_form_id, actor_form_id);
+            println!(
+                "  - アクター \"{}\" (Base: 0x{:08X}, REFR: 0x{:08X}) との会話を開始します...",
+                focused.name, base_form_id, actor_form_id
+            );
 
             let cond_ctx = ConditionContext {
                 speaker: Some(FormId(*base_form_id)),
@@ -272,9 +325,9 @@ pub fn perform_interact(app: &mut ViewerState) {
                             .into_iter()
                             .filter_map(|(dial, infos)| {
                                 // CTDA 条件式を満たす INFO を検索
-                                let valid_info = infos.into_iter().find(|info| {
-                                    evaluate_conditions(&info.conditions, &cond_ctx)
-                                });
+                                let valid_info = infos
+                                    .into_iter()
+                                    .find(|info| evaluate_conditions(&info.conditions, &cond_ctx));
 
                                 valid_info.map(|info| {
                                     let prompt = dial.prompt.clone().unwrap_or(dial.edid.clone());
@@ -294,9 +347,21 @@ pub fn perform_interact(app: &mut ViewerState) {
                         // VFS から実機 menus/dialog/dialog_menu.xml をロードして MenuRuntime を構築
                         if let Ok(xml_bytes) = app.vfs.read("menus/dialog/dialog_menu.xml") {
                             let xml_str = String::from_utf8_lossy(&xml_bytes);
-                            let top_bracket = app.vfs.read("menus/prefabs/top_bracket.xml").ok().map(|b| String::from_utf8_lossy(&b).to_string());
-                            let bottom_bracket = app.vfs.read("menus/prefabs/bottom_bracket.xml").ok().map(|b| String::from_utf8_lossy(&b).to_string());
-                            let list_box = app.vfs.read("menus/prefabs/list_box.xml").ok().map(|b| String::from_utf8_lossy(&b).to_string());
+                            let top_bracket = app
+                                .vfs
+                                .read("menus/prefabs/top_bracket.xml")
+                                .ok()
+                                .map(|b| String::from_utf8_lossy(&b).to_string());
+                            let bottom_bracket = app
+                                .vfs
+                                .read("menus/prefabs/bottom_bracket.xml")
+                                .ok()
+                                .map(|b| String::from_utf8_lossy(&b).to_string());
+                            let list_box = app
+                                .vfs
+                                .read("menus/prefabs/list_box.xml")
+                                .ok()
+                                .map(|b| String::from_utf8_lossy(&b).to_string());
 
                             let loader = |prefab_name: &str| -> Option<String> {
                                 let clean = prefab_name.to_lowercase();
@@ -313,7 +378,9 @@ pub fn perform_interact(app: &mut ViewerState) {
                             let parser = fo3_render::MenuXmlParser::new(Some(&loader));
                             if let Ok(root) = parser.parse(&xml_str) {
                                 let mut runtime = fo3_render::MenuRuntime::new(root);
-                                if let Ok(tai_bytes) = app.vfs.read("textures/interface/interfaceshared.tai") {
+                                if let Ok(tai_bytes) =
+                                    app.vfs.read("textures/interface/interfaceshared.tai")
+                                {
                                     let tai_str = String::from_utf8_lossy(&tai_bytes);
                                     runtime.atlas = Some(fo3_render::TextureAtlas::parse(&tai_str));
                                 }
@@ -322,30 +389,47 @@ pub fn perform_interact(app: &mut ViewerState) {
                             }
                         }
 
-                        println!("  - 会話UIモードへ遷移: 挨拶「{}」 (有効選択肢: {} 件)", greeting, dialog_state.choices.len());
+                        println!(
+                            "  - 会話UIモードへ遷移: 挨拶「{}」 (有効選択肢: {} 件)",
+                            greeting,
+                            dialog_state.choices.len()
+                        );
                         app.mode = ViewerMode::Dialog(dialog_state);
                     }
                     _ => {
-                        println!("  - アクター \"{}\" には利用可能な会話データがありません。", focused.name);
+                        println!(
+                            "  - アクター \"{}\" には利用可能な会話データがありません。",
+                            focused.name
+                        );
                     }
                 }
             }
         }
-        InteractableKind::Terminal { form_id: term_form_id, lock } => {
+        InteractableKind::Terminal {
+            form_id: term_form_id,
+            lock,
+        } => {
             if let Some(l) = lock {
                 if !app.vm.is_unlocked(FormId(focused.form_id)) {
                     println!("  - このターミナルは施錠されています (難易度: {})。ハッキングまたは開錠が必要です。", l.lock_level);
                     return;
                 }
             }
-            println!("  - ターミナル \"{}\" (FormID: 0x{:08X}) を起動します...", focused.name, term_form_id);
+            println!(
+                "  - ターミナル \"{}\" (FormID: 0x{:08X}) を起動します...",
+                focused.name, term_form_id
+            );
             let esm_path = std::path::Path::new(&app.data_dir).join("Fallout3.esm");
             if let Ok(mut reader) = fo3_esm::EsmReader::open(&esm_path) {
                 match reader.find_terminal(FormId(*term_form_id)) {
                     Ok(Some(term_rec)) => {
                         let term_state = TerminalState::from_record(&term_rec);
-                        println!("  - ターミナルUIモードへ遷移: \"{}\" (項目: {} 件)", term_state.title, term_state.menu_items.len());
-                        app.mode = ViewerMode::Terminal(term_state);
+                        println!(
+                            "  - ターミナルUIモードへ遷移: \"{}\" (項目: {} 件)",
+                            term_state.title,
+                            term_state.menu_items.len()
+                        );
+                        app.set_viewer_mode(ViewerMode::Terminal(term_state), Some(*term_form_id));
                     }
                     _ => {
                         println!("  - ターミナルデータが見つかりませんでした。");
@@ -354,7 +438,10 @@ pub fn perform_interact(app: &mut ViewerState) {
             }
         }
         InteractableKind::Activator { .. } => {
-            println!("  - アクティベーター \"{}\" を作動させました。", focused.name);
+            println!(
+                "  - アクティベーター \"{}\" を作動させました。",
+                focused.name
+            );
         }
     }
 }
@@ -365,44 +452,82 @@ pub fn process_teleport_requests(app: &mut ViewerState) {
         let (subject, marker) = app.vm.teleport_requests.remove(0);
         let marker_data = match marker.to_ascii_lowercase().as_str() {
             // --- CG00: Vault 101 Infirmary (出産シーン) ---
-            "cg00playerstartmarker"     => Some((glam::Vec3::new(-5275.8867, -7148.175, 7542.536), glam::Vec3::new(0.0, 0.0, std::f32::consts::PI))),
-            "cg00momstartmarker"        => Some((glam::Vec3::new(-5275.8867, -7250.0, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
-            "cg00dadstartmarker"        => Some((glam::Vec3::new(-5360.3623, -7332.082, 7542.536), glam::Vec3::new(0.0, 0.0, 6.19592))),
-            "cg00doctorlistartmarker"   => Some((glam::Vec3::new(-5190.0, -7330.0, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
+            "cg00playerstartmarker" => Some((
+                glam::Vec3::new(-5275.8867, -7148.175, 7542.536),
+                glam::Vec3::new(0.0, 0.0, std::f32::consts::PI),
+            )),
+            "cg00momstartmarker" => Some((
+                glam::Vec3::new(-5275.8867, -7250.0, 7542.536),
+                glam::Vec3::new(0.0, 0.0, 0.0),
+            )),
+            "cg00dadstartmarker" => Some((
+                glam::Vec3::new(-5360.3623, -7332.082, 7542.536),
+                glam::Vec3::new(0.0, 0.0, 6.19592),
+            )),
+            "cg00doctorlistartmarker" => Some((
+                glam::Vec3::new(-5190.0, -7330.0, 7542.536),
+                glam::Vec3::new(0.0, 0.0, 0.0),
+            )),
             // --- CG01: Vault 101 Atrium (1歳・幼児期) ---
             // 参照元: Fallout3.esm CELL "Vault101Atrium" REFR CG01PlayerStartMarker (近似座標)
-            "cg01playerstartmarker"     => Some((glam::Vec3::new(-5275.8867, -7148.175, 7542.536), glam::Vec3::new(0.0, 0.0, std::f32::consts::PI))),
-            "cg01dadstartmarker"        => Some((glam::Vec3::new(-5360.0, -7200.0, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
+            "cg01playerstartmarker" => Some((
+                glam::Vec3::new(-5275.8867, -7148.175, 7542.536),
+                glam::Vec3::new(0.0, 0.0, std::f32::consts::PI),
+            )),
+            "cg01dadstartmarker" => Some((
+                glam::Vec3::new(-5360.0, -7200.0, 7542.536),
+                glam::Vec3::new(0.0, 0.0, 0.0),
+            )),
             // --- CG02: Vault 101 教室 (10歳・GOAT テスト前) ---
             // 参照元: Fallout3.esm CELL "Vault101Classroom" REFR CG02PlayerStartMarker (近似座標)
-            "cg02playerstartmarker"     => Some((glam::Vec3::new(-5275.8867, -7148.175, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
-            "cg02dadstartmarker"        => Some((glam::Vec3::new(-5360.0, -7200.0, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
+            "cg02playerstartmarker" => Some((
+                glam::Vec3::new(-5275.8867, -7148.175, 7542.536),
+                glam::Vec3::new(0.0, 0.0, 0.0),
+            )),
+            "cg02dadstartmarker" => Some((
+                glam::Vec3::new(-5360.0, -7200.0, 7542.536),
+                glam::Vec3::new(0.0, 0.0, 0.0),
+            )),
             // --- CG03: Vault 101 廊下 (16歳・GOAT テスト結果) ---
             // 参照元: Fallout3.esm CELL "Vault101" REFR CG03PlayerStartMarker (近似座標)
-            "cg03playerstartmarker"     => Some((glam::Vec3::new(-5275.8867, -7148.175, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
-            "cg03dadstartmarker"        => Some((glam::Vec3::new(-5360.0, -7200.0, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
+            "cg03playerstartmarker" => Some((
+                glam::Vec3::new(-5275.8867, -7148.175, 7542.536),
+                glam::Vec3::new(0.0, 0.0, 0.0),
+            )),
+            "cg03dadstartmarker" => Some((
+                glam::Vec3::new(-5360.0, -7200.0, 7542.536),
+                glam::Vec3::new(0.0, 0.0, 0.0),
+            )),
             // --- CG04: Vault 101 (18歳・Birthday パーティー) ---
             // 参照元: Fallout3.esm CELL "Vault101Atrium" REFR CG04PlayerStartMarker (近似座標)
-            "cg04playerstartmarker"     => Some((glam::Vec3::new(-5275.8867, -7148.175, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
-            "cg04dadstartmarker"        => Some((glam::Vec3::new(-5360.0, -7200.0, 7542.536), glam::Vec3::new(0.0, 0.0, 0.0))),
+            "cg04playerstartmarker" => Some((
+                glam::Vec3::new(-5275.8867, -7148.175, 7542.536),
+                glam::Vec3::new(0.0, 0.0, 0.0),
+            )),
+            "cg04dadstartmarker" => Some((
+                glam::Vec3::new(-5360.0, -7200.0, 7542.536),
+                glam::Vec3::new(0.0, 0.0, 0.0),
+            )),
             _ => None,
         };
 
         if let Some((pos, rot)) = marker_data {
-            let target_form_id = subject.or_else(|| {
-                match marker.to_ascii_lowercase().as_str() {
-                    "cg00dadstartmarker" => Some(FormId(0x000290A7)),
-                    "cg00doctorlistartmarker" => Some(FormId(0x000290A5)),
-                    "cg00momstartmarker" => Some(FormId(0x0005EDE0)),
-                    _ => None,
-                }
+            let target_form_id = subject.or_else(|| match marker.to_ascii_lowercase().as_str() {
+                "cg00dadstartmarker" => Some(FormId(0x000290A7)),
+                "cg00doctorlistartmarker" => Some(FormId(0x000290A5)),
+                "cg00momstartmarker" => Some(FormId(0x0005EDE0)),
+                _ => None,
             });
 
             if let Some(fid) = target_form_id {
                 if let Some(actor) = app.scene.actors.iter_mut().find(|a| a.form_id == fid.0) {
                     actor.world_transform.translation = pos;
-                    actor.world_transform.rotation = glam::Mat3::from_euler(glam::EulerRot::XYZ, rot.x, rot.y, rot.z);
-                    println!("[MoveTo] アクター 0x{:08X} をマーカー \"{}\" (pos={:?}) へ配置完了", fid.0, marker, pos);
+                    actor.world_transform.rotation =
+                        glam::Mat3::from_euler(glam::EulerRot::XYZ, rot.x, rot.y, rot.z);
+                    println!(
+                        "[MoveTo] アクター 0x{:08X} をマーカー \"{}\" (pos={:?}) へ配置完了",
+                        fid.0, marker, pos
+                    );
                 }
             } else {
                 app.controller.character_controller.position = pos;
@@ -415,10 +540,16 @@ pub fn process_teleport_requests(app: &mut ViewerState) {
                 if let Some(ref mut player) = app.controller.player_actor {
                     player.position = pos;
                 }
-                println!("[MoveTo] プレイヤーをマーカー \"{}\" (pos={:?}) へテレポート完了", marker, pos);
+                println!(
+                    "[MoveTo] プレイヤーをマーカー \"{}\" (pos={:?}) へテレポート完了",
+                    marker, pos
+                );
             }
         } else {
-            println!("[MoveTo] 未知のマーカー \"{}\" への配置要求 (スキップ)", marker);
+            println!(
+                "[MoveTo] 未知のマーカー \"{}\" への配置要求 (スキップ)",
+                marker
+            );
         }
     }
 }
@@ -461,7 +592,7 @@ pub(crate) fn resolve_idle_kf_from_pack(ctx: &EsmMasterContext, pkg: &PackRecord
 ///
 /// 実機 ESM 検証 (CG00 クエスト): Dad (0x000290A6) / Mom (0x0005EDDF) / DrLi (0x000290A3)
 /// 各 NPC の PKID は Section5 -> Section4 -> ... -> Section0 -> Start/Default の順で並び、
-/// 各 Section PACK の CTDA は `GetStage(0x0001F388) >= {8,10,20,40,60,80}` 
+/// 各 Section PACK の CTDA は `GetStage(0x0001F388) >= {8,10,20,40,60,80}`
 /// (fnIndex=58, operator=0x60 -> GTE) で統一されている。
 ///
 /// 参照元: `references/openmw/components/esm4/loadnpc.cpp` (PKID),
@@ -485,13 +616,24 @@ pub(crate) fn resolve_pack_for_actor<'a>(
 
 /// PACK の Idle Collection からロード済み (nif, clip) を組み立てる共通適用処理。
 /// 複数 KF 候補を先頭から順に試し、初めて正常に NIF+クリップ化できた候補を返す。
-fn load_first_clip(app: &mut ViewerState, kf_paths: &[String]) -> Option<(String, std::sync::Arc<fo3_nif::NifFile>, std::sync::Arc<fo3_render::AnimationClip>)> {
+fn load_first_clip(
+    app: &mut ViewerState,
+    kf_paths: &[String],
+) -> Option<(
+    String,
+    std::sync::Arc<fo3_nif::NifFile>,
+    std::sync::Arc<fo3_render::AnimationClip>,
+)> {
     for path in kf_paths {
         if let Ok(bytes) = app.vfs.read(path) {
             let mut cursor = std::io::Cursor::new(bytes);
             if let Ok(kf) = fo3_nif::NifFile::read(&mut cursor) {
                 if let Some(clip) = fo3_render::AnimationClip::from_kf(&kf) {
-                    return Some((path.clone(), std::sync::Arc::new(kf), std::sync::Arc::new(clip)));
+                    return Some((
+                        path.clone(),
+                        std::sync::Arc::new(kf),
+                        std::sync::Arc::new(clip),
+                    ));
                 }
             }
         }
@@ -522,11 +664,12 @@ pub fn process_package_requests(app: &mut ViewerState) {
         let mut kf_paths = Vec::new();
 
         // 1a. PACK レコードを EDID 一致で解決し、Idle Collection (IDLA->IDLE->MODL) から KF を取得
-        if let Some(pkg) = app.master_context
-            .pack_map
-            .values()
-            .find(|p| p.editor_id.as_deref().map(|e| e.eq_ignore_ascii_case(&pkg_name)).unwrap_or(false))
-        {
+        if let Some(pkg) = app.master_context.pack_map.values().find(|p| {
+            p.editor_id
+                .as_deref()
+                .map(|e| e.eq_ignore_ascii_case(&pkg_name))
+                .unwrap_or(false)
+        }) {
             if let Some(actor_state) = app.ai.actors.get_mut(&target_fid) {
                 if !actor_state.script_packages.contains(&pkg.form_id) {
                     actor_state.script_packages.insert(0, pkg.form_id); // 高優先度
@@ -548,12 +691,23 @@ pub fn process_package_requests(app: &mut ViewerState) {
                         println!("[Package] プレイヤーにアニメーション \"{}\" を適用", path);
                     }
                 }
-            } else if let Some(actor) = app.scene.actors.iter_mut().find(|a| a.form_id == target_fid.0) {
+            } else if let Some(actor) = app
+                .scene
+                .actors
+                .iter_mut()
+                .find(|a| a.form_id == target_fid.0)
+            {
                 actor.set_animation(kf, clip);
-                println!("[Package] アクター 0x{:08X} にアニメーション \"{}\" を適用", target_fid.0, path);
+                println!(
+                    "[Package] アクター 0x{:08X} にアニメーション \"{}\" を適用",
+                    target_fid.0, path
+                );
             }
         } else {
-            println!("[Package] アニメーション KF が見つかりません: package=\"{}\"", pkg_name);
+            println!(
+                "[Package] アニメーション KF が見つかりません: package=\"{}\"",
+                pkg_name
+            );
         }
     }
 
@@ -568,9 +722,11 @@ pub fn process_package_requests(app: &mut ViewerState) {
 
         // REFR FormID -> NPC ベース FormID への解決 (REFR の NAME サブレコード由来)
         let base_npc = app.interactables.iter().find_map(|it| match it.kind {
-            InteractableKind::Actor { form_id, base_form_id, .. } if form_id == target_fid.0 => {
-                Some(fo3_esm::FormId(base_form_id))
-            }
+            InteractableKind::Actor {
+                form_id,
+                base_form_id,
+                ..
+            } if form_id == target_fid.0 => Some(fo3_esm::FormId(base_form_id)),
             _ => None,
         });
         let Some(base_npc) = base_npc else { continue };
@@ -594,7 +750,12 @@ pub fn process_package_requests(app: &mut ViewerState) {
 
         // 適用 PACK の Idle Collection 由来 KF をロードしてアクターに適用
         if let Some((path, kf, clip)) = load_first_clip(app, &kf_paths) {
-            if let Some(actor) = app.scene.actors.iter_mut().find(|a| a.form_id == target_fid.0) {
+            if let Some(actor) = app
+                .scene
+                .actors
+                .iter_mut()
+                .find(|a| a.form_id == target_fid.0)
+            {
                 actor.set_animation(kf, clip);
                 println!("[AI/EVP] アクター 0x{:08X} (\"{}\") に PACK \"{}\" 由来のアニメーション \"{}\" を適用",
                     target_fid.0, actor.name, pkg_edid, path);
@@ -603,8 +764,6 @@ pub fn process_package_requests(app: &mut ViewerState) {
     }
 }
 
-
-
 /// `PlayGroup` や `PlayAnim` によるアニメーション再生要求を処理する。
 /// Actorだけでなく、ActivatorやStatic(例: gene_projector.nif)にも適用する。
 pub fn process_playgroup_requests(app: &mut ViewerState) {
@@ -612,23 +771,28 @@ pub fn process_playgroup_requests(app: &mut ViewerState) {
     std::mem::swap(&mut requests, &mut app.vm.playgroup_queue);
 
     for (target_fid, anim_name) in requests {
-        if let Some(actor) = app.scene.actors.iter_mut().find(|a| a.form_id == target_fid.0) {
+        if let Some(actor) = app
+            .scene
+            .actors
+            .iter_mut()
+            .find(|a| a.form_id == target_fid.0)
+        {
             let mut kf_paths = vec![
                 format!("meshes/characters/_male/{}", anim_name), // Actor default
             ];
-            
+
             // If actor's name is a model path ending in .nif, add a KF path in its directory
             if actor.name.to_lowercase().ends_with(".nif") {
                 let path = std::path::Path::new(&actor.name);
                 if let Some(parent) = path.parent() {
                     let parent_str = parent.to_string_lossy().replace("\\", "/");
                     kf_paths.push(format!("{}/{}", parent_str, anim_name));
-                    
+
                     // Also try lowercase anim_name
                     kf_paths.push(format!("{}/{}", parent_str, anim_name.to_lowercase()));
                 }
             }
-            
+
             let mut kf_loaded = false;
             for kf_path in kf_paths {
                 if let Ok(buf) = app.vfs.read(&kf_path) {
@@ -636,7 +800,10 @@ pub fn process_playgroup_requests(app: &mut ViewerState) {
                         let kf_arc = std::sync::Arc::new(kf);
                         if let Some(clip) = fo3_render::animation::AnimationClip::from_kf(&kf_arc) {
                             actor.set_animation(kf_arc, std::sync::Arc::new(clip));
-                            println!("[Action] Actor {:08X} の PlayGroup: {} (KF: {}) を再生します", target_fid.0, anim_name, kf_path);
+                            println!(
+                                "[Action] Actor {:08X} の PlayGroup: {} (KF: {}) を再生します",
+                                target_fid.0, anim_name, kf_path
+                            );
                             kf_loaded = true;
                             break;
                         }

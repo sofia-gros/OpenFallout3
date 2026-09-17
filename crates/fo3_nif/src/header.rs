@@ -6,8 +6,8 @@
 //! - `references/nifxml/nif.xml:L1889-L1893` (`ExportString`)
 //! - `knowledge/nif_v20_2_0_7_format.md`
 
-use std::io::{self, BufRead, Read};
 use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, BufRead, Read};
 use thiserror::Error;
 
 /// NIF パース時のエラー型。
@@ -221,8 +221,8 @@ impl NifHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
     use byteorder::WriteBytesExt;
+    use std::io::Cursor;
 
     #[test]
     fn test_nif_header_roundtrip() {

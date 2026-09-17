@@ -2,15 +2,15 @@
 //!
 //! 参照元: Gamebryo 2.6 レンダリングパイプライン & winit イベントループ
 
-use std::collections::HashMap;
-use std::path::Path;
-use std::sync::Arc;
 use fo3_esm::{CellLighting, EsmMasterContext, FormId};
 use fo3_render::{
     GpuTexture, LightingUniform, NifCache, PlacedPointLight, RenderContext, RenderScene,
 };
 use fo3_vfs::VfsManager;
 use pollster::FutureExt;
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -19,19 +19,18 @@ use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
-use std::time::Instant;
 use crate::anim::AnimState;
 use crate::controller::Controller;
 use crate::hud::HudRenderer;
 use crate::interact::{
-    find_focused_by_raycast, find_focused_interactable, InteractableObject,
-    F_ACTIVATE_PICK_LENGTH,
+    find_focused_by_raycast, find_focused_interactable, InteractableObject, F_ACTIVATE_PICK_LENGTH,
 };
 use crate::interactive_anim::{InteractiveAnimator, RefrBinding};
 use crate::inventory::PlayerInventory;
 use crate::loader::load_scene;
 use crate::types::{print_controls_guide, update_window_title, CameraMode, ViewerTarget};
 pub use crate::ui::ViewerMode;
+use std::time::Instant;
 
 pub struct ViewerState {
     pub window: Arc<Window>,
@@ -64,6 +63,8 @@ pub struct ViewerState {
     pub data_dir: String,
     pub start_time: Instant,
     pub vfs: VfsManager,
+    pub ui_rtt: fo3_render::GpuTexture,
+    pub active_rtt_bindings: Vec<(usize, wgpu::BindGroup)>,
     pub master_context: Arc<EsmMasterContext>,
     pub nif_cache: NifCache,
     pub texture_cache: HashMap<String, GpuTexture>,
@@ -177,7 +178,10 @@ impl ViewerState {
         let (spawn_pos, initial_yaw) = if matches!(target, ViewerTarget::NewGame { .. }) {
             // 実機 CG00PlayerStartMarker (0x00039562): Pos=[-5275.8867, -7148.175, 7542.536], Rot=[0.0, 0.0, PI]
             let marker_pos = glam::Vec3::new(-5275.8867, -7148.175, 7542.536);
-            println!("★ ニューゲーム開始: CG00PlayerStartMarker へ配置 {:?}", marker_pos);
+            println!(
+                "★ ニューゲーム開始: CG00PlayerStartMarker へ配置 {:?}",
+                marker_pos
+            );
             (marker_pos, std::f32::consts::PI)
         } else if let Some((door_pos, _)) = loaded.door_spawn_point {
             let to_center = loaded.scene.bounds_center - door_pos;
@@ -187,16 +191,24 @@ impl ViewerState {
                 glam::Vec3::X
             };
             let pos = door_pos + into_room * 80.0 + glam::Vec3::new(0.0, 0.0, 65.0);
-            println!("出入口ドアから室内方向への初期スポーン地点を設定: {:?}", pos);
+            println!(
+                "出入口ドアから室内方向への初期スポーン地点を設定: {:?}",
+                pos
+            );
             (pos, into_room.y.atan2(into_room.x))
         } else {
-            let ray_origin =
-                loaded.scene.bounds_center + glam::Vec3::new(0.0, 0.0, loaded.scene.bounds_radius * 0.5);
+            let ray_origin = loaded.scene.bounds_center
+                + glam::Vec3::new(0.0, 0.0, loaded.scene.bounds_radius * 0.5);
             let ray_dir = glam::Vec3::new(0.0, 0.0, -1.0);
             let pos = if let Some(hit) =
-                loaded.physics_world.cast_ray(ray_origin, ray_dir, loaded.scene.bounds_radius * 2.0)
+                loaded
+                    .physics_world
+                    .cast_ray(ray_origin, ray_dir, loaded.scene.bounds_radius * 2.0)
             {
-                println!("レイキャストによる安全な床面検出に成功: Z = {:.1}", hit.point.z);
+                println!(
+                    "レイキャストによる安全な床面検出に成功: Z = {:.1}",
+                    hit.point.z
+                );
                 hit.point + glam::Vec3::new(0.0, 0.0, 65.0)
             } else {
                 loaded.scene.bounds_center + glam::Vec3::new(0.0, 0.0, 64.0)
@@ -286,6 +298,14 @@ impl ViewerState {
 
         print_controls_guide();
 
+        let ui_rtt = fo3_render::GpuTexture::create_render_target(
+            &device,
+            1024,
+            1024,
+            surface_format,
+            Some("UI RTT"),
+        );
+
         let mut state = Self {
             window,
             surface,
@@ -317,6 +337,8 @@ impl ViewerState {
             data_dir: data_dir.to_string(),
             start_time: Instant::now(),
             vfs,
+            ui_rtt,
+            active_rtt_bindings: Vec::new(),
             master_context,
             nif_cache,
             texture_cache,
@@ -326,7 +348,11 @@ impl ViewerState {
             ui_renderer,
             input_manager: crate::input::InputManager::new(),
             screen_fade_color: [0.0, 0.0, 0.0, 1.0],
-            screen_fade_alpha: if matches!(target, ViewerTarget::NewGame { .. }) { 1.0 } else { 0.0 },
+            screen_fade_alpha: if matches!(target, ViewerTarget::NewGame { .. }) {
+                1.0
+            } else {
+                0.0
+            },
             sound_engine: crate::audio::SoundEngine::new(),
             chargen_menu: crate::chargen_menu::ChargenMenu::new(),
             bink_player: None,
@@ -344,20 +370,40 @@ impl ViewerState {
 
         let interactables = state.interactables.clone();
         for obj in interactables {
-            if let crate::interact::InteractableKind::Actor { form_id, base_form_id, .. } = obj.kind {
-                state.ai.register_actor(fo3_esm::types::FormId(form_id), fo3_esm::types::FormId(base_form_id), &state.master_context);
+            if let crate::interact::InteractableKind::Actor {
+                form_id,
+                base_form_id,
+                ..
+            } = obj.kind
+            {
+                state.ai.register_actor(
+                    fo3_esm::types::FormId(form_id),
+                    fo3_esm::types::FormId(base_form_id),
+                    &state.master_context,
+                );
             }
         }
 
-        if let ViewerTarget::NewGame { intro_movie, start_quest, start_stage } = &target {
+        if let ViewerTarget::NewGame {
+            intro_movie,
+            start_quest,
+            start_stage,
+        } = &target
+        {
             println!("============================================================");
-            println!("⚙ ニューゲーム初期化: Quest (FormID: 0x{:08X}), Stage: {}", start_quest, start_stage);
+            println!(
+                "⚙ ニューゲーム初期化: Quest (FormID: 0x{:08X}), Stage: {}",
+                start_quest, start_stage
+            );
             println!("============================================================");
 
             if let Some(intro) = intro_movie {
                 let intro_bik = Path::new(data_dir).join(intro);
                 if intro_bik.exists() {
-                    state.vm.play_bink_queue.push(intro_bik.to_string_lossy().to_string());
+                    state
+                        .vm
+                        .play_bink_queue
+                        .push(intro_bik.to_string_lossy().to_string());
                 }
             }
 
@@ -385,7 +431,9 @@ impl ViewerState {
                 for (_, refrs, _) in cells {
                     for refr in refrs {
                         if !refr.edid.is_empty() {
-                            self.vm.edid_map.insert(refr.edid.to_ascii_uppercase(), refr.form_id);
+                            self.vm
+                                .edid_map
+                                .insert(refr.edid.to_ascii_uppercase(), refr.form_id);
                         }
                         if let Some(scpt_id) = refr.script {
                             self.dispatcher.attach_script(refr.form_id, scpt_id);
@@ -418,7 +466,6 @@ impl ViewerState {
         crate::action::perform_interact(self);
     }
 
-
     pub fn resize(&mut self, new_size: PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
@@ -428,6 +475,98 @@ impl ViewerState {
             self.depth_view =
                 RenderContext::create_depth_texture(&self.device, new_size.width, new_size.height);
             self.controller.camera.aspect = new_size.width as f32 / new_size.height as f32;
+        }
+    }
+
+    pub fn bind_ui_to_refr(&mut self, form_id: u32) {
+        self.unbind_ui();
+        if let Some(binding) = self.refr_bindings.get(&form_id) {
+            for &mesh_idx in &binding.static_mesh_indices {
+                if let Some(mesh) = self.scene.meshes.get_mut(mesh_idx) {
+                    let name = mesh.name.to_lowercase();
+                    if name.contains("screen")
+                        || name.contains("projector")
+                        || name.contains("terminal")
+                        || name.contains("monitor")
+                    {
+                        println!(
+                            "RTT をメッシュ {} (Index: {}) にバインドします",
+                            mesh.name, mesh_idx
+                        );
+
+                        let rtt_bind_group =
+                            self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("RTT Texture Bind Group"),
+                                layout: &self.context.texture_bind_group_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: wgpu::BindingResource::TextureView(
+                                            &self.ui_rtt.view,
+                                        ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: wgpu::BindingResource::Sampler(
+                                            &self.ui_rtt.sampler,
+                                        ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: wgpu::BindingResource::TextureView(
+                                            &self.ui_rtt.view,
+                                        ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 3,
+                                        resource: wgpu::BindingResource::Sampler(
+                                            &self.ui_rtt.sampler,
+                                        ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 4,
+                                        resource: wgpu::BindingResource::TextureView(
+                                            &self.ui_rtt.view,
+                                        ),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 5,
+                                        resource: wgpu::BindingResource::Sampler(
+                                            &self.ui_rtt.sampler,
+                                        ),
+                                    },
+                                ],
+                            });
+
+                        let old_bind_group =
+                            std::mem::replace(&mut mesh.texture_bind_group, rtt_bind_group);
+                        self.active_rtt_bindings.push((mesh_idx, old_bind_group));
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn unbind_ui(&mut self) {
+        for (mesh_idx, old_bind_group) in self.active_rtt_bindings.drain(..) {
+            if let Some(mesh) = self.scene.meshes.get_mut(mesh_idx) {
+                mesh.texture_bind_group = old_bind_group;
+                println!(
+                    "メッシュ (Index: {}) の元のテクスチャを復元しました",
+                    mesh_idx
+                );
+            }
+        }
+    }
+
+    pub fn set_viewer_mode(&mut self, mode: ViewerMode, form_id: Option<u32>) {
+        self.mode = mode;
+        if self.mode.is_ui_active() {
+            if let Some(fid) = form_id {
+                self.bind_ui_to_refr(fid);
+            }
+        } else {
+            self.unbind_ui();
         }
     }
 
@@ -461,7 +600,9 @@ impl ViewerState {
             );
             // バインドグループを生成してキャッシュ
             if let Some(ref player) = self.bink_player {
-                let bg = self.hud.create_video_bind_group(&self.device, &player.texture_view);
+                let bg = self
+                    .hud
+                    .create_video_bind_group(&self.device, &player.texture_view);
                 self.bink_video_bind_group = Some(bg);
             }
         }
@@ -508,7 +649,8 @@ impl ViewerState {
 
         // 0.3 サウンドエンジンを更新 (音声 DIAL/INFO/SOUN 再生)
         self.vm.chargen_menu_active = self.chargen_menu.is_active();
-        self.sound_engine.update(dt, &mut self.vm, &self.master_context, &mut self.vfs);
+        self.sound_engine
+            .update(dt, &mut self.vm, &self.master_context, &mut self.vfs);
 
         // 0.4 キャラクター作成イベント (GetPlayerName / ShowRaceMenu) のポーリング
         self.chargen_menu.poll_events(&mut self.vm);
@@ -522,7 +664,9 @@ impl ViewerState {
                 for (mesh_indices, rigid_bodies, world_mat, pos, rot) in part_transforms {
                     // 1. 可動パーツの物理剛体の位置・回転を同期
                     for rb in rigid_bodies {
-                        self.controller.physics_world.set_rigid_body_transform(*rb, pos, rot);
+                        self.controller
+                            .physics_world
+                            .set_rigid_body_transform(*rb, pos, rot);
                     }
                     // 2. 可動パーツの GPU 描画メッシュのワールド行列を同期
                     let model_mat = world_mat.to_cols_array_2d();
@@ -579,15 +723,30 @@ impl ViewerState {
         if let Some(ref mut player) = self.controller.player_actor {
             let feet_pos = self.controller.character_controller.feet_position();
             let cam_yaw = self.controller.player_camera.yaw;
-            let is_moving = self.controller.key_forward || self.controller.key_backward || self.controller.key_left || self.controller.key_right;
+            let is_moving = self.controller.key_forward
+                || self.controller.key_backward
+                || self.controller.key_left
+                || self.controller.key_right;
             let fwd = glam::Vec3::new(cam_yaw.cos(), cam_yaw.sin(), 0.0).normalize();
             let rgt = glam::Vec3::new(cam_yaw.sin(), -cam_yaw.cos(), 0.0).normalize();
             let mut m_dir = glam::Vec3::ZERO;
-            if self.controller.key_forward { m_dir += fwd; }
-            if self.controller.key_backward { m_dir -= fwd; }
-            if self.controller.key_right { m_dir += rgt; }
-            if self.controller.key_left { m_dir -= rgt; }
-            let move_opt = if is_moving { Some(m_dir.normalize()) } else { None };
+            if self.controller.key_forward {
+                m_dir += fwd;
+            }
+            if self.controller.key_backward {
+                m_dir -= fwd;
+            }
+            if self.controller.key_right {
+                m_dir += rgt;
+            }
+            if self.controller.key_left {
+                m_dir -= rgt;
+            }
+            let move_opt = if is_moving {
+                Some(m_dir.normalize())
+            } else {
+                None
+            };
 
             player.update(
                 dt,
@@ -603,7 +762,8 @@ impl ViewerState {
         }
 
         // 単体 Anim / Actor モード時のスキニング・アニメーション更新
-        self.anim.update(dt, &self.device, &self.queue, &mut self.scene);
+        self.anim
+            .update(dt, &self.device, &self.queue, &mut self.scene);
 
         // 全 NPC アクターのアニメーション・ボーン姿勢・メッシュ更新
         for actor in &mut self.scene.actors {
@@ -614,9 +774,10 @@ impl ViewerState {
             if let Some(ref mut player) = actor.anim_player {
                 if player.is_finished() && !player.end_dispatched {
                     player.end_dispatched = true;
-                    self.dispatcher.push_event(fo3_script::GameEvent::OnAnimationEnd {
-                        actor: fo3_esm::types::FormId(actor.form_id),
-                    });
+                    self.dispatcher
+                        .push_event(fo3_script::GameEvent::OnAnimationEnd {
+                            actor: fo3_esm::types::FormId(actor.form_id),
+                        });
                 }
             }
         }
@@ -641,12 +802,19 @@ impl ViewerState {
 
         // 画面エフェクト (暗転・ホワイトアウト・徐々に視界が開ける演出)
         // 参照元: GECK `imod CG00BlackScreenISFX`, `imod CG00BirthISFX`
-        if self.vm.active_imods.iter().any(|m| m.eq_ignore_ascii_case("CG00BirthISFX") || m.eq_ignore_ascii_case("CG00BirthBaseISFX")) {
+        if self.vm.active_imods.iter().any(|m| {
+            m.eq_ignore_ascii_case("CG00BirthISFX") || m.eq_ignore_ascii_case("CG00BirthBaseISFX")
+        }) {
             self.screen_fade_color = [1.0, 1.0, 1.0, 1.0];
             if self.screen_fade_alpha > 0.0 {
                 self.screen_fade_alpha = (self.screen_fade_alpha - dt * 0.2).max(0.0);
             }
-        } else if self.vm.active_imods.iter().any(|m| m.eq_ignore_ascii_case("CG00BlackScreenISFX")) {
+        } else if self
+            .vm
+            .active_imods
+            .iter()
+            .any(|m| m.eq_ignore_ascii_case("CG00BlackScreenISFX"))
+        {
             self.screen_fade_color = [0.0, 0.0, 0.0, 1.0];
             self.screen_fade_alpha = 1.0;
         } else if self.screen_fade_alpha > 0.0 {
@@ -665,12 +833,22 @@ impl ViewerState {
         let prev_focus = self.focused_interactable.as_ref().map(|o| o.form_id);
 
         // 1. 画面中央（クロスヘア）からの物理レイキャストによる精密判定
-        let ray_hit = self.controller.physics_world.cast_ray_interaction(eye, forward, F_ACTIVATE_PICK_LENGTH);
+        let ray_hit = self.controller.physics_world.cast_ray_interaction(
+            eye,
+            forward,
+            F_ACTIVATE_PICK_LENGTH,
+        );
         let mut new_focus = find_focused_by_raycast(ray_hit, &self.interactables).cloned();
 
         // 2. コライダーを持たない一部アイテム/NPCに対する幾何フォールバック (手前に遮蔽壁がない場合のみ)
         if new_focus.is_none() && ray_hit.is_none() {
-            new_focus = find_focused_interactable(eye, forward, &self.interactables, F_ACTIVATE_PICK_LENGTH).cloned();
+            new_focus = find_focused_interactable(
+                eye,
+                forward,
+                &self.interactables,
+                F_ACTIVATE_PICK_LENGTH,
+            )
+            .cloned();
         }
 
         if let Some(ref focused) = new_focus {
@@ -782,12 +960,38 @@ impl ViewerState {
             self.size.height as f32,
         );
 
+        // RTT Render Pass
+        if !ui_batch.indices.is_empty() && !self.active_rtt_bindings.is_empty() {
+            self.ui_renderer
+                .update_resolution(&self.queue, 1024.0, 1024.0);
+            self.ui_renderer.upload_batch(&self.device, &ui_batch);
+
+            let mut rtt_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("RTT Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.ui_rtt.view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            self.ui_renderer.render(&mut rtt_pass);
+
+            // RTT用に構築したので一旦クリア
+            ui_batch.clear();
+        }
+
         // Draw active subtitles
         let mut y_offset = self.size.height as f32 - 100.0;
         for (sub, _) in self.sound_engine.active_subtitles.values() {
             let subtitle_text = format!("{}: {}", sub.speaker, sub.text);
             let screen_w = self.size.width as f32;
-            
+
             ui_batch.add_text(
                 self.ui_renderer.font(),
                 &subtitle_text,
@@ -801,7 +1005,10 @@ impl ViewerState {
 
         // 実機メッセージメニュー (MESG / ShowMessage) の描画
         if let Some(msg_id) = self.vm.show_messages.first() {
-            let mesg_opt = self.master_context.mesg_edid_map.get(&msg_id.to_ascii_uppercase())
+            let mesg_opt = self
+                .master_context
+                .mesg_edid_map
+                .get(&msg_id.to_ascii_uppercase())
                 .and_then(|fid| self.master_context.mesg_map.get(fid))
                 .or_else(|| {
                     let hex_str = msg_id.trim_start_matches("0x").trim_start_matches("0X");
@@ -829,15 +1036,35 @@ impl ViewerState {
 
                 let mut cy = by + 25.0;
                 if !mesg.text.is_empty() {
-                    ui_batch.add_text(self.ui_renderer.font(), &mesg.text, bx + 30.0, cy, 1.2, [1.0, 0.9, 0.2, 1.0]);
+                    ui_batch.add_text(
+                        self.ui_renderer.font(),
+                        &mesg.text,
+                        bx + 30.0,
+                        cy,
+                        1.2,
+                        [1.0, 0.9, 0.2, 1.0],
+                    );
                     cy += 45.0;
                 }
 
                 for (idx, btn_text) in mesg.buttons.iter().enumerate() {
                     let btn_y = cy;
-                    ui_batch.add_rect(bx + 30.0, btn_y - 2.0, box_w - 60.0, 28.0, [0.05, 0.18, 0.08, 0.85]);
+                    ui_batch.add_rect(
+                        bx + 30.0,
+                        btn_y - 2.0,
+                        box_w - 60.0,
+                        28.0,
+                        [0.05, 0.18, 0.08, 0.85],
+                    );
                     let label = format!("  [{}] {}", idx + 1, btn_text);
-                    ui_batch.add_text(self.ui_renderer.font(), &label, bx + 35.0, btn_y + 3.0, 1.15, [0.2, 1.0, 0.4, 1.0]);
+                    ui_batch.add_text(
+                        self.ui_renderer.font(),
+                        &label,
+                        bx + 35.0,
+                        btn_y + 3.0,
+                        1.15,
+                        [0.2, 1.0, 0.4, 1.0],
+                    );
                     cy += 34.0;
                 }
             }
@@ -846,7 +1073,10 @@ impl ViewerState {
         // キャラクター作成画面 (RaceSexMenu / NameMenu) の描画
         let screen_w = self.size.width as f32;
         let screen_h = self.size.height as f32;
-        self.chargen_menu.render(&self.ui_renderer, &mut ui_batch, screen_w, screen_h);
+        self.chargen_menu
+            .render(&self.ui_renderer, &mut ui_batch, screen_w, screen_h);
+
+        // 通常の画面UI描画 (RTTに描画しなかったもの、またはRTT描画後のメッセージ等)
         if !ui_batch.indices.is_empty() {
             self.ui_renderer.update_resolution(
                 &self.queue,
@@ -938,7 +1168,9 @@ impl ApplicationHandler for App {
             } => {
                 let pressed = btn_state == ElementState::Pressed;
                 if pressed && button == MouseButton::Left && state.mode.is_ui_active() {
-                    let _ = state.mode.handle_key_with_vm(winit::keyboard::KeyCode::Space, &mut state.vm);
+                    let _ = state
+                        .mode
+                        .handle_key_with_vm(winit::keyboard::KeyCode::Space, &mut state.vm);
                 }
                 match button {
                     MouseButton::Left => state.controller.left_mouse_down = pressed,
@@ -966,8 +1198,14 @@ impl ApplicationHandler for App {
                             }
                         }
                         CameraMode::Standard => {
-                            if state.vm.player_controls.looking && (state.controller.left_mouse_down || state.controller.right_mouse_down) {
-                                state.controller.player_camera.rotate(dx * 0.003, dy * 0.003);
+                            if state.vm.player_controls.looking
+                                && (state.controller.left_mouse_down
+                                    || state.controller.right_mouse_down)
+                            {
+                                state
+                                    .controller
+                                    .player_camera
+                                    .rotate(dx * 0.003, dy * 0.003);
                                 state.window.request_redraw();
                             }
                         }
@@ -992,5 +1230,3 @@ impl ApplicationHandler for App {
 /// `window_input.rs` が `crate::app::AppState` としてインポートするための型エイリアス。
 /// 参照元: `AGENTS.md` — モジュール公開 API の互換維持義務
 pub type AppState = ViewerState;
-
-

@@ -4,10 +4,10 @@
 //! 巨大サブレコード (`XXXX`) のサイズ拡張処理、文字列・数値変換ヘルパー。
 //! 参照元: `references/openmw/components/esm4/reader.cpp`
 
-use std::io::{self, Cursor, Read};
-use byteorder::{LittleEndian, ReadBytesExt};
 use crate::header::SubrecordHeader;
 use crate::types::{FourCC, ObjectBounds, SUB_XXXX};
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Cursor, Read};
 
 /// 単一のサブレコード。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -23,7 +23,7 @@ impl Subrecord {
         if let Some(&0) = slice.last() {
             slice = &slice[..slice.len() - 1];
         }
-        
+
         let (cow, _, had_errors) = encoding_rs::SHIFT_JIS.decode(slice);
         if !had_errors {
             cow.into_owned()
@@ -35,7 +35,10 @@ impl Subrecord {
     /// u32 値として解釈。
     pub fn as_u32(&self) -> io::Result<u32> {
         if self.data.len() < 4 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Subrecord too small for u32"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Subrecord too small for u32",
+            ));
         }
         let mut cursor = Cursor::new(&self.data);
         cursor.read_u32::<LittleEndian>()
@@ -44,7 +47,10 @@ impl Subrecord {
     /// i32 値として解釈。
     pub fn as_i32(&self) -> io::Result<i32> {
         if self.data.len() < 4 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Subrecord too small for i32"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Subrecord too small for i32",
+            ));
         }
         let mut cursor = Cursor::new(&self.data);
         cursor.read_i32::<LittleEndian>()
@@ -53,7 +59,10 @@ impl Subrecord {
     /// f32 値として解釈。
     pub fn as_f32(&self) -> io::Result<f32> {
         if self.data.len() < 4 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Subrecord too small for f32"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Subrecord too small for f32",
+            ));
         }
         let mut cursor = Cursor::new(&self.data);
         cursor.read_f32::<LittleEndian>()
@@ -62,7 +71,10 @@ impl Subrecord {
     /// u16 値として解釈。
     pub fn as_u16(&self) -> io::Result<u16> {
         if self.data.len() < 2 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Subrecord too small for u16"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Subrecord too small for u16",
+            ));
         }
         let mut cursor = Cursor::new(&self.data);
         cursor.read_u16::<LittleEndian>()
@@ -76,7 +88,10 @@ impl Subrecord {
     /// DATA サブレコードから位置とオイラー角回転 (pos [f32; 3], rot [f32; 3]) を取得 (24 bytes)。
     pub fn as_pos_rot(&self) -> io::Result<([f32; 3], [f32; 3])> {
         if self.data.len() < 24 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Subrecord too small for pos/rot DATA"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Subrecord too small for pos/rot DATA",
+            ));
         }
         let mut cursor = Cursor::new(&self.data);
         let px = cursor.read_f32::<LittleEndian>()?;
@@ -91,7 +106,10 @@ impl Subrecord {
     /// OBND 境界ボックス ([i16; 3] x 2) として解釈。
     pub fn as_bounds(&self) -> io::Result<ObjectBounds> {
         if self.data.len() < 12 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Subrecord too small for ObjectBounds"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Subrecord too small for ObjectBounds",
+            ));
         }
         let mut cursor = Cursor::new(&self.data);
         let min_x = cursor.read_i16::<LittleEndian>()?;
@@ -144,4 +162,3 @@ pub fn parse_subrecords<R: Read>(reader: &mut R, total_size: usize) -> io::Resul
 
     Ok(subrecords)
 }
-

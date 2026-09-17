@@ -8,7 +8,9 @@ fn test_dump_dialog_menu() {
 
     let bsa_path = format!("{}\\Fallout - Misc.bsa", data_dir);
     let mut bsa = fo3_bsa::BsaArchive::open(&bsa_path).expect("open bsa");
-    let content = bsa.extract_file("menus\\dialog\\dialog_menu.xml").expect("extract dialog_menu.xml");
+    let content = bsa
+        .extract_file("menus\\dialog\\dialog_menu.xml")
+        .expect("extract dialog_menu.xml");
     let text = String::from_utf8_lossy(&content);
     println!("=== dialog_menu.xml (len = {}) ===", text.len());
     println!("{}", text);
@@ -49,7 +51,10 @@ fn test_dump_tai() {
     let mut bsa = fo3_bsa::BsaArchive::open(&bsa_path).expect("open bsa");
     if let Ok(bytes) = bsa.extract_file("Interface\\InterfaceShared.tai") {
         println!("=== InterfaceShared.tai (len = {}) ===", bytes.len());
-        println!("{}", String::from_utf8_lossy(&bytes[..bytes.len().min(500)]));
+        println!(
+            "{}",
+            String::from_utf8_lossy(&bytes[..bytes.len().min(500)])
+        );
     } else {
         println!("Not found: Interface\\InterfaceShared.tai");
     }
@@ -72,7 +77,6 @@ fn test_find_tai() {
     }
 }
 
-
 #[test]
 fn test_read_tai_content() {
     let data_dir = "A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data";
@@ -80,7 +84,10 @@ fn test_read_tai_content() {
     let mut bsa = fo3_bsa::BsaArchive::open(&bsa_path).expect("open bsa");
     if let Ok(bytes) = bsa.extract_file("textures\\interface\\interfaceshared.tai") {
         println!("=== interfaceshared.tai (len = {}) ===", bytes.len());
-        println!("{}", String::from_utf8_lossy(&bytes[..bytes.len().min(1000)]));
+        println!(
+            "{}",
+            String::from_utf8_lossy(&bytes[..bytes.len().min(1000)])
+        );
     }
 }
 
@@ -92,7 +99,10 @@ fn test_check_tai_entries() {
     if let Ok(bytes) = bsa.extract_file("textures\\interface\\interfaceshared.tai") {
         let text = String::from_utf8_lossy(&bytes);
         for line in text.lines() {
-            if line.contains("solid.dds") || line.contains("fade_to_bottom") || line.contains("fade_to_top") {
+            if line.contains("solid.dds")
+                || line.contains("fade_to_bottom")
+                || line.contains("fade_to_top")
+            {
                 println!("TAI entry: {}", line);
             }
         }
@@ -104,11 +114,15 @@ fn test_find_cg00_kf() {
     let data_dir = "A:\\SteamLibrary\\steamapps\\common\\Fallout 3 goty\\Data";
     let meshes_bsa_path = format!("{}\\Fallout - Meshes.bsa", data_dir);
     if let Ok(bsa) = fo3_bsa::BsaArchive::open(&meshes_bsa_path) {
-        let kf_files: Vec<_> = bsa.list_files().iter().filter(|f| f.to_ascii_lowercase().contains("cg00") && f.ends_with(".kf")).cloned().collect();
+        let kf_files: Vec<_> = bsa
+            .list_files()
+            .iter()
+            .filter(|f| f.to_ascii_lowercase().contains("cg00") && f.ends_with(".kf"))
+            .cloned()
+            .collect();
         println!("=== Found {} CG00 KF files ===", kf_files.len());
         for f in kf_files {
             println!("  KF: {}", f);
         }
     }
 }
-

@@ -42,10 +42,7 @@ pub fn layer_to_interaction_groups(layer: Fallout3Layer) -> InteractionGroups {
         }
         Fallout3Layer::Trigger | Fallout3Layer::AcousticSpace => {
             // トリガー・センサーゾーン (キャラクタのみ検知)
-            (
-                Group::GROUP_5,
-                Group::GROUP_2,
-            )
+            (Group::GROUP_5, Group::GROUP_2)
         }
         Fallout3Layer::NonCollidable => {
             // 衝突判定なし

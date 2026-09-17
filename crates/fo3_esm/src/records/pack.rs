@@ -5,14 +5,14 @@
 //! `references/bevyout/src/vsa/openmw_esm4/actor_support.rs:L503-511, L659-745` (Idle Collection),
 //! `knowledge/phase11_ai_package_and_quest_progression.md`
 
-use std::io;
-use byteorder::{ByteOrder, LittleEndian};
+use crate::records::TargetCondition;
 use crate::subrecord::Subrecord;
 use crate::types::{
     FormId, SUB_CNAM, SUB_CTDA, SUB_EDID, SUB_IDLA, SUB_IDLC, SUB_IDLF, SUB_IDLT, SUB_PKDT,
     SUB_PLDT, SUB_PSDT, SUB_PTDT,
 };
-use crate::records::TargetCondition;
+use byteorder::{ByteOrder, LittleEndian};
+use std::io;
 
 /// パッケージの動作種別 (AI Package Type)。
 /// 参照元: `references/openmw/components/esm4/loadpack.hpp:PKDT`, `actor_support.rs:L570`
@@ -134,11 +134,7 @@ pub struct PackRecord {
 impl PackRecord {
     /// サブレコード群から PACK レコードを解析・構築する。
     /// 参照元: `actor_support.rs:parse_package`
-    pub fn parse(
-        form_id: FormId,
-        record_flags: u32,
-        subrecords: &[Subrecord],
-    ) -> io::Result<Self> {
+    pub fn parse(form_id: FormId, record_flags: u32, subrecords: &[Subrecord]) -> io::Result<Self> {
         let mut editor_id = None;
         let mut pack_type = PackType::Wander;
         let mut flags = 0u32;
@@ -221,7 +217,8 @@ impl PackRecord {
                 }
                 SUB_CNAM => {
                     if sub.data.len() >= 4 {
-                        combat_style_form_id = Some(FormId(LittleEndian::read_u32(&sub.data[0..4])));
+                        combat_style_form_id =
+                            Some(FormId(LittleEndian::read_u32(&sub.data[0..4])));
                     }
                 }
                 // Idle Collection 関連 (IDLF/IDLC/IDLT/IDLA)

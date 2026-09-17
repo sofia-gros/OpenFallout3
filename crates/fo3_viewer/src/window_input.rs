@@ -5,11 +5,11 @@
 //!
 //! 参照元: `Gamebryo 2.6 NiInputSystem`, `app.rs:WindowEvent`
 
+use crate::app::{AppState, ViewerMode};
+use crate::types::CameraMode;
 use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
-use crate::app::{AppState, ViewerMode};
-use crate::types::CameraMode;
 
 /// ウィンドウの入力イベント (マウスホイール、キーボード) をディスパッチ処理する。
 pub fn handle_input_event(state: &mut AppState, event: WindowEvent, event_loop: &ActiveEventLoop) {
@@ -23,7 +23,10 @@ pub fn handle_input_event(state: &mut AppState, event: WindowEvent, event_loop: 
                 if state.vm.player_controls.pov {
                     state.controller.player_camera.zoom(zoom_amount);
                     if let Some(ref mut player) = state.controller.player_actor {
-                        player.set_view_mode(state.controller.player_camera.mode, &mut state.scene.meshes);
+                        player.set_view_mode(
+                            state.controller.player_camera.mode,
+                            &mut state.scene.meshes,
+                        );
                     }
                 }
             } else {
@@ -50,7 +53,10 @@ pub fn handle_input_event(state: &mut AppState, event: WindowEvent, event_loop: 
                 // 実機メッセージダイアログ (MESG / ShowMessage) のボタン選択
                 if pressed {
                     if let Some(msg_id) = state.vm.show_messages.first().cloned() {
-                        let mesg_opt = state.master_context.mesg_edid_map.get(&msg_id.to_ascii_uppercase())
+                        let mesg_opt = state
+                            .master_context
+                            .mesg_edid_map
+                            .get(&msg_id.to_ascii_uppercase())
                             .and_then(|fid| state.master_context.mesg_map.get(fid));
                         if let Some(mesg) = mesg_opt {
                             let btn_idx = match key {
@@ -66,9 +72,15 @@ pub fn handle_input_event(state: &mut AppState, event: WindowEvent, event_loop: 
                                     state.vm.set_button_pressed(idx as i32);
                                     if msg_id.eq_ignore_ascii_case("CG00ChooseSexMessage") {
                                         state.vm.player_is_female = idx == 1;
-                                        println!("[Chargen] プレイヤー性別決定: is_female={}", state.vm.player_is_female);
+                                        println!(
+                                            "[Chargen] プレイヤー性別決定: is_female={}",
+                                            state.vm.player_is_female
+                                        );
                                     }
-                                    println!("[MessageMenu] ボタン選択: {} -> GetButtonPressed", idx);
+                                    println!(
+                                        "[MessageMenu] ボタン選択: {} -> GetButtonPressed",
+                                        idx
+                                    );
                                     state.window.request_redraw();
                                     return;
                                 }
@@ -78,7 +90,12 @@ pub fn handle_input_event(state: &mut AppState, event: WindowEvent, event_loop: 
                 }
 
                 if pressed && state.mode.is_ui_active() {
-                    if state.mode.handle_key_with_vm(key, &mut state.vm) {
+                    let was_ui_active = state.mode.is_ui_active();
+                    let handled = state.mode.handle_key_with_vm(key, &mut state.vm);
+                    if was_ui_active && !state.mode.is_ui_active() {
+                        state.unbind_ui();
+                    }
+                    if handled {
                         state.window.request_redraw();
                         return;
                     }
@@ -89,13 +106,33 @@ pub fn handle_input_event(state: &mut AppState, event: WindowEvent, event_loop: 
 
                 // キャラクタ移動・姿勢入力の同期 (実機 DisablePlayerControls 反映)
                 let can_move = state.vm.player_controls.movement;
-                state.controller.key_forward = can_move && state.input_manager.is_action_down(crate::input::GameAction::Forward);
-                state.controller.key_backward = can_move && state.input_manager.is_action_down(crate::input::GameAction::Backward);
-                state.controller.key_left = can_move && state.input_manager.is_action_down(crate::input::GameAction::StrafeLeft);
-                state.controller.key_right = can_move && state.input_manager.is_action_down(crate::input::GameAction::StrafeRight);
-                state.controller.key_jump = can_move && state.input_manager.is_action_down(crate::input::GameAction::Jump);
-                state.controller.key_sneak = can_move && state.input_manager.is_action_down(crate::input::GameAction::Sneak);
-                state.controller.key_run = !state.input_manager.is_action_down(crate::input::GameAction::Run);
+                state.controller.key_forward = can_move
+                    && state
+                        .input_manager
+                        .is_action_down(crate::input::GameAction::Forward);
+                state.controller.key_backward = can_move
+                    && state
+                        .input_manager
+                        .is_action_down(crate::input::GameAction::Backward);
+                state.controller.key_left = can_move
+                    && state
+                        .input_manager
+                        .is_action_down(crate::input::GameAction::StrafeLeft);
+                state.controller.key_right = can_move
+                    && state
+                        .input_manager
+                        .is_action_down(crate::input::GameAction::StrafeRight);
+                state.controller.key_jump = can_move
+                    && state
+                        .input_manager
+                        .is_action_down(crate::input::GameAction::Jump);
+                state.controller.key_sneak = can_move
+                    && state
+                        .input_manager
+                        .is_action_down(crate::input::GameAction::Sneak);
+                state.controller.key_run = !state
+                    .input_manager
+                    .is_action_down(crate::input::GameAction::Run);
 
                 if pressed {
                     // Bink ムービー再生中: Esc / Space でスキップ (実機 BinkVideo は任意キーでスキップ可能)
@@ -112,7 +149,9 @@ pub fn handle_input_event(state: &mut AppState, event: WindowEvent, event_loop: 
 
                     if let Some(action) = state.input_manager.get_action(key) {
                         match action {
-                            crate::input::InputCommand::Game(crate::input::GameAction::Activate) => {
+                            crate::input::InputCommand::Game(
+                                crate::input::GameAction::Activate,
+                            ) => {
                                 // Bink ムービー再生中はワールド操作 (OnActivate 発火 / テレポート) を禁止する。
                                 // ムービーは update() のシミュレーションと独立してウィンドウイベントで処理されるため、
                                 // 再生中に E キーでゲーム状態が進むのを防ぐ。
@@ -123,19 +162,27 @@ pub fn handle_input_event(state: &mut AppState, event: WindowEvent, event_loop: 
                                     state.interact_or_teleport();
                                 }
                             }
-                            crate::input::InputCommand::Game(crate::input::GameAction::TogglePOV) => {
+                            crate::input::InputCommand::Game(
+                                crate::input::GameAction::TogglePOV,
+                            ) => {
                                 if state.vm.player_controls.pov {
                                     state.controller.player_camera.toggle_view_mode();
                                     if let Some(ref mut player) = state.controller.player_actor {
-                                        player.set_view_mode(state.controller.player_camera.mode, &mut state.scene.meshes);
+                                        player.set_view_mode(
+                                            state.controller.player_camera.mode,
+                                            &mut state.scene.meshes,
+                                        );
                                     }
-                                    println!("[視点切替] 現在の視点モード: {:?}", state.controller.player_camera.mode);
+                                    println!(
+                                        "[視点切替] 現在の視点モード: {:?}",
+                                        state.controller.player_camera.mode
+                                    );
                                 }
                             }
                             crate::input::InputCommand::Game(crate::input::GameAction::PipBoy) => {
                                 if state.vm.player_controls.pipboy {
                                     if state.mode.is_ui_active() {
-                                        state.mode = ViewerMode::Exploring;
+                                        state.set_viewer_mode(ViewerMode::Exploring, None);
                                     } else {
                                         println!("[Pip-Boy] メニュー (Tab)");
                                     }
@@ -144,36 +191,61 @@ pub fn handle_input_event(state: &mut AppState, event: WindowEvent, event_loop: 
                             crate::input::InputCommand::Debug(crate::input::DebugAction::Help) => {
                                 println!("{}", state.input_manager.get_guide_text());
                             }
-                            crate::input::InputCommand::Debug(crate::input::DebugAction::ToggleCollision) => {
+                            crate::input::InputCommand::Debug(
+                                crate::input::DebugAction::ToggleCollision,
+                            ) => {
                                 state.show_collision = !state.show_collision;
-                                println!("Havok コリジョン表示 [F2]: {}", if state.show_collision { "ON" } else { "OFF" });
+                                println!(
+                                    "Havok コリジョン表示 [F2]: {}",
+                                    if state.show_collision { "ON" } else { "OFF" }
+                                );
                             }
-                            crate::input::InputCommand::Debug(crate::input::DebugAction::ToggleFog) => {
+                            crate::input::InputCommand::Debug(
+                                crate::input::DebugAction::ToggleFog,
+                            ) => {
                                 state.enable_fog = !state.enable_fog;
-                                println!("セル環境フォグ [F3]: {}", if state.enable_fog { "ON" } else { "OFF" });
+                                println!(
+                                    "セル環境フォグ [F3]: {}",
+                                    if state.enable_fog { "ON" } else { "OFF" }
+                                );
                             }
-                            crate::input::InputCommand::Debug(crate::input::DebugAction::ToggleHeadlight) => {
+                            crate::input::InputCommand::Debug(
+                                crate::input::DebugAction::ToggleHeadlight,
+                            ) => {
                                 state.headlight = !state.headlight;
-                                println!("ビューア補助ヘッドライト [F4]: {}", if state.headlight { "ON" } else { "OFF" });
+                                println!(
+                                    "ビューア補助ヘッドライト [F4]: {}",
+                                    if state.headlight { "ON" } else { "OFF" }
+                                );
                             }
-                            crate::input::InputCommand::Debug(crate::input::DebugAction::ResetCamera) => {
-                                state.controller.camera.focus(state.scene.bounds_center, state.scene.bounds_radius);
-                                state.controller.character_controller.position = state.scene.bounds_center + glam::Vec3::new(0.0, 0.0, 64.0);
+                            crate::input::InputCommand::Debug(
+                                crate::input::DebugAction::ResetCamera,
+                            ) => {
+                                state
+                                    .controller
+                                    .camera
+                                    .focus(state.scene.bounds_center, state.scene.bounds_radius);
+                                state.controller.character_controller.position =
+                                    state.scene.bounds_center + glam::Vec3::new(0.0, 0.0, 64.0);
                                 state.controller.vertical_velocity = 0.0;
                                 println!("カメラ・スポーン位置再フォーカス [F7]");
                             }
-                            crate::input::InputCommand::Debug(crate::input::DebugAction::ToggleFreeOrbit) => {
+                            crate::input::InputCommand::Debug(
+                                crate::input::DebugAction::ToggleFreeOrbit,
+                            ) => {
                                 state.controller.camera_mode = match state.controller.camera_mode {
                                     CameraMode::Standard => {
                                         println!("\n[カメラモード] F12: フリーオービットカメラ (全体俯瞰・回転周回) に切り替えました。");
                                         println!("  左ドラッグ: 回転, 右ドラッグ: 平行移動, ホイール: ズーム, F12: 実機カメラへ復帰");
-                                        state.controller.camera.target = state.controller.character_controller.position;
+                                        state.controller.camera.target =
+                                            state.controller.character_controller.position;
                                         CameraMode::FreeOrbit
                                     }
                                     CameraMode::FreeOrbit => {
                                         println!("\n[カメラモード] F12: Fallout 3 実機標準プレイヤーカメラに復帰しました。");
                                         println!("  WASD: 移動, Space: ジャンプ, Ctrl: しゃがみ, E: 調べる, F/V: 視点切替");
-                                        state.controller.character_controller.position = state.controller.initial_spawn_point;
+                                        state.controller.character_controller.position =
+                                            state.controller.initial_spawn_point;
                                         state.controller.vertical_velocity = 0.0;
                                         CameraMode::Standard
                                     }

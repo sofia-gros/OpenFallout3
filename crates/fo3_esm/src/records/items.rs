@@ -55,17 +55,23 @@ impl DoorRecord {
                 b"MODL" => model = sub.as_string(),
                 b"SNAM" => {
                     if sub.data.len() >= 4 {
-                        open_sound = Some(FormId(u32::from_le_bytes(sub.data[..4].try_into().unwrap())));
+                        open_sound = Some(FormId(u32::from_le_bytes(
+                            sub.data[..4].try_into().unwrap(),
+                        )));
                     }
                 }
                 b"ANAM" => {
                     if sub.data.len() >= 4 {
-                        close_sound = Some(FormId(u32::from_le_bytes(sub.data[..4].try_into().unwrap())));
+                        close_sound = Some(FormId(u32::from_le_bytes(
+                            sub.data[..4].try_into().unwrap(),
+                        )));
                     }
                 }
                 b"BNAM" => {
                     if sub.data.len() >= 4 {
-                        loop_sound = Some(FormId(u32::from_le_bytes(sub.data[..4].try_into().unwrap())));
+                        loop_sound = Some(FormId(u32::from_le_bytes(
+                            sub.data[..4].try_into().unwrap(),
+                        )));
                     }
                 }
                 b"FNAM" => {
@@ -125,22 +131,30 @@ impl ActiRecord {
                 b"MODL" => model = sub.as_string(),
                 b"SNAM" => {
                     if sub.data.len() >= 4 {
-                        sound = Some(FormId(u32::from_le_bytes(sub.data[..4].try_into().unwrap())));
+                        sound = Some(FormId(u32::from_le_bytes(
+                            sub.data[..4].try_into().unwrap(),
+                        )));
                     }
                 }
                 b"VNAM" => {
                     if sub.data.len() >= 4 {
-                        activate_sound = Some(FormId(u32::from_le_bytes(sub.data[..4].try_into().unwrap())));
+                        activate_sound = Some(FormId(u32::from_le_bytes(
+                            sub.data[..4].try_into().unwrap(),
+                        )));
                     }
                 }
                 b"RNAM" => {
                     if sub.data.len() >= 4 {
-                        loop_sound = Some(FormId(u32::from_le_bytes(sub.data[..4].try_into().unwrap())));
+                        loop_sound = Some(FormId(u32::from_le_bytes(
+                            sub.data[..4].try_into().unwrap(),
+                        )));
                     }
                 }
                 b"SCRI" => {
                     if sub.data.len() >= 4 {
-                        script = Some(FormId(u32::from_le_bytes(sub.data[..4].try_into().unwrap())));
+                        script = Some(FormId(u32::from_le_bytes(
+                            sub.data[..4].try_into().unwrap(),
+                        )));
                     }
                 }
                 _ => unknown_subrecords.push(sub.clone()),
@@ -207,22 +221,29 @@ impl ContRecord {
                 }
                 b"SNAM" => {
                     if sub.data.len() >= 4 {
-                        open_sound = Some(FormId(u32::from_le_bytes(sub.data[..4].try_into().unwrap())));
+                        open_sound = Some(FormId(u32::from_le_bytes(
+                            sub.data[..4].try_into().unwrap(),
+                        )));
                     }
                 }
                 b"QNAM" => {
                     if sub.data.len() >= 4 {
-                        close_sound = Some(FormId(u32::from_le_bytes(sub.data[..4].try_into().unwrap())));
+                        close_sound = Some(FormId(u32::from_le_bytes(
+                            sub.data[..4].try_into().unwrap(),
+                        )));
                     }
                 }
                 b"SCRI" => {
                     if sub.data.len() >= 4 {
-                        script = Some(FormId(u32::from_le_bytes(sub.data[..4].try_into().unwrap())));
+                        script = Some(FormId(u32::from_le_bytes(
+                            sub.data[..4].try_into().unwrap(),
+                        )));
                     }
                 }
                 b"CNTO" => {
                     if sub.data.len() >= 8 {
-                        let item_id = FormId(u32::from_le_bytes(sub.data[0..4].try_into().unwrap()));
+                        let item_id =
+                            FormId(u32::from_le_bytes(sub.data[0..4].try_into().unwrap()));
                         let count = i32::from_le_bytes(sub.data[4..8].try_into().unwrap());
                         items.push((item_id, count));
                     }
@@ -371,17 +392,25 @@ impl GmstRecord {
                     if let Some(first_char) = edid.chars().next() {
                         match first_char {
                             'b' => {
-                                let v = if !sub.data.is_empty() { sub.data[0] != 0 } else { false };
+                                let v = if !sub.data.is_empty() {
+                                    sub.data[0] != 0
+                                } else {
+                                    false
+                                };
                                 value = GmstValue::Bool(v);
                             }
                             'i' | 'u' => {
                                 if sub.data.len() >= 4 {
-                                    value = GmstValue::Int(i32::from_le_bytes(sub.data[..4].try_into().unwrap()));
+                                    value = GmstValue::Int(i32::from_le_bytes(
+                                        sub.data[..4].try_into().unwrap(),
+                                    ));
                                 }
                             }
                             'f' => {
                                 if sub.data.len() >= 4 {
-                                    value = GmstValue::Float(f32::from_le_bytes(sub.data[..4].try_into().unwrap()));
+                                    value = GmstValue::Float(f32::from_le_bytes(
+                                        sub.data[..4].try_into().unwrap(),
+                                    ));
                                 }
                             }
                             's' => {
@@ -389,7 +418,9 @@ impl GmstRecord {
                             }
                             _ => {
                                 if sub.data.len() >= 4 {
-                                    value = GmstValue::Int(i32::from_le_bytes(sub.data[..4].try_into().unwrap()));
+                                    value = GmstValue::Int(i32::from_le_bytes(
+                                        sub.data[..4].try_into().unwrap(),
+                                    ));
                                 }
                             }
                         }

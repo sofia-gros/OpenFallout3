@@ -11,12 +11,9 @@
 //! - `references/nifxml/nif.xml:L1919` (`ControlledBlock`)
 //! - `references/nifxml/nif.xml:L4214` (`NiControllerSequence`)
 
-use std::io::{self, Read};
+use crate::types::{KeyGroup, KeyType, NiQuatTransform, QuatKey, Vector3};
 use byteorder::{LittleEndian, ReadBytesExt};
-use crate::types::{
-    KeyGroup, KeyType, NiQuatTransform, QuatKey, Vector3,
-};
-
+use std::io::{self, Read};
 
 /// 文字列パレット（0x00 区切りの文字列バッファ）。
 ///
@@ -93,7 +90,11 @@ impl NiTransformData {
         let num_rot_keys = reader.read_u32::<LittleEndian>()? as usize;
         let mut rotation_type = KeyType::Linear;
         let mut quaternion_keys = Vec::new();
-        let mut xyz_rotations = [KeyGroup::default(), KeyGroup::default(), KeyGroup::default()];
+        let mut xyz_rotations = [
+            KeyGroup::default(),
+            KeyGroup::default(),
+            KeyGroup::default(),
+        ];
 
         if num_rot_keys > 0 {
             rotation_type = KeyType::from_u32(reader.read_u32::<LittleEndian>()?);
@@ -367,9 +368,7 @@ impl NiBSplineCompTransformInterpolator {
     }
 }
 
-
-
-/// 参照元: 
+/// 参照元:
 /// 参照元: `references/nifskope/build/nif.xml:L3592` (`NiTransformController`)
 /// 継承元: NiSingleInterpController -> NiInterpController -> NiTimeController
 #[derive(Debug, Clone, PartialEq)]

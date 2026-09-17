@@ -2,8 +2,8 @@
 //!
 //! 参照元: OpenMW `components/vfs`
 
-use std::io;
 use fo3_bsa::BsaError;
+use std::io;
 use thiserror::Error;
 
 /// 仮想ファイルシステム操作時のエラー型。

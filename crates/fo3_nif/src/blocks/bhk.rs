@@ -21,9 +21,9 @@
 //! - `references/nifxml/nif.xml:L3420` (`bhkCollisionObject`)
 //! - `references/nifxml/nif.xml:L3958` (`hkPackedNiTriStripsData`)
 
-use std::io::{self, Read};
-use byteorder::{LittleEndian, ReadBytesExt};
 use crate::types::Vector3;
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Read};
 
 /// IEEE-754 半精度浮動小数点数 (16-bit float) を 単精度 (f32) に変換する。
 ///
@@ -76,7 +76,11 @@ impl BhkCollisionObject {
         let target = reader.read_i32::<LittleEndian>()?;
         let flags = reader.read_u16::<LittleEndian>()?;
         let body = reader.read_i32::<LittleEndian>()?;
-        Ok(BhkCollisionObject { target, flags, body })
+        Ok(BhkCollisionObject {
+            target,
+            flags,
+            body,
+        })
     }
 }
 
@@ -505,11 +509,7 @@ impl HkPackedNiTriStripsData {
                 let hx = reader.read_u16::<LittleEndian>()?;
                 let hy = reader.read_u16::<LittleEndian>()?;
                 let hz = reader.read_u16::<LittleEndian>()?;
-                vertices.push([
-                    half_to_f32(hx),
-                    half_to_f32(hy),
-                    half_to_f32(hz),
-                ]);
+                vertices.push([half_to_f32(hx), half_to_f32(hy), half_to_f32(hz)]);
             }
         }
 

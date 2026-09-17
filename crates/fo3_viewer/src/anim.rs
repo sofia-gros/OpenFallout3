@@ -3,14 +3,14 @@
 //! 参照元: Gamebryo 2.6 `NiControllerSequence::Update` → `NiSkinInstance::Update`
 //! 参照元: `knowledge/actor_and_skin_mesh.md` (セクション 4.4: スケルトン分離とボーン名マッピング)
 
-use std::collections::HashMap;
-use std::io::Cursor;
+use crate::types::{get_actor_part_paths, ViewerTarget};
 use fo3_esm::FormId;
 use fo3_nif::NifFile;
 use fo3_render::{AnimationClip, AnimationPlayer, SkeletonPose};
 use fo3_vfs::VfsManager;
 use glam::Mat4;
-use crate::types::{get_actor_part_paths, ViewerTarget};
+use std::collections::HashMap;
+use std::io::Cursor;
 
 /// アニメーション再生・スキニング更新用のステート。
 pub struct AnimState {
@@ -32,7 +32,11 @@ pub struct AnimState {
 impl AnimState {
     /// ターゲットに応じたアニメーション初期状態を構築する。
     pub fn new(target: &ViewerTarget, vfs: &mut VfsManager) -> Self {
-        if let ViewerTarget::Actor { outfit_or_naked, kf_path } = target {
+        if let ViewerTarget::Actor {
+            outfit_or_naked,
+            kf_path,
+        } = target
+        {
             use fo3_render::recompute_bone_world_maps_with_pose;
 
             // 1. KF ファイル読み込み
@@ -40,8 +44,7 @@ impl AnimState {
                 .read(kf_path)
                 .expect("KF ファイルの読み込みに失敗しました");
             let mut kf_cursor = Cursor::new(kf_bytes);
-            let kf_nif =
-                NifFile::read(&mut kf_cursor).expect("KF ファイルのパースに失敗しました");
+            let kf_nif = NifFile::read(&mut kf_cursor).expect("KF ファイルのパースに失敗しました");
             println!("KF パース成功 (ブロック数: {})", kf_nif.blocks.len());
 
             // 2. スケルトン NIF 読み込み
@@ -61,7 +64,16 @@ impl AnimState {
             };
             let is_female = outfit_or_naked.to_ascii_lowercase().contains("female")
                 || outfit_or_naked.to_ascii_lowercase().contains("outfitf");
-            let part_paths = get_actor_part_paths(is_female, FormId(0), &body_path, None, None, None, None, false);
+            let part_paths = get_actor_part_paths(
+                is_female,
+                FormId(0),
+                &body_path,
+                None,
+                None,
+                None,
+                None,
+                false,
+            );
             let mut anim_parts = Vec::new();
             for path in &part_paths {
                 if let Ok(bytes) = vfs.read(path) {
@@ -109,8 +121,7 @@ impl AnimState {
                 .read(kf_path)
                 .expect("KF ファイルの読み込みに失敗しました");
             let mut kf_cursor = Cursor::new(kf_bytes);
-            let kf_nif =
-                NifFile::read(&mut kf_cursor).expect("KF ファイルのパースに失敗しました");
+            let kf_nif = NifFile::read(&mut kf_cursor).expect("KF ファイルのパースに失敗しました");
             println!("KF パース成功 (ブロック数: {})", kf_nif.blocks.len());
 
             // 2. スキンメッシュ NIF 読み込み
@@ -131,9 +142,15 @@ impl AnimState {
                 }
             });
 
-            let skeleton_nif = if !has_true_skeleton && (nif_path.to_ascii_lowercase().contains("characters") || nif_path.to_ascii_lowercase().contains("armor")) {
+            let skeleton_nif = if !has_true_skeleton
+                && (nif_path.to_ascii_lowercase().contains("characters")
+                    || nif_path.to_ascii_lowercase().contains("armor"))
+            {
                 let skel_path = "meshes\\characters\\_male\\skeleton.nif";
-                println!("メッシュ単体に全身骨格がないため、共有スケルトン NIF をロード中: {}", skel_path);
+                println!(
+                    "メッシュ単体に全身骨格がないため、共有スケルトン NIF をロード中: {}",
+                    skel_path
+                );
                 if let Ok(skel_bytes) = vfs.read(skel_path) {
                     let mut skel_cursor = Cursor::new(skel_bytes);
                     NifFile::read(&mut skel_cursor).ok()
@@ -158,13 +175,14 @@ impl AnimState {
             );
 
             // AnimationClip を構築して AnimationPlayer を作成
-            let player = AnimationClip::from_kf(&kf_nif).map(|clip| {
-                println!(
+            let player =
+                AnimationClip::from_kf(&kf_nif).map(|clip| {
+                    println!(
                     "アニメーションクリップ \"{}\" ロード完了: {:.2}s〜{:.2}s, チャンネル数: {}",
                     clip.name, clip.start_time, clip.stop_time, clip.channels.len()
                 );
-                AnimationPlayer::new(clip)
-            });
+                    AnimationPlayer::new(clip)
+                });
 
             Self {
                 anim_player: player,
@@ -214,7 +232,12 @@ impl AnimState {
 
             // 3. 全パーツスキンメッシュの頂点バッファをスケルトンのボーン名ワールド行列で更新
             let part_refs: Vec<&NifFile> = self.anim_parts.iter().collect();
-            scene.update_animated_skins_multi_parts(device, queue, &part_refs, &self.anim_bone_name_world_map);
+            scene.update_animated_skins_multi_parts(
+                device,
+                queue,
+                &part_refs,
+                &self.anim_bone_name_world_map,
+            );
 
             // 4. 全剛体アタッチメントパーツ (目・歯・舌など) のモデル行列をボーン追従更新
             scene.update_animated_rigid_meshes(queue, &self.anim_bone_name_world_map);

@@ -8,9 +8,9 @@
 //! - `references/bevyout/src/vsa/prepare/interface.rs:21-24`
 //! - `references/bevyout/src/viewer/hud.rs:253-287`, `references/bevyout/src/viewer/fallout_ui.rs:6-12`
 
-use std::sync::Arc;
 use fo3_render::GpuTexture;
 use fo3_vfs::VfsManager;
+use std::sync::Arc;
 
 /// Fallout 3 実機 HUD のフォスファー発光色 (Phosphor Green)。
 /// 参照元: `references/bevyout/src/viewer/fallout_ui.rs:6`
@@ -323,8 +323,18 @@ fn fs_video_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
         // Fallout 3 実機アーカイブ (Fallout - Textures.bsa) からクロスヘアテクスチャをロード
         // 参照元: textures\interface\hud\crosshair.dds, textures\interface\hud\glow_crosshair.dds
-        let crosshair_tex = load_hud_texture(device, queue, vfs, "textures\\interface\\hud\\crosshair.dds");
-        let glow_tex = load_hud_texture(device, queue, vfs, "textures\\interface\\hud\\glow_crosshair.dds");
+        let crosshair_tex = load_hud_texture(
+            device,
+            queue,
+            vfs,
+            "textures\\interface\\hud\\crosshair.dds",
+        );
+        let glow_tex = load_hud_texture(
+            device,
+            queue,
+            vfs,
+            "textures\\interface\\hud\\glow_crosshair.dds",
+        );
 
         let crosshair_bind_group = crosshair_tex.as_ref().map(|tex| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -417,7 +427,8 @@ fn fs_video_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
         // 呼吸パルスのアルファ計算 (0.65 .. 0.95)
         // 参照元: references/bevyout/src/viewer/hud.rs:815-824
-        let pulse = (elapsed_seconds * std::f32::consts::TAU / CROSSHAIR_PULSE_SECONDS).sin() * 0.5 + 0.5;
+        let pulse =
+            (elapsed_seconds * std::f32::consts::TAU / CROSSHAIR_PULSE_SECONDS).sin() * 0.5 + 0.5;
         let glow_alpha = 0.50 + pulse * 0.35;
 
         // 画面高さに対する相対サイズ (vh 基準)
@@ -432,17 +443,40 @@ fn fs_video_main(in: VertexOutput) -> @location(0) vec4<f32> {
         if let Some(ref bg) = self.glow_bind_group {
             let half = glow_size * 0.5;
             let vertices = [
-                HudVertex { position: [-half, -half], uv: [0.0, 0.0] },
-                HudVertex { position: [half, -half], uv: [1.0, 0.0] },
-                HudVertex { position: [half, half], uv: [1.0, 1.0] },
-                HudVertex { position: [-half, -half], uv: [0.0, 0.0] },
-                HudVertex { position: [half, half], uv: [1.0, 1.0] },
-                HudVertex { position: [-half, half], uv: [0.0, 1.0] },
+                HudVertex {
+                    position: [-half, -half],
+                    uv: [0.0, 0.0],
+                },
+                HudVertex {
+                    position: [half, -half],
+                    uv: [1.0, 0.0],
+                },
+                HudVertex {
+                    position: [half, half],
+                    uv: [1.0, 1.0],
+                },
+                HudVertex {
+                    position: [-half, -half],
+                    uv: [0.0, 0.0],
+                },
+                HudVertex {
+                    position: [half, half],
+                    uv: [1.0, 1.0],
+                },
+                HudVertex {
+                    position: [-half, half],
+                    uv: [0.0, 1.0],
+                },
             ];
             queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
 
             let uniform = HudUniform {
-                color: [HUD_PHOSPHOR_COLOR[0], HUD_PHOSPHOR_COLOR[1], HUD_PHOSPHOR_COLOR[2], glow_alpha],
+                color: [
+                    HUD_PHOSPHOR_COLOR[0],
+                    HUD_PHOSPHOR_COLOR[1],
+                    HUD_PHOSPHOR_COLOR[2],
+                    glow_alpha,
+                ],
                 screen_size: [screen_width, screen_height],
                 _pad: [0.0, 0.0],
             };
@@ -457,17 +491,40 @@ fn fs_video_main(in: VertexOutput) -> @location(0) vec4<f32> {
         if let Some(ref bg) = self.crosshair_bind_group {
             let half = core_size * 0.5;
             let vertices = [
-                HudVertex { position: [-half, -half], uv: [0.0, 0.0] },
-                HudVertex { position: [half, -half], uv: [1.0, 0.0] },
-                HudVertex { position: [half, half], uv: [1.0, 1.0] },
-                HudVertex { position: [-half, -half], uv: [0.0, 0.0] },
-                HudVertex { position: [half, half], uv: [1.0, 1.0] },
-                HudVertex { position: [-half, half], uv: [0.0, 1.0] },
+                HudVertex {
+                    position: [-half, -half],
+                    uv: [0.0, 0.0],
+                },
+                HudVertex {
+                    position: [half, -half],
+                    uv: [1.0, 0.0],
+                },
+                HudVertex {
+                    position: [half, half],
+                    uv: [1.0, 1.0],
+                },
+                HudVertex {
+                    position: [-half, -half],
+                    uv: [0.0, 0.0],
+                },
+                HudVertex {
+                    position: [half, half],
+                    uv: [1.0, 1.0],
+                },
+                HudVertex {
+                    position: [-half, half],
+                    uv: [0.0, 1.0],
+                },
             ];
             queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
 
             let uniform = HudUniform {
-                color: [HUD_PHOSPHOR_COLOR[0], HUD_PHOSPHOR_COLOR[1], HUD_PHOSPHOR_COLOR[2], 0.95],
+                color: [
+                    HUD_PHOSPHOR_COLOR[0],
+                    HUD_PHOSPHOR_COLOR[1],
+                    HUD_PHOSPHOR_COLOR[2],
+                    0.95,
+                ],
                 screen_size: [screen_width, screen_height],
                 _pad: [0.0, 0.0],
             };
@@ -500,12 +557,30 @@ fn fs_video_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let bottom = center_y + half_h;
 
         let vertices = [
-            HudVertex { position: [left, top], uv: [0.0, 0.0] },
-            HudVertex { position: [right, top], uv: [1.0, 0.0] },
-            HudVertex { position: [right, bottom], uv: [1.0, 1.0] },
-            HudVertex { position: [left, top], uv: [0.0, 0.0] },
-            HudVertex { position: [right, bottom], uv: [1.0, 1.0] },
-            HudVertex { position: [left, bottom], uv: [0.0, 1.0] },
+            HudVertex {
+                position: [left, top],
+                uv: [0.0, 0.0],
+            },
+            HudVertex {
+                position: [right, top],
+                uv: [1.0, 0.0],
+            },
+            HudVertex {
+                position: [right, bottom],
+                uv: [1.0, 1.0],
+            },
+            HudVertex {
+                position: [left, top],
+                uv: [0.0, 0.0],
+            },
+            HudVertex {
+                position: [right, bottom],
+                uv: [1.0, 1.0],
+            },
+            HudVertex {
+                position: [left, bottom],
+                uv: [0.0, 1.0],
+            },
         ];
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
 
@@ -539,12 +614,30 @@ fn fs_video_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let half_w = screen_width * 0.5;
         let half_h = screen_height * 0.5;
         let vertices = [
-            HudVertex { position: [0.0 - half_w, 0.0 - half_h], uv: [0.0, 0.0] },
-            HudVertex { position: [0.0 + half_w, 0.0 - half_h], uv: [1.0, 0.0] },
-            HudVertex { position: [0.0 + half_w, 0.0 + half_h], uv: [1.0, 1.0] },
-            HudVertex { position: [0.0 - half_w, 0.0 - half_h], uv: [0.0, 0.0] },
-            HudVertex { position: [0.0 + half_w, 0.0 + half_h], uv: [1.0, 1.0] },
-            HudVertex { position: [0.0 - half_w, 0.0 + half_h], uv: [0.0, 1.0] },
+            HudVertex {
+                position: [0.0 - half_w, 0.0 - half_h],
+                uv: [0.0, 0.0],
+            },
+            HudVertex {
+                position: [0.0 + half_w, 0.0 - half_h],
+                uv: [1.0, 0.0],
+            },
+            HudVertex {
+                position: [0.0 + half_w, 0.0 + half_h],
+                uv: [1.0, 1.0],
+            },
+            HudVertex {
+                position: [0.0 - half_w, 0.0 - half_h],
+                uv: [0.0, 0.0],
+            },
+            HudVertex {
+                position: [0.0 + half_w, 0.0 + half_h],
+                uv: [1.0, 1.0],
+            },
+            HudVertex {
+                position: [0.0 - half_w, 0.0 + half_h],
+                uv: [0.0, 1.0],
+            },
         ];
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
 
@@ -614,18 +707,78 @@ fn fs_video_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let box_w = screen_width * 0.85;
         let box_h = screen_height * 0.38;
         let center_y = screen_height * 0.28;
-        self.render_rect(rpass, queue, 0.0, center_y, box_w, box_h, [0.0, 0.06, 0.02, 0.88], screen_width, screen_height);
+        self.render_rect(
+            rpass,
+            queue,
+            0.0,
+            center_y,
+            box_w,
+            box_h,
+            [0.0, 0.06, 0.02, 0.88],
+            screen_width,
+            screen_height,
+        );
 
         let border_color = HUD_PHOSPHOR_COLOR;
-        self.render_rect(rpass, queue, 0.0, center_y - box_h * 0.5, box_w, 2.0, border_color, screen_width, screen_height);
-        self.render_rect(rpass, queue, 0.0, center_y + box_h * 0.5, box_w, 2.0, border_color, screen_width, screen_height);
-        self.render_rect(rpass, queue, -box_w * 0.5, center_y, 2.0, box_h, border_color, screen_width, screen_height);
-        self.render_rect(rpass, queue, box_w * 0.5, center_y, 2.0, box_h, border_color, screen_width, screen_height);
+        self.render_rect(
+            rpass,
+            queue,
+            0.0,
+            center_y - box_h * 0.5,
+            box_w,
+            2.0,
+            border_color,
+            screen_width,
+            screen_height,
+        );
+        self.render_rect(
+            rpass,
+            queue,
+            0.0,
+            center_y + box_h * 0.5,
+            box_w,
+            2.0,
+            border_color,
+            screen_width,
+            screen_height,
+        );
+        self.render_rect(
+            rpass,
+            queue,
+            -box_w * 0.5,
+            center_y,
+            2.0,
+            box_h,
+            border_color,
+            screen_width,
+            screen_height,
+        );
+        self.render_rect(
+            rpass,
+            queue,
+            box_w * 0.5,
+            center_y,
+            2.0,
+            box_h,
+            border_color,
+            screen_width,
+            screen_height,
+        );
 
         let item_h = 24.0f32;
         let sel_y = center_y - box_h * 0.1 + (dialog.selected_index as f32) * (item_h + 4.0);
         if sel_y < center_y + box_h * 0.45 {
-            self.render_rect(rpass, queue, 0.0, sel_y, box_w * 0.96, item_h, [0.18, 1.0, 0.48, 0.25], screen_width, screen_height);
+            self.render_rect(
+                rpass,
+                queue,
+                0.0,
+                sel_y,
+                box_w * 0.96,
+                item_h,
+                [0.18, 1.0, 0.48, 0.25],
+                screen_width,
+                screen_height,
+            );
         }
     }
 
@@ -638,24 +791,94 @@ fn fs_video_main(in: VertexOutput) -> @location(0) vec4<f32> {
         screen_height: f32,
         term: &crate::ui::TerminalState,
     ) {
-        self.render_rect(rpass, queue, 0.0, 0.0, screen_width, screen_height, [0.0, 0.04, 0.015, 0.94], screen_width, screen_height);
+        self.render_rect(
+            rpass,
+            queue,
+            0.0,
+            0.0,
+            screen_width,
+            screen_height,
+            [0.0, 0.04, 0.015, 0.94],
+            screen_width,
+            screen_height,
+        );
 
         let frame_w = screen_width * 0.92;
         let frame_h = screen_height * 0.90;
         let border_color = HUD_PHOSPHOR_COLOR;
-        self.render_rect(rpass, queue, 0.0, -frame_h * 0.5, frame_w, 3.0, border_color, screen_width, screen_height);
-        self.render_rect(rpass, queue, 0.0, frame_h * 0.5, frame_w, 3.0, border_color, screen_width, screen_height);
-        self.render_rect(rpass, queue, -frame_w * 0.5, 0.0, 3.0, frame_h, border_color, screen_width, screen_height);
-        self.render_rect(rpass, queue, frame_w * 0.5, 0.0, 3.0, frame_h, border_color, screen_width, screen_height);
+        self.render_rect(
+            rpass,
+            queue,
+            0.0,
+            -frame_h * 0.5,
+            frame_w,
+            3.0,
+            border_color,
+            screen_width,
+            screen_height,
+        );
+        self.render_rect(
+            rpass,
+            queue,
+            0.0,
+            frame_h * 0.5,
+            frame_w,
+            3.0,
+            border_color,
+            screen_width,
+            screen_height,
+        );
+        self.render_rect(
+            rpass,
+            queue,
+            -frame_w * 0.5,
+            0.0,
+            3.0,
+            frame_h,
+            border_color,
+            screen_width,
+            screen_height,
+        );
+        self.render_rect(
+            rpass,
+            queue,
+            frame_w * 0.5,
+            0.0,
+            3.0,
+            frame_h,
+            border_color,
+            screen_width,
+            screen_height,
+        );
 
         let header_y = -frame_h * 0.35;
-        self.render_rect(rpass, queue, 0.0, header_y, frame_w * 0.95, 2.0, [0.18, 1.0, 0.48, 0.6], screen_width, screen_height);
+        self.render_rect(
+            rpass,
+            queue,
+            0.0,
+            header_y,
+            frame_w * 0.95,
+            2.0,
+            [0.18, 1.0, 0.48, 0.6],
+            screen_width,
+            screen_height,
+        );
 
         if matches!(term.screen, crate::ui::TerminalScreen::Menu) {
             let item_h = 28.0f32;
             let sel_y = header_y + 50.0 + (term.selected_index as f32) * (item_h + 6.0);
             if sel_y < frame_h * 0.45 {
-                self.render_rect(rpass, queue, 0.0, sel_y, frame_w * 0.92, item_h, [0.18, 1.0, 0.48, 0.30], screen_width, screen_height);
+                self.render_rect(
+                    rpass,
+                    queue,
+                    0.0,
+                    sel_y,
+                    frame_w * 0.92,
+                    item_h,
+                    [0.18, 1.0, 0.48, 0.30],
+                    screen_width,
+                    screen_height,
+                );
             }
         }
     }
@@ -680,7 +903,10 @@ fn load_hud_texture(
             }
         },
         Err(e) => {
-            eprintln!("警告: HUD テクスチャ \"{}\" の VFS 読み出し失敗: {}", path, e);
+            eprintln!(
+                "警告: HUD テクスチャ \"{}\" の VFS 読み出し失敗: {}",
+                path, e
+            );
             None
         }
     }

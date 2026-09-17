@@ -3,10 +3,10 @@
 //! 髪型や髭のメッシュ定義。
 //! 参照元: `references/openmw/components/esm4/loadhair.hpp`, `loadhair.cpp`
 
-use std::io;
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{FormId, SUB_DATA, SUB_EDID, SUB_FULL, SUB_MODL};
+use std::io;
 
 /// 髪型定義レコード (HAIR)。
 #[derive(Clone, Debug, PartialEq)]

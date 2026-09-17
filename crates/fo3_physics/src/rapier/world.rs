@@ -4,12 +4,12 @@
 //!
 //! 参照元: `knowledge/physics_engine_evaluation_and_architecture.md`
 
+use crate::rapier::adapter::rigid_body_data_to_rapier;
+use crate::traits::RayIntersection;
+use fo3_nif::collision::NifCollisionData;
 use glam::{Quat, Vec3};
 use rapier3d::na::{Point3, Vector3};
 use rapier3d::prelude::*;
-use fo3_nif::collision::NifCollisionData;
-use crate::rapier::adapter::rigid_body_data_to_rapier;
-use crate::traits::RayIntersection;
 
 /// Rapier3D 物理ワールド。
 pub struct RapierPhysicsWorld {
@@ -168,17 +168,16 @@ impl RapierPhysicsWorld {
 
         let shape = SharedShape::trimesh(points, indices);
         let rb_builder = RigidBodyBuilder::fixed();
-        let col_builder = ColliderBuilder::new(shape)
-            .collision_groups(crate::collision_layers::layer_to_interaction_groups(
+        let col_builder = ColliderBuilder::new(shape).collision_groups(
+            crate::collision_layers::layer_to_interaction_groups(
                 fo3_nif::blocks::Fallout3Layer::Static,
-            ));
+            ),
+        );
 
         let rb_handle = self.rigid_body_set.insert(rb_builder);
-        let col_handle = self.collider_set.insert_with_parent(
-            col_builder,
-            rb_handle,
-            &mut self.rigid_body_set,
-        );
+        let col_handle =
+            self.collider_set
+                .insert_with_parent(col_builder, rb_handle, &mut self.rigid_body_set);
 
         self.query_pipeline.update(&self.collider_set);
         Some((rb_handle, col_handle))
@@ -256,9 +255,16 @@ impl RapierPhysicsWorld {
 
     /// 登録済み剛体のワールド位置・回転を更新し、コライダーの空間構造を再構築する（アニメーション追従用）。
     /// 参照元: Gamebryo 2.6 `bhkRigidBody` (`MO_SYS_KEYFRAMED`) 位置同期
-    pub fn set_rigid_body_transform(&mut self, handle: RigidBodyHandle, pos: Vec3, rot: glam::Quat) {
+    pub fn set_rigid_body_transform(
+        &mut self,
+        handle: RigidBodyHandle,
+        pos: Vec3,
+        rot: glam::Quat,
+    ) {
         if let Some(rb) = self.rigid_body_set.get_mut(handle) {
-            let nalgebra_rot = nalgebra::UnitQuaternion::new_normalize(nalgebra::Quaternion::new(rot.w, rot.x, rot.y, rot.z));
+            let nalgebra_rot = nalgebra::UnitQuaternion::new_normalize(nalgebra::Quaternion::new(
+                rot.w, rot.x, rot.y, rot.z,
+            ));
             let nalgebra_pos = nalgebra::Isometry3::from_parts(
                 nalgebra::Translation3::new(pos.x, pos.y, pos.z),
                 nalgebra_rot,

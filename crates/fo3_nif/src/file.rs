@@ -4,9 +4,9 @@
 //! 各ブロックは `block_sizes` に基づいて厳密に区切られてパースされるため、
 //! 未対応ブロックが存在しても後続ブロックがずれることなく安全に読み切れます。
 
-use std::io::{BufRead, Cursor};
 use crate::blocks::*;
 use crate::header::{NifError, NifHeader};
+use std::io::{BufRead, Cursor};
 
 /// 完全な NIF ファイル表現構造体。
 #[derive(Clone, Debug)]
@@ -81,14 +81,16 @@ impl NifFile {
                         }
                     }
                 },
-                "BSShaderPPLightingProperty" => match BSShaderPPLightingProperty::read(&mut cursor) {
+                "BSShaderPPLightingProperty" => match BSShaderPPLightingProperty::read(&mut cursor)
+                {
                     Ok(prop) => NifBlock::BSShaderPPLightingProperty(prop),
                     Err(_) => NifBlock::Unknown {
                         type_name: block_type_name.clone(),
                         data: block_bytes,
                     },
                 },
-                "BSShaderNoLightingProperty" => match BSShaderNoLightingProperty::read(&mut cursor) {
+                "BSShaderNoLightingProperty" => match BSShaderNoLightingProperty::read(&mut cursor)
+                {
                     Ok(prop) => NifBlock::BSShaderNoLightingProperty(prop),
                     Err(_) => NifBlock::Unknown {
                         type_name: block_type_name.clone(),
@@ -349,7 +351,6 @@ impl NifFile {
                     }
                 },
                 "NiSkinInstance" => match NiSkinInstance::read(&mut cursor) {
-
                     Ok(inst) => NifBlock::NiSkinInstance(inst),
                     Err(e) => {
                         eprintln!("[WARN] NiSkinInstanceパース失敗: {:?}", e);
@@ -401,7 +402,7 @@ impl NifFile {
                         }
                     }
                 }
-                                "NiTransformController" => match NiTransformController::read(&mut cursor) {
+                "NiTransformController" => match NiTransformController::read(&mut cursor) {
                     Ok(ctrl) => NifBlock::NiTransformController(ctrl),
                     Err(e) => {
                         eprintln!("[WARN] NiTransformControllerパース失敗: {:?}", e);
@@ -455,7 +456,10 @@ impl NifFile {
                     match NiBSplineCompTransformInterpolator::read(&mut cursor) {
                         Ok(interp) => NifBlock::NiBSplineCompTransformInterpolator(interp),
                         Err(e) => {
-                            eprintln!("[WARN] NiBSplineCompTransformInterpolatorパース失敗: {:?}", e);
+                            eprintln!(
+                                "[WARN] NiBSplineCompTransformInterpolatorパース失敗: {:?}",
+                                e
+                            );
                             NifBlock::Unknown {
                                 type_name: block_type_name.clone(),
                                 data: block_bytes,
@@ -463,8 +467,6 @@ impl NifFile {
                         }
                     }
                 }
-
-
 
                 _ => NifBlock::Unknown {
                     type_name: block_type_name.clone(),

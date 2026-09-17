@@ -8,9 +8,9 @@
 //! - `references/nifxml/nif.xml:L5163` (`NiStringExtraData`)
 //! - `references/nifxml/nif.xml:L3932` (`BSBound`)
 
-use std::io::{self, Read};
-use byteorder::{LittleEndian, ReadBytesExt};
 use crate::types::Vector3;
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Read};
 
 /// 文字列追加データブロック。
 ///

@@ -4,8 +4,8 @@
 //! wgpu のパイプラインバインドグループへ変換する。
 //! 参照元: `references/nifxml/nif.xml`, `knowledge/nif_blocks_geometry.md`
 
-use std::collections::HashMap;
 use glam::{Mat3, Vec3};
+use std::collections::HashMap;
 use wgpu::util::DeviceExt;
 
 use fo3_gamebryo_core::{NiBound, NiTransform};
@@ -128,12 +128,21 @@ pub fn create_render_mesh_with_override(
     ensure_texture_cached(&normal_path, vfs, device, queue, texture_cache);
     ensure_texture_cached(&glow_path, vfs, device, queue, texture_cache);
 
-    let has_glow_map = glow_path.is_some() && glow_path.as_ref().map_or(false, |p| texture_cache.contains_key(p));
+    let has_glow_map = glow_path.is_some()
+        && glow_path
+            .as_ref()
+            .map_or(false, |p| texture_cache.contains_key(p));
 
     // Model Uniform バッファ作成 (動的書き換え対応のため COPY_DST を付与)
     let world_mat = world_transform.to_mat4();
     let tint = tint_color.unwrap_or([1.0, 1.0, 1.0, 1.0]);
-    let model_uniform = ModelUniform::new_with_tint(world_mat, effective_alpha, material_prop, has_glow_map, tint);
+    let model_uniform = ModelUniform::new_with_tint(
+        world_mat,
+        effective_alpha,
+        material_prop,
+        has_glow_map,
+        tint,
+    );
     let model_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(&format!("Model Uniform Buffer: {}", name)),
         contents: bytemuck::bytes_of(&model_uniform),
@@ -261,18 +270,19 @@ pub fn ensure_texture_cached(
     if let Some(ref path) = path_opt {
         if !texture_cache.contains_key(path) {
             match vfs.read(path) {
-                Ok(bytes) => {
-                    match GpuTexture::from_dds_bytes(device, queue, &bytes, Some(path)) {
-                        Ok(tex) => {
-                            texture_cache.insert(path.clone(), tex);
-                        }
-                        Err(e) => {
-                            eprintln!("警告: テクスチャ '{}' のパース失敗: {}", path, e);
-                        }
+                Ok(bytes) => match GpuTexture::from_dds_bytes(device, queue, &bytes, Some(path)) {
+                    Ok(tex) => {
+                        texture_cache.insert(path.clone(), tex);
                     }
-                }
+                    Err(e) => {
+                        eprintln!("警告: テクスチャ '{}' のパース失敗: {}", path, e);
+                    }
+                },
                 Err(e) => {
-                    eprintln!("警告: VFS からテクスチャ '{}' を読み込めません: {}", path, e);
+                    eprintln!(
+                        "警告: VFS からテクスチャ '{}' を読み込めません: {}",
+                        path, e
+                    );
                 }
             }
         }
@@ -281,18 +291,29 @@ pub fn ensure_texture_cached(
 
 /// マテリアルプロパティからディフューズ (スロット 0)、法線マップ (スロット 1)、およびグローマップ (スロット 2) を取得。
 /// 参照元: `references/openmw/components/nifosg/nifloader.cpp:L2401-2426`, `references/nifxml/nif.xml:L6307`, `L6415` (SLSF2_Glow_Map = bit 6)
-pub fn find_texture_paths(properties: &[i32], nif: &NifFile) -> (Option<String>, Option<String>, Option<String>) {
+pub fn find_texture_paths(
+    properties: &[i32],
+    nif: &NifFile,
+) -> (Option<String>, Option<String>, Option<String>) {
     for &prop_idx in properties {
         if prop_idx >= 0 && (prop_idx as usize) < nif.blocks.len() {
-            if let NifBlock::BSShaderPPLightingProperty(ref shader_prop) = nif.blocks[prop_idx as usize] {
-                if shader_prop.texture_set >= 0 && (shader_prop.texture_set as usize) < nif.blocks.len() {
-                    if let NifBlock::BSShaderTextureSet(ref tex_set) = nif.blocks[shader_prop.texture_set as usize] {
-                        let diff = if !tex_set.textures.is_empty() && !tex_set.textures[0].is_empty() {
-                            Some(normalize_texture_path(&tex_set.textures[0]))
-                        } else {
-                            None
-                        };
-                        let norm = if tex_set.textures.len() > 1 && !tex_set.textures[1].is_empty() {
+            if let NifBlock::BSShaderPPLightingProperty(ref shader_prop) =
+                nif.blocks[prop_idx as usize]
+            {
+                if shader_prop.texture_set >= 0
+                    && (shader_prop.texture_set as usize) < nif.blocks.len()
+                {
+                    if let NifBlock::BSShaderTextureSet(ref tex_set) =
+                        nif.blocks[shader_prop.texture_set as usize]
+                    {
+                        let diff =
+                            if !tex_set.textures.is_empty() && !tex_set.textures[0].is_empty() {
+                                Some(normalize_texture_path(&tex_set.textures[0]))
+                            } else {
+                                None
+                            };
+                        let norm = if tex_set.textures.len() > 1 && !tex_set.textures[1].is_empty()
+                        {
                             Some(normalize_texture_path(&tex_set.textures[1]))
                         } else {
                             None
@@ -300,7 +321,10 @@ pub fn find_texture_paths(properties: &[i32], nif: &NifFile) -> (Option<String>,
                         // スロット 2 は SLSF2_Glow_Map (bit 6) が立っている場合のみ Glow Map として扱う
                         // Hair のハイライトマップ (_hl.dds) や肌のスキンマップ (_sk.dds) の誤サンプリングを防止
                         let has_glow_flag = (shader_prop.shader_flags2 & (1 << 6)) != 0;
-                        let glow = if has_glow_flag && tex_set.textures.len() > 2 && !tex_set.textures[2].is_empty() {
+                        let glow = if has_glow_flag
+                            && tex_set.textures.len() > 2
+                            && !tex_set.textures[2].is_empty()
+                        {
                             Some(normalize_texture_path(&tex_set.textures[2]))
                         } else {
                             None
@@ -319,7 +343,9 @@ pub fn find_texture_paths(properties: &[i32], nif: &NifFile) -> (Option<String>,
 pub fn has_vertex_colors_enabled(properties: &[i32], nif: &NifFile) -> bool {
     for &prop_idx in properties {
         if prop_idx >= 0 && (prop_idx as usize) < nif.blocks.len() {
-            if let NifBlock::BSShaderPPLightingProperty(ref shader_prop) = nif.blocks[prop_idx as usize] {
+            if let NifBlock::BSShaderPPLightingProperty(ref shader_prop) =
+                nif.blocks[prop_idx as usize]
+            {
                 return (shader_prop.shader_flags2 & (1 << 5)) != 0;
             }
         }
@@ -329,7 +355,10 @@ pub fn has_vertex_colors_enabled(properties: &[i32], nif: &NifFile) -> bool {
 
 /// プロパティリストから NiMaterialProperty を検索する。
 /// 参照元: `references/nifxml/nif.xml:L4363`, Gamebryo 2.6 `NiMaterialProperty`
-pub fn find_material_property<'a>(properties: &[i32], nif: &'a NifFile) -> Option<&'a fo3_nif::NiMaterialProperty> {
+pub fn find_material_property<'a>(
+    properties: &[i32],
+    nif: &'a NifFile,
+) -> Option<&'a fo3_nif::NiMaterialProperty> {
     for &prop_idx in properties {
         if prop_idx >= 0 && (prop_idx as usize) < nif.blocks.len() {
             if let NifBlock::NiMaterialProperty(ref mat) = nif.blocks[prop_idx as usize] {
@@ -342,7 +371,10 @@ pub fn find_material_property<'a>(properties: &[i32], nif: &'a NifFile) -> Optio
 
 /// プロパティリストから NiAlphaProperty を検索する。
 /// 参照元: `references/nifskope/src/gl/glnode.cpp:295`, `references/nifxml/nif.xml:L3972`
-pub fn find_alpha_property<'a>(properties: &[i32], nif: &'a NifFile) -> Option<&'a fo3_nif::NiAlphaProperty> {
+pub fn find_alpha_property<'a>(
+    properties: &[i32],
+    nif: &'a NifFile,
+) -> Option<&'a fo3_nif::NiAlphaProperty> {
     for &prop_idx in properties {
         if prop_idx >= 0 && (prop_idx as usize) < nif.blocks.len() {
             if let NifBlock::NiAlphaProperty(ref alpha) = nif.blocks[prop_idx as usize] {
@@ -415,7 +447,9 @@ mod tests {
         distances.sort_by(|a, b| {
             let dist_a = a.1.distance_squared(cam_pos);
             let dist_b = b.1.distance_squared(cam_pos);
-            dist_b.partial_cmp(&dist_a).unwrap_or(std::cmp::Ordering::Equal)
+            dist_b
+                .partial_cmp(&dist_a)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         // 期待順序: ID 2 (遠: 100) -> ID 3 (中: 50) -> ID 1 (近: 10)

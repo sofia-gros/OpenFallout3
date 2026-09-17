@@ -2,8 +2,8 @@
 //!
 //! 参照元: `references/openmw/components/bsa/compressedbsafile.hpp:L39-L90`
 
-use std::io::{self, Read};
 use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Read};
 use thiserror::Error;
 
 /// BSA パース時のエラー型。

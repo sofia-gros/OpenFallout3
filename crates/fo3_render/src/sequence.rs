@@ -11,8 +11,8 @@
 
 use std::sync::Arc;
 
-use fo3_nif::NifFile;
 use crate::animation::{AnimationPlayer, BoneTransformOverride, SkeletonPose};
+use fo3_nif::NifFile;
 
 /// アニメーションシーケンスの再生トラック情報。
 ///
@@ -121,7 +121,9 @@ pub fn blend_poses(
     // pose_a のボーン
     for (name, over_a) in &pose_a.overrides {
         if let Some(over_b) = pose_b.overrides.get(name) {
-            result.overrides.insert(name.clone(), blend_bone_overrides(over_a, over_b, alpha));
+            result
+                .overrides
+                .insert(name.clone(), blend_bone_overrides(over_a, over_b, alpha));
         } else {
             result.overrides.insert(name.clone(), *over_a);
         }
@@ -272,10 +274,8 @@ impl SequenceManager {
             track_poses.push((pose, track.weight, track.priority));
         }
 
-        let ref_tracks: Vec<(&SkeletonPose, f32, i32)> = track_poses
-            .iter()
-            .map(|(p, w, pr)| (p, *w, *pr))
-            .collect();
+        let ref_tracks: Vec<(&SkeletonPose, f32, i32)> =
+            track_poses.iter().map(|(p, w, pr)| (p, *w, *pr)).collect();
 
         blend_multiple_poses(&ref_tracks)
     }
@@ -323,47 +323,62 @@ mod tests {
     fn test_blend_multiple_poses_priority_override() {
         // ボディポーズ (Priority: 0): Pelvis と Head を制御
         let mut body_pose = SkeletonPose::default();
-        body_pose.overrides.insert("Bip01 Pelvis".to_string(), BoneTransformOverride {
-            translation: Some(Vec3::new(0.0, 0.0, 100.0)),
-            rotation: Some(Quat::IDENTITY),
-            scale: Some(1.0),
-        });
-        body_pose.overrides.insert("Bip01 Head".to_string(), BoneTransformOverride {
-            translation: Some(Vec3::new(0.0, 0.0, 150.0)),
-            rotation: Some(Quat::IDENTITY),
-            scale: Some(1.0),
-        });
+        body_pose.overrides.insert(
+            "Bip01 Pelvis".to_string(),
+            BoneTransformOverride {
+                translation: Some(Vec3::new(0.0, 0.0, 100.0)),
+                rotation: Some(Quat::IDENTITY),
+                scale: Some(1.0),
+            },
+        );
+        body_pose.overrides.insert(
+            "Bip01 Head".to_string(),
+            BoneTransformOverride {
+                translation: Some(Vec3::new(0.0, 0.0, 150.0)),
+                rotation: Some(Quat::IDENTITY),
+                scale: Some(1.0),
+            },
+        );
 
         // リップシンクポーズ (Priority: 10): Head と Jaw (顎) を制御
         // リップシンクの高優先度により、Head の回転はリップシンク側の値が優先され、
         // かつボディにしかない Pelvis はそのまま残る
         let mut lipsync_pose = SkeletonPose::default();
         let head_talk_rot = Quat::from_rotation_x(0.1);
-        lipsync_pose.overrides.insert("Bip01 Head".to_string(), BoneTransformOverride {
-            translation: Some(Vec3::new(0.0, 0.0, 150.0)),
-            rotation: Some(head_talk_rot),
-            scale: Some(1.0),
-        });
-        lipsync_pose.overrides.insert("Bip01 Jaw".to_string(), BoneTransformOverride {
-            translation: Some(Vec3::new(0.0, -5.0, 0.0)),
-            rotation: Some(Quat::IDENTITY),
-            scale: Some(1.0),
-        });
+        lipsync_pose.overrides.insert(
+            "Bip01 Head".to_string(),
+            BoneTransformOverride {
+                translation: Some(Vec3::new(0.0, 0.0, 150.0)),
+                rotation: Some(head_talk_rot),
+                scale: Some(1.0),
+            },
+        );
+        lipsync_pose.overrides.insert(
+            "Bip01 Jaw".to_string(),
+            BoneTransformOverride {
+                translation: Some(Vec3::new(0.0, -5.0, 0.0)),
+                rotation: Some(Quat::IDENTITY),
+                scale: Some(1.0),
+            },
+        );
 
-        let tracks = vec![
-            (&body_pose, 1.0, 0),
-            (&lipsync_pose, 1.0, 10),
-        ];
+        let tracks = vec![(&body_pose, 1.0, 0), (&lipsync_pose, 1.0, 10)];
 
         let final_pose = blend_multiple_poses(&tracks);
 
         // 1. Pelvis はボディポーズのまま
         assert!(final_pose.overrides.contains_key("Bip01 Pelvis"));
-        assert_eq!(final_pose.overrides["Bip01 Pelvis"].translation.unwrap(), Vec3::new(0.0, 0.0, 100.0));
+        assert_eq!(
+            final_pose.overrides["Bip01 Pelvis"].translation.unwrap(),
+            Vec3::new(0.0, 0.0, 100.0)
+        );
 
         // 2. Jaw はリップシンクポーズから合成
         assert!(final_pose.overrides.contains_key("Bip01 Jaw"));
-        assert_eq!(final_pose.overrides["Bip01 Jaw"].translation.unwrap(), Vec3::new(0.0, -5.0, 0.0));
+        assert_eq!(
+            final_pose.overrides["Bip01 Jaw"].translation.unwrap(),
+            Vec3::new(0.0, -5.0, 0.0)
+        );
 
         // 3. Head は優先度 10 のリップシンクポーズが優先される
         assert!(final_pose.overrides.contains_key("Bip01 Head"));

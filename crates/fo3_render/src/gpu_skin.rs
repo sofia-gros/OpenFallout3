@@ -3,12 +3,12 @@
 //! Gamebryo 2.6 `NiSkinPartition` および `NiSkinData` に準拠した GPU ボーンパレット管理。
 //! 参照元: `knowledge/actor_and_skin_mesh.md`, Gamebryo 2.6 `NiSkinInstance::Update`
 
-use std::collections::HashMap;
 use fo3_gamebryo_core::NiBound;
 use fo3_nif::blocks::geometry::NiTriShapeData;
 use fo3_nif::blocks::skin::{NiSkinData, NiSkinInstance, SkinPartition};
 use fo3_nif::NifFile;
 use glam::{Mat4, Vec3};
+use std::collections::HashMap;
 use wgpu::util::DeviceExt;
 
 use crate::mesh::GpuMesh;
@@ -92,8 +92,12 @@ impl GpuBonePalette {
                 bone_block_indices.push(node_block_idx);
                 if node_block_idx >= 0 && (node_block_idx as usize) < nif.blocks.len() {
                     let name_opt = match &nif.blocks[node_block_idx as usize] {
-                        fo3_nif::NifBlock::NiNode(ref node) => nif.get_string(node.av.net.name_index),
-                        fo3_nif::NifBlock::BSFadeNode(ref fade) => nif.get_string(fade.node.av.net.name_index),
+                        fo3_nif::NifBlock::NiNode(ref node) => {
+                            nif.get_string(node.av.net.name_index)
+                        }
+                        fo3_nif::NifBlock::BSFadeNode(ref fade) => {
+                            nif.get_string(fade.node.av.net.name_index)
+                        }
                         _ => None,
                     };
                     if let Some(name) = name_opt {
@@ -134,7 +138,11 @@ impl GpuBonePalette {
                 Mat4::IDENTITY
             };
 
-            let b_bone = self.inv_bind_matrices.get(k).copied().unwrap_or(Mat4::IDENTITY);
+            let b_bone = self
+                .inv_bind_matrices
+                .get(k)
+                .copied()
+                .unwrap_or(Mat4::IDENTITY);
 
             // 合成行列: P_k = M_bone * B_bone
             // 参照元: NifSkope glmesh.cpp:L645, references/nifxml/nif.xml:L5094
@@ -155,12 +163,19 @@ impl GpuBonePalette {
             }
 
             let m_bone = if block_idx >= 0 {
-                bone_block_map.get(&block_idx).copied().unwrap_or(Mat4::IDENTITY)
+                bone_block_map
+                    .get(&block_idx)
+                    .copied()
+                    .unwrap_or(Mat4::IDENTITY)
             } else {
                 Mat4::IDENTITY
             };
 
-            let b_bone = self.inv_bind_matrices.get(k).copied().unwrap_or(Mat4::IDENTITY);
+            let b_bone = self
+                .inv_bind_matrices
+                .get(k)
+                .copied()
+                .unwrap_or(Mat4::IDENTITY);
 
             // 合成行列: P_k = M_bone * B_bone
             // 参照元: NifSkope glmesh.cpp:L645
@@ -361,4 +376,3 @@ mod tests {
         assert!((transformed - glam::Vec3::new(0.0, 20.0, 100.0)).length() < 1e-4);
     }
 }
-

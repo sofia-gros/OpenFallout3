@@ -3,13 +3,13 @@
 //! 参照元: Gamebryo 2.6 / GECK スクリプトシステム & `references/openmw/components/esm4/loadqust.hpp`
 //! 参照元: `knowledge/phase10_script_and_event_system.md:QUST レコードのバイナリ構造仕様`
 
-use byteorder::{LittleEndian, ReadBytesExt};
-use std::io::{self, Cursor};
 use crate::subrecord::Subrecord;
 use crate::types::{
-    FormId, SUB_DATA, SUB_EDID, SUB_FULL, SUB_INDX, SUB_NNAM, SUB_QOBJ, SUB_QSDT,
-    SUB_SCRI, SUB_SCTX,
+    FormId, SUB_DATA, SUB_EDID, SUB_FULL, SUB_INDX, SUB_NNAM, SUB_QOBJ, SUB_QSDT, SUB_SCRI,
+    SUB_SCTX,
 };
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Cursor};
 
 /// クエストステージ情報。
 #[derive(Debug, Clone, Default)]
@@ -61,14 +61,10 @@ impl QuestRecord {
         for sub in subrecords {
             match sub.type_id {
                 SUB_EDID => {
-                    record.editor_id = sub.as_string()
-                        .trim_end_matches('\0')
-                        .to_string();
+                    record.editor_id = sub.as_string().trim_end_matches('\0').to_string();
                 }
                 SUB_FULL => {
-                    record.name = sub.as_string()
-                        .trim_end_matches('\0')
-                        .to_string();
+                    record.name = sub.as_string().trim_end_matches('\0').to_string();
                 }
                 SUB_DATA => {
                     if sub.data.len() >= 8 {
@@ -110,9 +106,7 @@ impl QuestRecord {
                     }
                 }
                 SUB_SCTX => {
-                    let source = sub.as_string()
-                        .trim_end_matches('\0')
-                        .to_string();
+                    let source = sub.as_string().trim_end_matches('\0').to_string();
                     if let Some(ref mut st) = current_stage {
                         st.script_source = Some(source);
                     }
@@ -132,9 +126,7 @@ impl QuestRecord {
                     }
                 }
                 SUB_NNAM => {
-                    let text = sub.as_string()
-                        .trim_end_matches('\0')
-                        .to_string();
+                    let text = sub.as_string().trim_end_matches('\0').to_string();
                     if let Some(ref mut obj) = current_objective {
                         obj.text = text;
                     }
@@ -221,10 +213,12 @@ mod tests {
         assert_eq!(quest.stages[0].flags, 0);
         assert_eq!(quest.stages[1].index, 100);
         assert_eq!(quest.stages[1].flags, 1);
-        assert_eq!(quest.stages[1].script_source.as_deref(), Some("SetStage MQ02 10"));
+        assert_eq!(
+            quest.stages[1].script_source.as_deref(),
+            Some("SetStage MQ02 10")
+        );
         assert_eq!(quest.objectives.len(), 1);
         assert_eq!(quest.objectives[0].index, 10);
         assert_eq!(quest.objectives[0].text, "Speak to Colin Moriarty");
     }
 }
-

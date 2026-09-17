@@ -6,11 +6,11 @@
 //! 正規化されたファイルパスをキーとしてメモリ上にキャッシュし、セル間遷移や複数オブジェクト間での
 //! ゼロコスト共有を実現します。
 
+use crate::texture::GpuTexture;
+use fo3_nif::NifFile;
+use fo3_vfs::VfsManager;
 use std::collections::HashMap;
 use std::sync::Arc;
-use fo3_vfs::VfsManager;
-use fo3_nif::NifFile;
-use crate::texture::GpuTexture;
 
 /// メッシュファイルパスを小文字化・バックスラッシュ統一し、先頭に `meshes\` を補完して正規化する。
 pub fn normalize_mesh_path(raw_path: &str) -> String {
@@ -47,7 +47,11 @@ impl NifCache {
     }
 
     /// キャッシュから NIF ファイルを取得する。存在しない場合は VFS から読み込んでパースし、キャッシュに格納する。
-    pub fn get_or_load(&mut self, path: &str, vfs: &mut VfsManager) -> Result<Arc<NifFile>, String> {
+    pub fn get_or_load(
+        &mut self,
+        path: &str,
+        vfs: &mut VfsManager,
+    ) -> Result<Arc<NifFile>, String> {
         let key = normalize_mesh_path(path);
         if let Some(nif) = self.cache.get(&key) {
             return Ok(Arc::clone(nif));
@@ -58,8 +62,8 @@ impl NifCache {
             .map_err(|e| format!("VFS 読み込み失敗 '{}': {:?}", key, e))?;
 
         let mut cursor = std::io::Cursor::new(&bytes);
-        let nif = NifFile::read(&mut cursor)
-            .map_err(|e| format!("NIF パース失敗 '{}': {:?}", key, e))?;
+        let nif =
+            NifFile::read(&mut cursor).map_err(|e| format!("NIF パース失敗 '{}': {:?}", key, e))?;
 
         let arc_nif = Arc::new(nif);
         self.cache.insert(key, Arc::clone(&arc_nif));

@@ -5,11 +5,11 @@
 //! - `references/openmw/components/esm4/script.hpp:346-378`
 //! - `references/bevyout/src/vsa/scripts/record.rs:210-250`
 
-use std::io::{self, Cursor};
-use byteorder::{LittleEndian, ReadBytesExt};
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{FormId, REC_SCPT};
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Cursor};
 
 /// スクリプト種別 (`SCHR.type`)。
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -178,7 +178,11 @@ impl ScptRecord {
             if first_lower == "begin" {
                 // 既存の未終了ブロックがあれば回収
                 if let Some((event_type, args, lines)) = current_block.take() {
-                    blocks.push(ScriptBlock { event_type, args, lines });
+                    blocks.push(ScriptBlock {
+                        event_type,
+                        args,
+                        lines,
+                    });
                 }
 
                 if tokens.len() > 1 {
@@ -188,7 +192,11 @@ impl ScptRecord {
                 }
             } else if first_lower == "end" {
                 if let Some((event_type, args, lines)) = current_block.take() {
-                    blocks.push(ScriptBlock { event_type, args, lines });
+                    blocks.push(ScriptBlock {
+                        event_type,
+                        args,
+                        lines,
+                    });
                 }
             } else if let Some((_, _, ref mut lines)) = current_block {
                 lines.push(line.to_string());
@@ -197,7 +205,11 @@ impl ScptRecord {
 
         // ファイル末尾で End が省略されている場合の回収
         if let Some((event_type, args, lines)) = current_block {
-            blocks.push(ScriptBlock { event_type, args, lines });
+            blocks.push(ScriptBlock {
+                event_type,
+                args,
+                lines,
+            });
         }
 
         blocks
@@ -330,13 +342,34 @@ mod tests {
         slsd_bytes[16..20].copy_from_slice(&0u32.to_le_bytes()); // type 0
 
         let subrecords = vec![
-            Subrecord { type_id: crate::types::FourCC(*b"EDID"), data: b"TestDoorScript\0".to_vec() },
-            Subrecord { type_id: crate::types::FourCC(*b"SCHR"), data: schr_bytes },
-            Subrecord { type_id: crate::types::FourCC(*b"SCDA"), data: vec![0x10, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00] },
-            Subrecord { type_id: crate::types::FourCC(*b"SCTX"), data: b"scn TestDoorScript\nBegin OnActivate\nEnd\0".to_vec() },
-            Subrecord { type_id: crate::types::FourCC(*b"SLSD"), data: slsd_bytes },
-            Subrecord { type_id: crate::types::FourCC(*b"SCVR"), data: b"bOpen\0".to_vec() },
-            Subrecord { type_id: crate::types::FourCC(*b"SCRO"), data: 0x000abcdeu32.to_le_bytes().to_vec() },
+            Subrecord {
+                type_id: crate::types::FourCC(*b"EDID"),
+                data: b"TestDoorScript\0".to_vec(),
+            },
+            Subrecord {
+                type_id: crate::types::FourCC(*b"SCHR"),
+                data: schr_bytes,
+            },
+            Subrecord {
+                type_id: crate::types::FourCC(*b"SCDA"),
+                data: vec![0x10, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00],
+            },
+            Subrecord {
+                type_id: crate::types::FourCC(*b"SCTX"),
+                data: b"scn TestDoorScript\nBegin OnActivate\nEnd\0".to_vec(),
+            },
+            Subrecord {
+                type_id: crate::types::FourCC(*b"SLSD"),
+                data: slsd_bytes,
+            },
+            Subrecord {
+                type_id: crate::types::FourCC(*b"SCVR"),
+                data: b"bOpen\0".to_vec(),
+            },
+            Subrecord {
+                type_id: crate::types::FourCC(*b"SCRO"),
+                data: 0x000abcdeu32.to_le_bytes().to_vec(),
+            },
         ];
 
         let scpt = ScptRecord::parse(&record_header, &subrecords).expect("Failed to parse SCPT");

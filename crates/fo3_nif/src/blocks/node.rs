@@ -6,9 +6,9 @@
 //! - `references/nifxml/nif.xml:L4384` (`NiNode`)
 //! - `references/nifxml/nif.xml:L6131` (`BSFadeNode`)
 
-use std::io::{self, Read};
-use byteorder::{LittleEndian, ReadBytesExt};
 use crate::types::{Matrix33, Vector3};
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Read};
 
 /// 名前や追加データを持つオブジェクトの共通基底。
 ///
@@ -28,7 +28,10 @@ impl NiObjectNET {
         let name_index = reader.read_u32::<LittleEndian>()?;
         let num_extra = reader.read_u32::<LittleEndian>()? as usize;
         if num_extra > 4096 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("num_extra too large: {}", num_extra)));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("num_extra too large: {}", num_extra),
+            ));
         }
         let mut extra_data_list = Vec::with_capacity(num_extra);
         for _ in 0..num_extra {
@@ -74,7 +77,10 @@ impl NiAVObject {
 
         let num_properties = reader.read_u32::<LittleEndian>()? as usize;
         if num_properties > 4096 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("num_properties too large: {}", num_properties)));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("num_properties too large: {}", num_properties),
+            ));
         }
         let mut properties = Vec::with_capacity(num_properties);
         for _ in 0..num_properties {
@@ -113,7 +119,10 @@ impl NiNode {
 
         let num_children = reader.read_u32::<LittleEndian>()? as usize;
         if num_children > 65536 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("num_children too large: {}", num_children)));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("num_children too large: {}", num_children),
+            ));
         }
         let mut children = Vec::with_capacity(num_children);
         for _ in 0..num_children {
@@ -122,7 +131,10 @@ impl NiNode {
 
         let num_effects = reader.read_u32::<LittleEndian>()? as usize;
         if num_effects > 4096 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("num_effects too large: {}", num_effects)));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("num_effects too large: {}", num_effects),
+            ));
         }
         let mut effects = Vec::with_capacity(num_effects);
         for _ in 0..num_effects {

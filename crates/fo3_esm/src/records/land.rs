@@ -3,14 +3,12 @@
 //! セルの地形標高ハイトマップ、法線、頂点カラー、テクスチャ定義を保持。
 //! 参照元: `references/openmw/components/esm4/loadland.hpp`, `loadland.cpp`, `references/openmw/components/esm/esmterrain.cpp:39-77`
 
-use std::io::{self, Cursor};
 use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Cursor};
 
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
-use crate::types::{
-    FormId, SUB_ATXT, SUB_BTXT, SUB_DATA, SUB_VCLR, SUB_VHGT, SUB_VNML, SUB_VTXT,
-};
+use crate::types::{FormId, SUB_ATXT, SUB_BTXT, SUB_DATA, SUB_VCLR, SUB_VHGT, SUB_VNML, SUB_VTXT};
 
 /// 地形の一辺あたりの頂点数 (Gamebryo 2.6 / Fallout 3 定数)。
 pub const LAND_VERTS_PER_SIDE: usize = 33;

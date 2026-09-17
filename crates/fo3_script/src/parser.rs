@@ -2,7 +2,7 @@
 //!
 //! ソーステキスト (SCTX) をパースし、抽象構文木 (AST) またはより強固な
 //! 実行可能表現に変換する。
-//! 
+//!
 //! 参照元: GECK Wiki "Scripting"
 
 #[derive(Debug, Clone, PartialEq)]
@@ -141,9 +141,8 @@ impl<'a> Lexer<'a> {
         }
         let lower = s.to_ascii_lowercase();
         match lower.as_str() {
-            "begin" | "end" | "if" | "else" | "elseif" | "endif" | "set" | "to" | "return" | "activate" => {
-                Token::Keyword(lower)
-            }
+            "begin" | "end" | "if" | "else" | "elseif" | "endif" | "set" | "to" | "return"
+            | "activate" => Token::Keyword(lower),
             _ => Token::Identifier(s),
         }
     }
@@ -197,12 +196,13 @@ impl<'a> Lexer<'a> {
             '=' | '!' | '<' | '>' | '&' | '|' | '+' | '-' | '*' | '/' => {
                 let mut op = c.to_string();
                 if let Some(&next_c) = self.input.peek() {
-                    if (c == '=' && next_c == '=') ||
-                       (c == '!' && next_c == '=') ||
-                       (c == '<' && next_c == '=') ||
-                       (c == '>' && next_c == '=') ||
-                       (c == '&' && next_c == '&') ||
-                       (c == '|' && next_c == '|') {
+                    if (c == '=' && next_c == '=')
+                        || (c == '!' && next_c == '=')
+                        || (c == '<' && next_c == '=')
+                        || (c == '>' && next_c == '=')
+                        || (c == '&' && next_c == '&')
+                        || (c == '|' && next_c == '|')
+                    {
                         op.push(next_c);
                         self.input.next();
                     }
@@ -226,7 +226,10 @@ impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Self {
         let mut lexer = Lexer::new(input);
         let current_token = lexer.next_token();
-        Self { lexer, current_token }
+        Self {
+            lexer,
+            current_token,
+        }
     }
 
     fn advance(&mut self) {
@@ -299,7 +302,7 @@ impl<'a> Parser<'a> {
 
     fn parse_set(&mut self) -> Result<Statement, String> {
         self.advance(); // consume "set"
-        
+
         let target = match self.current_token.clone() {
             Token::Identifier(s) => {
                 self.advance();
@@ -331,9 +334,11 @@ impl<'a> Parser<'a> {
     fn parse_if(&mut self) -> Result<Statement, String> {
         self.advance(); // consume "if"
         let condition = self.parse_expression(0)?;
-        
+
         let mut then_block = Vec::new();
-        while !matches!(self.current_token, Token::Keyword(ref k) if k == "elseif" || k == "else" || k == "endif" || k == "end") && self.current_token != Token::EOF {
+        while !matches!(self.current_token, Token::Keyword(ref k) if k == "elseif" || k == "else" || k == "endif" || k == "end")
+            && self.current_token != Token::EOF
+        {
             then_block.push(self.parse_statement()?);
         }
 
@@ -343,7 +348,9 @@ impl<'a> Parser<'a> {
                 self.advance(); // consume elseif
                 let ei_cond = self.parse_expression(0)?;
                 let mut ei_block = Vec::new();
-                while !matches!(self.current_token, Token::Keyword(ref k2) if k2 == "elseif" || k2 == "else" || k2 == "endif" || k2 == "end") && self.current_token != Token::EOF {
+                while !matches!(self.current_token, Token::Keyword(ref k2) if k2 == "elseif" || k2 == "else" || k2 == "endif" || k2 == "end")
+                    && self.current_token != Token::EOF
+                {
                     ei_block.push(self.parse_statement()?);
                 }
                 else_ifs.push((ei_cond, ei_block));
@@ -357,7 +364,9 @@ impl<'a> Parser<'a> {
             if k == "else" {
                 self.advance(); // consume else
                 let mut e_block = Vec::new();
-                while !matches!(self.current_token, Token::Keyword(ref k2) if k2 == "endif" || k2 == "end") && self.current_token != Token::EOF {
+                while !matches!(self.current_token, Token::Keyword(ref k2) if k2 == "endif" || k2 == "end")
+                    && self.current_token != Token::EOF
+                {
                     e_block.push(self.parse_statement()?);
                 }
                 else_block = Some(e_block);
@@ -371,7 +380,7 @@ impl<'a> Parser<'a> {
                 return Err(format!("Expected endif, got {:?}", self.current_token));
             }
         } else {
-             return Err(format!("Expected endif, got {:?}", self.current_token));
+            return Err(format!("Expected endif, got {:?}", self.current_token));
         }
 
         Ok(Statement::If {
@@ -382,7 +391,11 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_call(&mut self, subject: Option<String>, command: String) -> Result<Statement, String> {
+    fn parse_call(
+        &mut self,
+        subject: Option<String>,
+        command: String,
+    ) -> Result<Statement, String> {
         // Read arguments until the end of the line/statement.
         // Read arguments until the end of the line/statement.
         // Wait, how do we know the statement ends?
@@ -399,23 +412,34 @@ impl<'a> Parser<'a> {
             Token::Number(n) => {
                 self.advance();
                 Expr::Number(n)
-            },
+            }
             Token::Identifier(name) => {
                 self.advance();
                 let lower = name.to_ascii_lowercase();
-                if lower == "getsecondspassed" || lower == "getbuttonpressed" || lower == "getinchargen" {
-                    Expr::FunctionCall { subject: None, function: name, args: vec![] }
+                if lower == "getsecondspassed"
+                    || lower == "getbuttonpressed"
+                    || lower == "getinchargen"
+                {
+                    Expr::FunctionCall {
+                        subject: None,
+                        function: name,
+                        args: vec![],
+                    }
                 } else if lower == "getstage" {
                     let mut args = vec![];
                     if let Token::Identifier(ref arg) = self.current_token {
                         args.push(Expr::Variable(arg.clone()));
                         self.advance();
                     }
-                    Expr::FunctionCall { subject: None, function: name, args }
+                    Expr::FunctionCall {
+                        subject: None,
+                        function: name,
+                        args,
+                    }
                 } else {
                     Expr::Variable(name)
                 }
-            },
+            }
             Token::LParen => {
                 self.advance();
                 let expr = self.parse_expression(0)?;
@@ -425,12 +449,16 @@ impl<'a> Parser<'a> {
                 } else {
                     return Err("Expected ')'".to_string());
                 }
-            },
+            }
             Token::Operator(ref op) if op == "-" => {
                 self.advance();
                 let right = self.parse_expression(70)?; // Unary minus
-                Expr::BinaryOp { op: BinaryOperator::Sub, left: Box::new(Expr::Number(0.0)), right: Box::new(right) }
-            },
+                Expr::BinaryOp {
+                    op: BinaryOperator::Sub,
+                    left: Box::new(Expr::Number(0.0)),
+                    right: Box::new(right),
+                }
+            }
             tok => return Err(format!("Unexpected token in expression: {:?}", tok)),
         };
 
@@ -453,7 +481,12 @@ impl<'a> Parser<'a> {
             };
 
             let op_prec = match op {
-                BinaryOperator::Eq | BinaryOperator::Neq | BinaryOperator::Lt | BinaryOperator::Gt | BinaryOperator::Lte | BinaryOperator::Gte => 30,
+                BinaryOperator::Eq
+                | BinaryOperator::Neq
+                | BinaryOperator::Lt
+                | BinaryOperator::Gt
+                | BinaryOperator::Lte
+                | BinaryOperator::Gte => 30,
                 BinaryOperator::Add | BinaryOperator::Sub => 50,
                 BinaryOperator::Mul | BinaryOperator::Div => 60,
                 _ => 0,
@@ -465,11 +498,13 @@ impl<'a> Parser<'a> {
 
             self.advance(); // Consume operator
             let right = self.parse_expression(op_prec)?;
-            left = Expr::BinaryOp { op, left: Box::new(left), right: Box::new(right) };
+            left = Expr::BinaryOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
         }
 
         Ok(left)
     }
 }
-
-

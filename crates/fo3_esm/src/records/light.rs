@@ -3,11 +3,11 @@
 //! 点光源やスポットライト、照明器具メッシュの定義レコード。
 //! 参照元: `references/openmw/components/esm4/loadligh.hpp`, `loadligh.cpp`
 
-use std::io::{self, Cursor, Read};
-use byteorder::{LittleEndian, ReadBytesExt};
 use crate::header::RecordHeader;
 use crate::subrecord::Subrecord;
 use crate::types::{FormId, SUB_DATA, SUB_EDID, SUB_FULL, SUB_MODL};
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Cursor, Read};
 
 /// 光源定義レコード (`LIGH`)。
 ///

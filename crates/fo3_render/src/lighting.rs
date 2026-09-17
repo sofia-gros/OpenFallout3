@@ -115,7 +115,11 @@ impl LightingUniform {
 
             uniform.fog_far_power = [
                 lgt.fog_far,
-                if lgt.fog_power > 0.01 { lgt.fog_power } else { 1.0 },
+                if lgt.fog_power > 0.01 {
+                    lgt.fog_power
+                } else {
+                    1.0
+                },
                 0.0,
                 0.0,
             ];
@@ -126,23 +130,37 @@ impl LightingUniform {
         let mut sorted_lights: Vec<&PlacedPointLight> = lights.iter().collect();
         sorted_lights.sort_by(|a, b| {
             let score_a = if let Some(focus) = focus_pos {
-                a.position.distance_squared(focus) * 0.7 + a.position.distance_squared(camera_pos) * 0.3
+                a.position.distance_squared(focus) * 0.7
+                    + a.position.distance_squared(camera_pos) * 0.3
             } else {
                 a.position.distance_squared(camera_pos)
             };
             let score_b = if let Some(focus) = focus_pos {
-                b.position.distance_squared(focus) * 0.7 + b.position.distance_squared(camera_pos) * 0.3
+                b.position.distance_squared(focus) * 0.7
+                    + b.position.distance_squared(camera_pos) * 0.3
             } else {
                 b.position.distance_squared(camera_pos)
             };
-            score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
+            score_a
+                .partial_cmp(&score_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         let num_lights = sorted_lights.len().min(16);
         for (i, light) in sorted_lights.iter().take(num_lights).enumerate() {
             uniform.point_lights[i] = GpuPointLight {
-                pos_radius: [light.position.x, light.position.y, light.position.z, light.radius],
-                color_falloff: [light.color[0], light.color[1], light.color[2], light.falloff],
+                pos_radius: [
+                    light.position.x,
+                    light.position.y,
+                    light.position.z,
+                    light.radius,
+                ],
+                color_falloff: [
+                    light.color[0],
+                    light.color[1],
+                    light.color[2],
+                    light.falloff,
+                ],
             };
         }
         uniform.fog_far_power[2] = num_lights as f32;

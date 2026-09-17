@@ -107,9 +107,15 @@ pub fn get_actor_part_paths(
     hide_hair: bool,
 ) -> Vec<String> {
     let (default_right_hand, default_left_hand) = if is_female {
-        ("meshes\\characters\\_male\\femalerighthand.nif", "meshes\\characters\\_male\\femalelefthand.nif")
+        (
+            "meshes\\characters\\_male\\femalerighthand.nif",
+            "meshes\\characters\\_male\\femalelefthand.nif",
+        )
     } else {
-        ("meshes\\characters\\_male\\righthand.nif", "meshes\\characters\\_male\\lefthand.nif")
+        (
+            "meshes\\characters\\_male\\righthand.nif",
+            "meshes\\characters\\_male\\lefthand.nif",
+        )
     };
     let head_nif = if is_ghoul_race(race) {
         "meshes\\characters\\head\\headghoul.nif"

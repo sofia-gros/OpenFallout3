@@ -6,8 +6,8 @@
 //! - `references/bevyout/src/vsa/prepare/facegen.rs` (`parse_texture_morph`, `synthesize_head_diffuse`, `sample_texture_delta`)
 //! - `references/openmw/components/esm4/loadnpc.cpp:L208-215`
 
-use std::io::Cursor;
 use ddsfile::{Dds, PixelFormatFlags};
+use std::io::Cursor;
 
 const EGT_MAGIC: &[u8; 8] = b"FREGT003";
 const EGT_HEADER_BYTES: usize = 8 + 4 + 4 + 4 + 4 + 4 + 36;
@@ -111,11 +111,7 @@ pub fn parse_geometry_morph(bytes: &[u8]) -> Result<GeometryMorph, String> {
             let x = reader.i16().ok_or("dx 読み込み失敗")?;
             let y = reader.i16().ok_or("dy 読み込み失敗")?;
             let z = reader.i16().ok_or("dz 読み込み失敗")?;
-            deltas.push([
-                (x as f32) * scale,
-                (y as f32) * scale,
-                (z as f32) * scale,
-            ]);
+            deltas.push([(x as f32) * scale, (y as f32) * scale, (z as f32) * scale]);
         }
         modes.push(deltas);
     }
@@ -254,7 +250,9 @@ pub fn parse_texture_morph(bytes: &[u8]) -> Result<TextureMorph, Box<dyn std::er
 }
 
 /// DXT1 / DXT3 / DXT5 または非圧縮 DDS データを RGBA8 (各ピクセル 4 バイト) ピクセル配列にデコードする。
-pub fn decode_dds_to_rgba8(dds_bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), Box<dyn std::error::Error>> {
+pub fn decode_dds_to_rgba8(
+    dds_bytes: &[u8],
+) -> Result<(u32, u32, Vec<u8>), Box<dyn std::error::Error>> {
     let mut cursor = Cursor::new(dds_bytes);
     let dds = Dds::read(&mut cursor)?;
 
@@ -286,7 +284,9 @@ pub fn decode_dds_to_rgba8(dds_bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), Box<
         }
     }
 
-    if dds.header.spf.flags.contains(PixelFormatFlags::RGB) && dds.header.spf.rgb_bit_count == Some(32) {
+    if dds.header.spf.flags.contains(PixelFormatFlags::RGB)
+        && dds.header.spf.rgb_bit_count == Some(32)
+    {
         let expected_size = (width * height * 4) as usize;
         if dds.data.len() >= expected_size {
             return Ok((width, height, dds.data[..expected_size].to_vec()));
@@ -297,7 +297,12 @@ pub fn decode_dds_to_rgba8(dds_bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), Box<
 }
 
 /// BC1 (DXT1) ソフトウェアデコーダー
-fn decode_bc1(data: &[u8], width: u32, height: u32, out_rgba: &mut [u8]) -> Result<(), Box<dyn std::error::Error>> {
+fn decode_bc1(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    out_rgba: &mut [u8],
+) -> Result<(), Box<dyn std::error::Error>> {
     let blocks_x = (width + 3) / 4;
     let blocks_y = (height + 3) / 4;
     let mut offset = 0;
@@ -309,7 +314,12 @@ fn decode_bc1(data: &[u8], width: u32, height: u32, out_rgba: &mut [u8]) -> Resu
             }
             let c0_raw = u16::from_le_bytes([data[offset], data[offset + 1]]);
             let c1_raw = u16::from_le_bytes([data[offset + 2], data[offset + 3]]);
-            let bits = u32::from_le_bytes([data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7]]);
+            let bits = u32::from_le_bytes([
+                data[offset + 4],
+                data[offset + 5],
+                data[offset + 6],
+                data[offset + 7],
+            ]);
             offset += 8;
 
             let c0 = rgb565_to_rgb8(c0_raw);
@@ -343,10 +353,14 @@ fn decode_bc1(data: &[u8], width: u32, height: u32, out_rgba: &mut [u8]) -> Resu
 
             for py in 0..4 {
                 let y = by * 4 + py;
-                if y >= height { continue; }
+                if y >= height {
+                    continue;
+                }
                 for px in 0..4 {
                     let x = bx * 4 + px;
-                    if x >= width { continue; }
+                    if x >= width {
+                        continue;
+                    }
                     let code_idx = ((bits >> (2 * (py * 4 + px))) & 0x03) as usize;
                     let color = palette[code_idx];
                     let dst_idx = ((y * width + x) * 4) as usize;
@@ -359,18 +373,30 @@ fn decode_bc1(data: &[u8], width: u32, height: u32, out_rgba: &mut [u8]) -> Resu
 }
 
 /// BC2 (DXT3) ソフトウェアデコーダー
-fn decode_bc2(data: &[u8], width: u32, height: u32, out_rgba: &mut [u8]) -> Result<(), Box<dyn std::error::Error>> {
+fn decode_bc2(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    out_rgba: &mut [u8],
+) -> Result<(), Box<dyn std::error::Error>> {
     let blocks_x = (width + 3) / 4;
     let blocks_y = (height + 3) / 4;
     let mut offset = 0;
 
     for by in 0..blocks_y {
         for bx in 0..blocks_x {
-            if offset + 16 > data.len() { break; }
+            if offset + 16 > data.len() {
+                break;
+            }
             let alpha_bytes = &data[offset..offset + 8];
             let c0_raw = u16::from_le_bytes([data[offset + 8], data[offset + 9]]);
             let c1_raw = u16::from_le_bytes([data[offset + 10], data[offset + 11]]);
-            let bits = u32::from_le_bytes([data[offset + 12], data[offset + 13], data[offset + 14], data[offset + 15]]);
+            let bits = u32::from_le_bytes([
+                data[offset + 12],
+                data[offset + 13],
+                data[offset + 14],
+                data[offset + 15],
+            ]);
             offset += 16;
 
             let c0 = rgb565_to_rgb8(c0_raw);
@@ -396,13 +422,16 @@ fn decode_bc2(data: &[u8], width: u32, height: u32, out_rgba: &mut [u8]) -> Resu
                 let a_row = u16::from_le_bytes([alpha_bytes[py_u * 2], alpha_bytes[py_u * 2 + 1]]);
                 for px in 0..4 {
                     let x = bx * 4 + px;
-                    if x >= width { continue; }
+                    if x >= width {
+                        continue;
+                    }
                     let a_4bit = ((a_row >> (px * 4)) & 0x0F) as u8;
                     let alpha = (a_4bit << 4) | a_4bit;
                     let code_idx = ((bits >> (2 * (py * 4 + px))) & 0x03) as usize;
                     let rgb = palette[code_idx];
                     let dst_idx = ((y * width + x) * 4) as usize;
-                    out_rgba[dst_idx..dst_idx + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], alpha]);
+                    out_rgba[dst_idx..dst_idx + 4]
+                        .copy_from_slice(&[rgb[0], rgb[1], rgb[2], alpha]);
                 }
             }
         }
@@ -411,22 +440,35 @@ fn decode_bc2(data: &[u8], width: u32, height: u32, out_rgba: &mut [u8]) -> Resu
 }
 
 /// BC3 (DXT5) ソフトウェアデコーダー
-fn decode_bc3(data: &[u8], width: u32, height: u32, out_rgba: &mut [u8]) -> Result<(), Box<dyn std::error::Error>> {
+fn decode_bc3(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    out_rgba: &mut [u8],
+) -> Result<(), Box<dyn std::error::Error>> {
     let blocks_x = (width + 3) / 4;
     let blocks_y = (height + 3) / 4;
     let mut offset = 0;
 
     for by in 0..blocks_y {
         for bx in 0..blocks_x {
-            if offset + 16 > data.len() { break; }
+            if offset + 16 > data.len() {
+                break;
+            }
             let a0 = data[offset];
             let a1 = data[offset + 1];
             let a_bits = [
-                data[offset + 2], data[offset + 3], data[offset + 4],
-                data[offset + 5], data[offset + 6], data[offset + 7],
+                data[offset + 2],
+                data[offset + 3],
+                data[offset + 4],
+                data[offset + 5],
+                data[offset + 6],
+                data[offset + 7],
             ];
             let mut a_indices = [0u8; 16];
-            let a_val64 = u64::from_le_bytes([a_bits[0], a_bits[1], a_bits[2], a_bits[3], a_bits[4], a_bits[5], 0, 0]);
+            let a_val64 = u64::from_le_bytes([
+                a_bits[0], a_bits[1], a_bits[2], a_bits[3], a_bits[4], a_bits[5], 0, 0,
+            ]);
             for i in 0..16 {
                 a_indices[i] = ((a_val64 >> (i * 3)) & 0x07) as u8;
             }
@@ -448,7 +490,12 @@ fn decode_bc3(data: &[u8], width: u32, height: u32, out_rgba: &mut [u8]) -> Resu
 
             let c0_raw = u16::from_le_bytes([data[offset + 8], data[offset + 9]]);
             let c1_raw = u16::from_le_bytes([data[offset + 10], data[offset + 11]]);
-            let bits = u32::from_le_bytes([data[offset + 12], data[offset + 13], data[offset + 14], data[offset + 15]]);
+            let bits = u32::from_le_bytes([
+                data[offset + 12],
+                data[offset + 13],
+                data[offset + 14],
+                data[offset + 15],
+            ]);
             offset += 16;
 
             let c0 = rgb565_to_rgb8(c0_raw);
@@ -470,16 +517,21 @@ fn decode_bc3(data: &[u8], width: u32, height: u32, out_rgba: &mut [u8]) -> Resu
 
             for py in 0..4 {
                 let y = by * 4 + py;
-                if y >= height { continue; }
+                if y >= height {
+                    continue;
+                }
                 for px in 0..4 {
                     let x = bx * 4 + px;
-                    if x >= width { continue; }
+                    if x >= width {
+                        continue;
+                    }
                     let p_idx = (py * 4 + px) as usize;
                     let alpha = a_pal[a_indices[p_idx] as usize];
                     let code_idx = ((bits >> (2 * p_idx)) & 0x03) as usize;
                     let rgb = palette[code_idx];
                     let dst_idx = ((y * width + x) * 4) as usize;
-                    out_rgba[dst_idx..dst_idx + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], alpha]);
+                    out_rgba[dst_idx..dst_idx + 4]
+                        .copy_from_slice(&[rgb[0], rgb[1], rgb[2], alpha]);
                 }
             }
         }
@@ -601,7 +653,6 @@ mod tests {
         assert!((positions[1][2] - 29.8).abs() < 1e-5);
     }
 }
-
 
 /// ベースの頭部ディフューズ画像 (RGBA8) に FaceGen EGT モーフィング差分を加算合成する。
 /// 参照元: `references/bevyout/src/vsa/prepare/facegen.rs:L710-796`
