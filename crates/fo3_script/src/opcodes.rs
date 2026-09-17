@@ -83,4 +83,6 @@ pub mod functions {
     pub const FN_SAY: u16 = 0x00A0;
     /// 会話開始 (`StartConversation [ActorFormID]`)
     pub const FN_START_CONVERSATION: u16 = 0x00A1;
+    /// スクリプト変数取得 (`GetScriptVariable [Reference] [VariableIndex]`)
+    pub const FN_GET_SCRIPT_VARIABLE: u16 = 0x01AB;
 }

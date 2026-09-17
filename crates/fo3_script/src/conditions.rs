@@ -22,12 +22,14 @@ pub struct ConditionContext {
     pub player_pos: Vec3,
     /// クエストごとの現在ステージマップ (`QuestFormID -> Stage`)
     pub quest_stages: HashMap<FormId, u32>,
-    /// クエストごとの到達済みステージ履歴 (`QuestFormID -> Set<Stage>`)
+    /// クエストのステージ履歴 (`QuestFormID -> Set<Stage>`)
     pub quest_stage_history: HashMap<FormId, HashSet<u32>>,
-    /// プレイヤーのインベントリ所持数 (`ItemFormID -> Count`)
+    /// プレイヤーのインベントリ (`ItemFormID -> Count`)
     pub inventory: HashMap<FormId, u32>,
-    /// プレイヤーの性別 (true: Female=1, false: Male=0)
+    /// プレイヤー性別 (true: Female=1, false: Male=0)
     pub is_female: bool,
+    /// スクリプト変数 (`(RefrFormID, VarIndex) -> f32`)
+    pub script_vars: HashMap<(FormId, u32), f32>,
 }
 
 /// 単一の `TargetCondition` を評価する。
@@ -96,11 +98,17 @@ pub fn evaluate_single_condition(cond: &TargetCondition, ctx: &ConditionContext)
             count as f32
         }
         FN_GET_DISTANCE => {
-            // 距離算出
+            // 距離
             ctx.speaker_pos.distance(ctx.player_pos)
         }
+        FN_GET_SCRIPT_VARIABLE => {
+            // スクリプト変数取得 (param1: Refr FormID, param2: Var Index)
+            let refr_id = FormId(cond.param1);
+            let var_idx = cond.param2;
+            ctx.script_vars.get(&(refr_id, var_idx)).copied().unwrap_or(0.0)
+        }
         _ => {
-            // 未知または未実装の関数は真とみなす（Fallout 3 フォールバック）
+            // 未実装関数は一旦true扱い(Fallout 3 の進行停止を防ぐため)
             return true;
         }
     };

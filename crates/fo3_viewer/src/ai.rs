@@ -12,7 +12,12 @@ pub struct ActorAiState {
     pub script_packages: Vec<FormId>,
     /// 現在アクティブなパッケージ
     pub current_package: Option<FormId>,
+    /// 算出された移動経路
+    pub current_path: Option<fo3_navigation::NavPath>,
+    /// 移動経路の現在の目標インデックス
+    pub path_target_index: usize,
 }
+
 
 #[derive(Default)]
 pub struct AiManager {
@@ -45,16 +50,24 @@ impl AiManager {
                 base_packages,
                 script_packages: Vec::new(),
                 current_package: None,
+                current_path: None,
+                path_target_index: 0,
             },
         );
     }
 
     /// 毎フレーム呼ばれ、全アクターのAIパッケージの条件を評価する
-    pub fn update(&mut self, vm: &mut ScriptVm, master: &EsmMasterContext) {
+    pub fn update(
+        &mut self,
+        vm: &mut ScriptVm,
+        master: &EsmMasterContext,
+        nav_graph: &fo3_navigation::NavGraph,
+        actor_positions: &HashMap<FormId, glam::Vec3>,
+    ) {
         for state in self.actors.values_mut() {
             let mut active_pack = None;
 
-            // スクリプトパッケージを優先して評価
+            // 優先度順に条件評価
             for pkg_id in state
                 .script_packages
                 .iter()
@@ -66,6 +79,17 @@ impl AiManager {
                         break;
                     }
 
+                    // スクリプト変数の逆引き (VMの string key から FormID へ)
+                    let mut script_vars = std::collections::HashMap::new();
+                    for (k, v) in &vm.globals {
+                        if let Some((prefix, _sub)) = k.split_once('.') {
+                            if let Some(&fid) = vm.edid_map.get(&prefix.to_ascii_uppercase()) {
+                                // 変数インデックスが不明なため、とりあえず全て index 0 として扱う（CG00用フォールバック）
+                                script_vars.insert((fid, 0), *v);
+                            }
+                        }
+                    }
+
                     let cond_ctx = fo3_script::ConditionContext {
                         speaker: Some(state.form_id),
                         target: None,
@@ -75,6 +99,7 @@ impl AiManager {
                         quest_stage_history: std::collections::HashMap::new(),
                         inventory: vm.inventory.clone(),
                         is_female: vm.player_is_female,
+                        script_vars,
                     };
 
                     // 全条件が true か評価
@@ -91,6 +116,42 @@ impl AiManager {
 
                 if let Some(pack_id) = active_pack {
                     if let Some(pack) = master.pack_map.get(&pack_id) {
+                        // 目的地座標を取得してNavPathを算出
+                        if let Some(loc) = &pack.location {
+                            if let Some(target_fid) = loc.form_id {
+                                if let (Some(&start_pos), Some(&end_pos)) = (actor_positions.get(&state.form_id), actor_positions.get(&target_fid)) {
+                                    // 簡易的に最も近いNavMeshポリゴンを探索 (本来は空間分割・レイキャスト)
+                                    let mut best_start = None;
+                                    let mut best_start_dist = f32::MAX;
+                                    let mut best_end = None;
+                                    let mut best_end_dist = f32::MAX;
+
+                                    for (&mesh_id, nodes) in &nav_graph.nodes {
+                                        for node in nodes {
+                                            let s_dist = node.center.distance(start_pos);
+                                            if s_dist < best_start_dist {
+                                                best_start_dist = s_dist;
+                                                best_start = Some((mesh_id, node.triangle_idx));
+                                            }
+                                            let e_dist = node.center.distance(end_pos);
+                                            if e_dist < best_end_dist {
+                                                best_end_dist = e_dist;
+                                                best_end = Some((mesh_id, node.triangle_idx));
+                                            }
+                                        }
+                                    }
+
+                                    if let (Some((sm, st)), Some((em, et))) = (best_start, best_end) {
+                                        state.current_path = fo3_navigation::astar::find_path(nav_graph, sm, st, em, et);
+                                        state.path_target_index = 0;
+                                        if let Some(path) = &state.current_path {
+                                            println!("[AiManager] NPC 0x{:08X} の経路を算出しました (Waypoints: {})", state.form_id.0, path.points.len());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         if let Some(topic_id) = pack.topic_id {
                             // Topic FormID から EDID を逆引き
                             if let Some((dial, _)) = master

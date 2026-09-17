@@ -70,6 +70,7 @@ pub struct ViewerState {
     pub texture_cache: HashMap<String, GpuTexture>,
     pub vm: fo3_script::ScriptVm,
     pub ai: crate::ai::AiManager,
+    pub nav_graph: fo3_navigation::NavGraph,
     pub dispatcher: fo3_script::EventDispatcher,
     pub ui_renderer: fo3_render::UiRenderer,
     /// キーバインド・入力管理マネージャー (Fallout 3 実機標準 + F1-F12 デバッグ)
@@ -344,6 +345,7 @@ impl ViewerState {
             texture_cache,
             vm,
             ai: crate::ai::AiManager::new(),
+            nav_graph: fo3_navigation::NavGraph::new(),
             dispatcher,
             ui_renderer,
             input_manager: crate::input::InputManager::new(),
@@ -358,6 +360,11 @@ impl ViewerState {
             bink_player: None,
             bink_video_bind_group: None,
         };
+
+        // NavGraphの構築
+        for record in state.master_context.navm_map.values() {
+            state.nav_graph.add_navmesh(record);
+        }
 
         // セル EDID の解決: ターゲット種別に応じてスクリプト登録対象のセルを決定
         // 参照元: `knowledge/new_game_and_quest_engine_architecture.md:2.1` — CG00 初期セル
@@ -645,7 +652,11 @@ impl ViewerState {
         crate::action::process_playgroup_requests(self);
 
         // AI Package Evaluator を更新
-        self.ai.update(&mut self.vm, &self.master_context);
+        let mut actor_positions = std::collections::HashMap::new();
+        for actor in &self.scene.actors {
+            actor_positions.insert(FormId(actor.form_id), actor.world_transform.translation);
+        }
+        self.ai.update(&mut self.vm, &self.master_context, &self.nav_graph, &actor_positions);
 
         // 0.3 サウンドエンジンを更新 (音声 DIAL/INFO/SOUN 再生)
         self.vm.chargen_menu_active = self.chargen_menu.is_active();
@@ -765,8 +776,35 @@ impl ViewerState {
         self.anim
             .update(dt, &self.device, &self.queue, &mut self.scene);
 
-        // 全 NPC アクターのアニメーション・ボーン姿勢・メッシュ更新
+        // 全 NPC アクターのアニメーション・ボーン姿勢・メッシュ更新と NavPath に沿った移動
+        let walk_speed = 60.0; // 簡易的な歩行速度 (units/sec)
+
         for actor in &mut self.scene.actors {
+            if let Some(ai_state) = self.ai.actors.get_mut(&FormId(actor.form_id)) {
+                if let Some(path) = &ai_state.current_path {
+                    if ai_state.path_target_index < path.points.len() {
+                        let target_pos = path.points[ai_state.path_target_index];
+                        let current_pos = actor.world_transform.translation;
+                        let dir = target_pos - current_pos;
+                        let dist = dir.length();
+                        
+                        if dist < 10.0 {
+                            ai_state.path_target_index += 1;
+                        } else {
+                            let move_dist = (walk_speed * dt).min(dist);
+                            let move_dir = dir / dist;
+                            actor.world_transform.translation += move_dir * move_dist;
+                            // Yaw (Z軸回転) を進行方向に向ける
+                            let yaw = move_dir.y.atan2(move_dir.x);
+                            actor.world_transform.rotation = glam::Mat3::from_rotation_z(yaw);
+                        }
+                    } else {
+                        // 到達
+                        ai_state.current_path = None;
+                    }
+                }
+            }
+
             actor.update(dt, &self.device, &self.queue, &mut self.scene.meshes);
             // KF アニメーション完了時、OnAnimationEnd を 1 回だけ発行する
             // (パッケージの次のステージ進行トリガー)

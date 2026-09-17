@@ -12,6 +12,7 @@ fo3_vfs = { path = "../fo3_vfs" }
 fo3_esm = { path = "../fo3_esm" }
 fo3_physics = { path = "../fo3_physics" }
 fo3_script = { path = "../fo3_script" }
+fo3_navigation = { path = "../fo3_navigation" }
 glam = { workspace = true }
 wgpu = { workspace = true }
 winit = { workspace = true }

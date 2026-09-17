@@ -27,6 +27,7 @@ pub mod quest;
 pub mod scpt;
 pub mod soun;
 pub mod term;
+pub mod navm;
 
 pub use armo::ArmorRecord;
 pub use cell::{CellLighting, CellRecord};
@@ -59,3 +60,4 @@ pub use term::{TermMenuItem, TermRecord};
 pub use tes4::Tes4Header;
 pub use txst::TextureSetRecord;
 pub use wrld::WorldRecord;
+pub use navm::{NavMeshRecord, NavMeshTriangle, NavMeshDoor, NavMeshExternalConnection, NavMeshGrid};

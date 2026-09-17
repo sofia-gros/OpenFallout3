@@ -71,6 +71,7 @@ pub enum Token {
     RParen,
     Comma,
     Dot,
+    Newline,
     EOF,
 }
 
@@ -85,9 +86,9 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn skip_whitespace_and_comments(&mut self) {
+        fn skip_whitespace_and_comments(&mut self) {
         while let Some(&c) = self.input.peek() {
-            if c.is_whitespace() {
+            if c.is_whitespace() && c != '\n' && c != '\r' {
                 self.input.next();
             } else if c == ';' {
                 while let Some(&ch) = self.input.peek() {
@@ -105,7 +106,15 @@ impl<'a> Lexer<'a> {
     pub fn next_token(&mut self) -> Token {
         self.skip_whitespace_and_comments();
         if let Some(&c) = self.input.peek() {
-            if c.is_alphabetic() || c == '_' {
+            if c == '\n' || c == '\r' {
+                self.input.next();
+                if c == '\r' {
+                    if let Some(&'\n') = self.input.peek() {
+                        self.input.next();
+                    }
+                }
+                return Token::Newline;
+            }if c.is_alphabetic() || c == '_' {
                 return self.read_identifier_or_keyword();
             } else if c.is_ascii_digit() || c == '-' || c == '.' {
                 // Could be number or dot
@@ -147,12 +156,38 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn read_number(&mut self) -> Token {
+        fn read_number(&mut self) -> Token {
         let mut s = String::new();
         if let Some(&'-') = self.input.peek() {
             s.push('-');
             self.input.next();
         }
+        
+        // Handle hex: 0x or 0X
+        if let Some(&'0') = self.input.peek() {
+            s.push('0');
+            self.input.next();
+            if let Some(&'x') | Some(&'X') = self.input.peek() {
+                s.push('x');
+                self.input.next();
+                while let Some(&c) = self.input.peek() {
+                    if c.is_ascii_hexdigit() {
+                        s.push(c);
+                        self.input.next();
+                    } else {
+                        break;
+                    }
+                }
+                // We parse hex into f32 for now, or just return an Identifier since we don't have Hex Token
+                // But typically hex forms are FormIDs. In Expr we can parse f32 from hex.
+                if let Ok(num) = u32::from_str_radix(&s[2..], 16) {
+                    return Token::Number(num as f32);
+                } else {
+                    return Token::Identifier(s);
+                }
+            }
+        }
+        
         while let Some(&c) = self.input.peek() {
             if c.is_ascii_digit() || c == '.' {
                 s.push(c);
@@ -162,17 +197,14 @@ impl<'a> Lexer<'a> {
             }
         }
         if s == "-" || s == "." {
-            return Token::Operator(s); // Not a valid number on its own
+            return Token::Operator(s);
         }
         if let Ok(num) = s.parse::<f32>() {
             Token::Number(num)
         } else {
-            // fallback
             Token::Identifier(s)
         }
-    }
-
-    fn read_string(&mut self) -> Token {
+    }fn read_string(&mut self) -> Token {
         self.input.next(); // skip "
         let mut s = String::new();
         while let Some(&c) = self.input.peek() {
@@ -240,16 +272,21 @@ impl<'a> Parser<'a> {
         &self.current_token
     }
 
-    pub fn parse_statements(&mut self) -> Result<Vec<Statement>, String> {
+        pub fn parse_statements(&mut self) -> Result<Vec<Statement>, String> {
         let mut stmts = Vec::new();
         while self.current_token != Token::EOF {
+            if self.current_token == Token::Newline {
+                self.advance();
+                continue;
+            }
             let stmt = self.parse_statement()?;
             stmts.push(stmt);
         }
         Ok(stmts)
-    }
-
-    fn parse_statement(&mut self) -> Result<Statement, String> {
+    }    fn parse_statement(&mut self) -> Result<Statement, String> {
+        while self.current_token == Token::Newline {
+            self.advance();
+        }
         match &self.current_token {
             Token::Keyword(kw) => {
                 match kw.as_str() {
@@ -331,48 +368,65 @@ impl<'a> Parser<'a> {
         Ok(Statement::Set { target, expr })
     }
 
+        fn skip_newlines(&mut self) {
+        while self.current_token == Token::Newline {
+            self.advance();
+        }
+    }
+
     fn parse_if(&mut self) -> Result<Statement, String> {
         self.advance(); // consume "if"
         let condition = self.parse_expression(0)?;
 
         let mut then_block = Vec::new();
-        while !matches!(self.current_token, Token::Keyword(ref k) if k == "elseif" || k == "else" || k == "endif" || k == "end")
-            && self.current_token != Token::EOF
-        {
+        loop {
+            self.skip_newlines();
+            if matches!(self.current_token, Token::Keyword(ref k) if k == "elseif" || k == "else" || k == "endif" || k == "end") || self.current_token == Token::EOF {
+                break;
+            }
             then_block.push(self.parse_statement()?);
         }
 
         let mut else_ifs = Vec::new();
-        while let Token::Keyword(ref k) = self.current_token {
-            if k == "elseif" {
-                self.advance(); // consume elseif
-                let ei_cond = self.parse_expression(0)?;
-                let mut ei_block = Vec::new();
-                while !matches!(self.current_token, Token::Keyword(ref k2) if k2 == "elseif" || k2 == "else" || k2 == "endif" || k2 == "end")
-                    && self.current_token != Token::EOF
-                {
-                    ei_block.push(self.parse_statement()?);
+        loop {
+            self.skip_newlines();
+            if let Token::Keyword(ref k) = self.current_token {
+                if k == "elseif" {
+                    self.advance(); // consume elseif
+                    let ei_cond = self.parse_expression(0)?;
+                    let mut ei_block = Vec::new();
+                    loop {
+                        self.skip_newlines();
+                        if matches!(self.current_token, Token::Keyword(ref k2) if k2 == "elseif" || k2 == "else" || k2 == "endif" || k2 == "end") || self.current_token == Token::EOF {
+                            break;
+                        }
+                        ei_block.push(self.parse_statement()?);
+                    }
+                    else_ifs.push((ei_cond, ei_block));
+                    continue;
                 }
-                else_ifs.push((ei_cond, ei_block));
-            } else {
-                break;
             }
+            break;
         }
 
         let mut else_block = None;
+        self.skip_newlines();
         if let Token::Keyword(ref k) = self.current_token {
             if k == "else" {
                 self.advance(); // consume else
                 let mut e_block = Vec::new();
-                while !matches!(self.current_token, Token::Keyword(ref k2) if k2 == "endif" || k2 == "end")
-                    && self.current_token != Token::EOF
-                {
+                loop {
+                    self.skip_newlines();
+                    if matches!(self.current_token, Token::Keyword(ref k2) if k2 == "endif" || k2 == "end") || self.current_token == Token::EOF {
+                        break;
+                    }
                     e_block.push(self.parse_statement()?);
                 }
                 else_block = Some(e_block);
             }
         }
 
+        self.skip_newlines();
         if let Token::Keyword(ref k) = self.current_token {
             if k == "endif" || k == "end" {
                 self.advance(); // consume endif/end
@@ -390,24 +444,20 @@ impl<'a> Parser<'a> {
             else_block,
         })
     }
-
     fn parse_call(
         &mut self,
         subject: Option<String>,
         command: String,
     ) -> Result<Statement, String> {
-        // Read arguments until the end of the line/statement.
-        // Read arguments until the end of the line/statement.
-        // Wait, how do we know the statement ends?
-        // In GECK scripts, statements end with a newline. But we skipped whitespace/newlines!
-        // This is a flaw in the basic Lexer. We need to preserve newlines!
-        // But for now, we can just hack it or we must change the Lexer.
-        // Since we didn't preserve newlines, we can't easily parse calls.
-        // Let's return an error to remind ourselves to fix the lexer.
-        return Err("Lexer must preserve newlines for statement boundaries".into());
-    }
-
-    fn parse_expression(&mut self, precedence: u8) -> Result<Expr, String> {
+        let mut args = Vec::new();
+        while self.current_token != Token::Newline && self.current_token != Token::EOF {
+            args.push(self.parse_expression(0)?);
+        }
+        if self.current_token == Token::Newline {
+            self.advance();
+        }
+        Ok(Statement::Call { subject, command, args })
+    }fn parse_expression(&mut self, precedence: u8) -> Result<Expr, String> {
         let mut left = match self.current_token.clone() {
             Token::Number(n) => {
                 self.advance();
@@ -508,3 +558,19 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 }
+#[test]
+fn test_hex_parsing() {
+    let mut p = crate::parser::Parser::new("setstage 0x00014E89 10");
+    println!("{:#?}", p.parse_statements());
+}
+#[test]
+fn test_hex_parsing2() {
+    let mut p = crate::parser::Parser::new("setstage 0x00014E89 10\n");
+    println!("{:#?}", p.parse_statements());
+}
+
+
+
+
+
+

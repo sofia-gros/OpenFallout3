@@ -608,6 +608,65 @@ impl<R: Read + Seek> EsmReader<R> {
         Ok(scripts)
     }
 
+    /// 全ての NavMesh レコード (NAVM) を一括走査して FormID -> NavMeshRecord マップを構築する。
+    pub fn read_all_navmeshes_map(&mut self) -> io::Result<HashMap<FormId, crate::records::navm::NavMeshRecord>> {
+        let mut navms = HashMap::new();
+        let start_pos = 24 + self.header_record.data_size as u64;
+        self.reader.seek(SeekFrom::Start(start_pos))?;
+
+        while let Some(entry) = self.read_next_entry()? {
+            match entry {
+                EsmEntry::Group(group) => {
+                    // Cell の子グループ等に属する NAVM もあるかもしれないため再帰的に探索...
+                    // 実際には Gamebryo (Fallout3) の NAVM は CELL グループの子として存在することが多い。
+                    // 単純にレコードを平坦に走査するか、CELL/WRLD グループを掘り下げる必要がある。
+                    // パフォーマンス優先でトップレベル CELL グループと WRLD 内 CELL グループだけを走査します。
+                    // 汎用的には Group を全て再帰トラバースするのが安全です。
+                    let rtype = group.target_record_type();
+                    if rtype == Some(crate::types::REC_NAVM) {
+                        let group_end = self.reader.stream_position()?
+                            + (group.group_size as u64 - GroupHeader::SIZE as u64);
+                        while self.reader.stream_position()? < group_end {
+                            if let Some(inner) = self.read_next_entry()? {
+                                match inner {
+                                    EsmEntry::Record(header, subs) => {
+                                        if header.type_id == crate::types::REC_NAVM {
+                                            if let Ok(navm) = crate::records::navm::NavMeshRecord::from_record(&header, &subs) {
+                                                navms.insert(header.form_id, navm);
+                                            }
+                                        }
+                                    }
+                                    EsmEntry::Group(child_group) => {
+                                        let skip = child_group.group_size as u64 - GroupHeader::SIZE as u64;
+                                        self.skip(skip)?;
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                    } else if group.group_type == 6 || group.group_type == 8 || group.group_type == 9 || group.group_type == 0 {
+                        // Interior Cell / Exterior Cell Block/SubBlock / Top level
+                        // 中に入る
+                    } else {
+                        let remaining = group.group_size as u64 - GroupHeader::SIZE as u64;
+                        self.skip(remaining)?;
+                    }
+                }
+                EsmEntry::Record(rec, subs) => {
+                    if rec.type_id == crate::types::REC_NAVM {
+                        if let Ok(navm) = crate::records::navm::NavMeshRecord::from_record(&rec, &subs) {
+                            navms.insert(rec.form_id, navm);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(navms)
+    }
+
+
     /// 全てのクエストレコード (QUST) を一括走査して FormID -> QuestRecord マップを構築する。
     pub fn read_all_quests_map(&mut self) -> io::Result<HashMap<FormId, QuestRecord>> {
         let mut quests = HashMap::new();

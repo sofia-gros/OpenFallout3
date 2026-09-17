@@ -15,6 +15,10 @@ pub struct QuestManager {
     stage_history: HashMap<FormId, HashSet<u16>>,
     /// 各クエストの目標表示状態 ((QuestFormId, ObjectiveIndex) -> Displayed)
     objectives_displayed: HashMap<(FormId, u32), bool>,
+    /// 各クエストの目標完了状態 ((QuestFormId, ObjectiveIndex) -> Completed)
+    objectives_completed: HashMap<(FormId, u32), bool>,
+    /// 完了済みクエスト FormID 群
+    pub completed_quests: HashSet<FormId>,
     /// クエストに紐づくローカル変数 (QuestFormId -> VarName -> Value)
     pub quest_variables: HashMap<FormId, HashMap<String, f64>>,
     /// 実機 ESM からロードされたクエスト定義レコード群 (FormId -> QuestRecord)
@@ -23,6 +27,16 @@ pub struct QuestManager {
     pub edid_map: HashMap<String, FormId>,
     /// HUD / UI 表示用通知キュー
     pub notifications: Vec<String>,
+    /// 現在追跡中のアクティブクエスト (SetCurrentQuest / GetCurrentQuest)
+    pub current_quest: Option<FormId>,
+    /// 各クエストの目標失敗状態 ((QuestFormId, ObjectiveIndex) -> Failed)
+    pub objectives_failed: HashMap<(FormId, u32), bool>,
+    /// クエストスクリプトの更新インターバル秒数 (QuestFormId -> Seconds)
+    pub quest_delays: HashMap<FormId, f32>,
+    /// クエストアイテムフラグを持つ FormID 群
+    pub quest_items: HashSet<FormId>,
+    /// プレイヤーに解放された会話トピック ID/文字列一覧
+    pub topics: HashSet<String>,
 }
 
 impl QuestManager {
@@ -215,6 +229,57 @@ impl QuestManager {
             .unwrap_or(false)
     }
 
+    /// クエスト目標の完了状態を設定する。
+    /// 参照元: GECK `SetObjectiveCompleted <QuestID> <ObjectiveIndex> <Flag>`
+    pub fn set_objective_completed(&mut self, quest: FormId, objective: u32, completed: bool) {
+        self.objectives_completed
+            .insert((quest, objective), completed);
+        let obj_text = self.get_objective_text(quest, objective).unwrap_or("");
+        println!(
+            "[QuestManager] クエスト 0x{:08X} 目標 {} (\"{}\") 完了設定: {}",
+            quest.0, objective, obj_text, completed
+        );
+
+        if completed && !obj_text.is_empty() {
+            let notif = format!("[Objective Completed] {}", obj_text);
+            self.notifications.push(notif);
+        }
+    }
+
+    /// クエスト目標が完了しているかどうかを取得する。
+    /// 参照元: GECK `GetObjectiveCompleted <QuestID> <ObjectiveIndex>`
+    pub fn is_objective_completed(&self, quest: FormId, objective: u32) -> bool {
+        self.objectives_completed
+            .get(&(quest, objective))
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// クエストを完了状態にする。
+    /// 参照元: GECK `CompleteQuest <QuestID>`, `StopQuest <QuestID>`
+    pub fn complete_quest(&mut self, quest: FormId) {
+        self.completed_quests.insert(quest);
+        let quest_name = self
+            .quests
+            .get(&quest)
+            .map(|r| {
+                if !r.name.is_empty() {
+                    r.name.as_str()
+                } else {
+                    r.editor_id.as_str()
+                }
+            })
+            .unwrap_or("Unknown Quest");
+        println!("[QuestManager] クエスト \"{}\" (0x{:08X}) 完了", quest_name, quest.0);
+        let notif = format!("[Quest Completed] {}", quest_name);
+        self.notifications.push(notif);
+    }
+
+    /// クエストが完了しているかどうかを判定する。
+    pub fn is_quest_completed(&self, quest: FormId) -> bool {
+        self.completed_quests.contains(&quest)
+    }
+
     /// クエスト変数を設定する。
     /// クエスト変数を取得する。
     pub fn get_quest_variable(&self, quest: FormId, name: &str) -> Option<f64> {
@@ -229,6 +294,118 @@ impl QuestManager {
             .entry(quest)
             .or_default()
             .insert(name.to_ascii_lowercase(), value);
+    }
+
+    /// クエストの進行状態、目標、履歴、変数を初期化（リセット）する。
+    /// 参照元: GECK: ResetQuest <QuestID>
+    pub fn reset_quest(&mut self, quest: FormId) {
+        self.current_stages.remove(&quest);
+        self.stage_history.remove(&quest);
+        self.objectives_displayed.retain(|(q, _), _| *q != quest);
+        self.objectives_completed.retain(|(q, _), _| *q != quest);
+        self.objectives_failed.retain(|(q, _), _| *q != quest);
+        self.completed_quests.remove(&quest);
+        self.quest_variables.remove(&quest);
+        if self.current_quest == Some(quest) {
+            self.current_quest = None;
+        }
+    }
+
+    /// 目標の失敗状態を設定する。
+    /// 参照元: GECK: SetObjectiveFailed <QuestID> <ObjectiveIndex> <Failed>
+    pub fn set_objective_failed(&mut self, quest: FormId, objective: u32, failed: bool) {
+        if failed {
+            self.objectives_failed.insert((quest, objective), true);
+            // 失敗時は完了フラグを落とす
+            self.objectives_completed.remove(&(quest, objective));
+        } else {
+            self.objectives_failed.remove(&(quest, objective));
+        }
+    }
+
+    /// 目標が失敗しているかどうか判定する。
+    /// 参照元: GECK: GetObjectiveFailed <QuestID> <ObjectiveIndex>
+    pub fn is_objective_failed(&self, quest: FormId, objective: u32) -> bool {
+        self.objectives_failed.get(&(quest, objective)).copied().unwrap_or(false)
+    }
+
+    /// クエストに定義されているすべての目標を完了済みにする。
+    /// 参照元: GECK: CompleteAllObjectives <QuestID>
+    pub fn complete_all_objectives(&mut self, quest: FormId) {
+        if let Some(record) = self.quests.get(&quest) {
+            for obj in &record.objectives {
+                self.objectives_completed.insert((quest, obj.index as u32), true);
+                self.objectives_failed.remove(&(quest, obj.index as u32));
+            }
+        }
+    }
+
+    /// クエストに定義されているすべての目標を失敗状態にする。
+    /// 参照元: GECK: FailAllObjectives <QuestID>
+    pub fn fail_all_objectives(&mut self, quest: FormId) {
+        if let Some(record) = self.quests.get(&quest) {
+            for obj in &record.objectives {
+                self.objectives_failed.insert((quest, obj.index as u32), true);
+                self.objectives_completed.remove(&(quest, obj.index as u32));
+            }
+        }
+    }
+
+    /// 現在追跡中のアクティブクエストを設定する。
+    /// 参照元: GECK: SetCurrentQuest <QuestID>
+    pub fn set_current_quest(&mut self, quest: FormId) {
+        self.current_quest = Some(quest);
+    }
+
+    /// 現在追跡中のアクティブクエストを取得する。
+    /// 参照元: GECK: GetCurrentQuest
+    pub fn get_current_quest(&self) -> Option<FormId> {
+        self.current_quest
+    }
+
+    /// クエストスクリプトの更新遅延時間（秒）を設定する。
+    /// 参照元: GECK: SetQuestDelay <QuestID> <DelayFloat>
+    pub fn set_quest_delay(&mut self, quest: FormId, delay: f32) {
+        self.quest_delays.insert(quest, delay);
+    }
+
+    /// クエストスクリプトの更新遅延時間（秒）を取得する（デフォルト 5.0 秒）。
+    /// 参照元: GECK: GetQuestDelay <QuestID>
+    pub fn get_quest_delay(&self, quest: FormId) -> f32 {
+        self.quest_delays.get(&quest).copied().unwrap_or(5.0)
+    }
+
+    /// クエストアイテム属性を設定する。
+    /// 参照元: GECK: SetQuestObject <FormID> <1/0>
+    pub fn set_quest_item(&mut self, item: FormId, is_quest: bool) {
+        if is_quest {
+            self.quest_items.insert(item);
+        } else {
+            self.quest_items.remove(&item);
+        }
+    }
+
+    /// クエストアイテムかどうかを判定する。
+    /// 参照元: GECK: IsQuestObject <FormID>
+    pub fn is_quest_item(&self, item: FormId) -> bool {
+        self.quest_items.contains(&item)
+    }
+
+    /// 会話トピックを追加する。
+    /// 参照元: GECK: AddTopic <TopicID>
+    pub fn add_topic(&mut self, topic: &str) {
+        self.topics.insert(topic.to_ascii_lowercase());
+    }
+
+    /// 会話トピックを削除する。
+    /// 参照元: GECK: RemoveTopic <TopicID>
+    pub fn remove_topic(&mut self, topic: &str) {
+        self.topics.remove(&topic.to_ascii_lowercase());
+    }
+
+    /// 会話トピックを所持しているか判定する。
+    pub fn has_topic(&self, topic: &str) -> bool {
+        self.topics.contains(&topic.to_ascii_lowercase())
     }
 }
 

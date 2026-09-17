@@ -68,7 +68,10 @@ pub struct EsmMasterContext {
     pub topic_map: HashMap<String, (DialRecord, Vec<InfoRecord>)>,
     /// FormID から INFO レコードへのマップ
     pub info_map: HashMap<FormId, InfoRecord>,
+    /// FormID から NavMesh レコードへのマップ (NAVM)
+    pub navm_map: HashMap<FormId, crate::records::navm::NavMeshRecord>,
 }
+
 
 impl EsmMasterContext {
     /// 新しい空のマスターコンテキストを生成する。
@@ -91,6 +94,7 @@ impl EsmMasterContext {
         let mesg_map = reader.read_all_messages_map().unwrap_or_default();
         let soun_map = reader.read_all_sounds_map().unwrap_or_default();
         let (topic_map, info_map) = reader.read_all_dialogues_map().unwrap_or_default();
+        let navm_map = reader.read_all_navmeshes_map().unwrap_or_default();
 
         let mut quest_edid_map = HashMap::new();
         for (form_id, q) in &quest_map {
@@ -132,6 +136,7 @@ impl EsmMasterContext {
             soun_edid_map,
             topic_map,
             info_map,
+            navm_map,
         })
     }
 

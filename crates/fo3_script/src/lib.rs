@@ -1,3 +1,4 @@
+
 //! # fo3_script
 //!
 //! Fallout 3 (Gamebryo 2.6) スクリプト VM & 条件式評価エンジン。
@@ -15,6 +16,13 @@ pub mod vm;
 
 pub use conditions::{evaluate_conditions, evaluate_single_condition, ConditionContext};
 pub use event::{EventDispatcher, GameEvent, ScriptInstanceContext};
-pub use opcodes::{functions, opcodes as opcode_constants};
+pub use opcodes::opcodes as opcode_constants;
 pub use quest::QuestManager;
 pub use vm::{ScriptError, ScriptVm};
+
+pub mod functions;
+pub mod ast_vm;
+
+
+
+

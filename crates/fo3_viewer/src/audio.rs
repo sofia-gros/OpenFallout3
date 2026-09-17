@@ -245,13 +245,14 @@ impl SoundEngine {
             // 条件式 (CTDA) 評価コンテキストの構築
             let cond_ctx = ConditionContext {
                 speaker: speaker_id,
-                target: None,
+                target: Some(FormId(0x00000014)), // Player
                 speaker_pos: glam::Vec3::ZERO,
                 player_pos: glam::Vec3::ZERO,
                 quest_stages: vm.quest_stages.clone(),
-                quest_stage_history: HashMap::new(),
+                quest_stage_history: vm.quest_manager.get_stage_history_u32(),
                 inventory: vm.inventory.clone(),
                 is_female: vm.player_is_female,
+                script_vars: Default::default(),
             };
 
             // 適合する INFO レコードを検索 (未読のものを優先し、Say Once は完全除外)
@@ -346,18 +347,9 @@ impl SoundEngine {
                 );
             } else {
                 println!(
-                    "[SoundEngine] トピック \"{}\" に適合する INFO 条件が見つかりませんでした",
+                    "[SoundEngine] 該当 Topic \"{}\" に有効な INFO が見つかりませんでした",
                     dial.edid
                 );
-                // これ以上話す台詞がないため、該当アクターの doTalk フラグをクリア
-                let edid_lower = dial.edid.to_ascii_lowercase();
-                if edid_lower.contains("dad") {
-                    vm.globals.insert("cg00dadref.dotalk".to_string(), 0.0);
-                } else if edid_lower.contains("mom") {
-                    vm.globals.insert("cg00momref.dotalk".to_string(), 0.0);
-                } else if edid_lower.contains("doctorli") || edid_lower.contains("drli") {
-                    vm.globals.insert("cg00doctorliref.dotalk".to_string(), 0.0);
-                }
             }
         }
     }

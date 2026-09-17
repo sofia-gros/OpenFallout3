@@ -188,6 +188,9 @@ impl ScriptVm {
     /// 文字列 (0x16進数, 10進数, または EditorID) から FormID を解決。
     pub fn resolve_form_id(&self, s: &str) -> Result<FormId, ScriptError> {
         let clean = s.trim();
+        if clean.eq_ignore_ascii_case("player") || clean.eq_ignore_ascii_case("playerref") {
+            return Ok(FormId(0x14));
+        }
         if let Some(hex) = clean
             .strip_prefix("0x")
             .or_else(|| clean.strip_prefix("0X"))
@@ -854,107 +857,31 @@ impl ScriptVm {
 
     /// 複数行のスクリプトブロック (If / ElseIf / Else / EndIf / Return / Activate 対応) を実行する。
     /// 戻り値: スクリプト内で明示的に `Activate` 命令が実行されたかどうか
-    pub fn execute_block(
+        pub fn execute_block(
         &mut self,
         lines: &[String],
         self_id: Option<FormId>,
     ) -> Result<bool, ScriptError> {
+        let joined = lines.join("\n");
+        let mut parser = crate::parser::Parser::new(&joined);
+        let stmts = match parser.parse_statements() {
+            Ok(s) => s,
+            Err(e) => return Err(ScriptError::ParseError(e)),
+        };
+
         let mut activated = false;
-        // if スタック: (現在の分岐が実行中か, すでにこの if 系列のいずれかの分岐が実行されたか)
-        let mut if_stack: Vec<(bool, bool)> = Vec::new();
-
-        for line in lines {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with(';') {
-                continue;
+        for stmt in stmts {
+            let res = self.execute_ast_statement(&stmt, self_id)?;
+            if res.activated {
+                activated = true;
             }
-
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            if parts.is_empty() {
-                continue;
-            }
-
-            let first = parts[0].to_ascii_lowercase();
-
-            // 制御フロー構文の処理
-            if first == "if" {
-                let cond_str = if parts.len() > 1 {
-                    trimmed[parts[0].len()..].trim()
-                } else {
-                    ""
-                };
-
-                let parent_active = if_stack.last().map(|&(active, _)| active).unwrap_or(true);
-                if parent_active {
-                    let cond = self.eval_condition_str(cond_str, self_id);
-                    if_stack.push((cond, cond));
-                } else {
-                    if_stack.push((false, true)); // 親が無効なら自身も無効
-                }
-                continue;
-            } else if first == "elseif" {
-                let cond_str = if parts.len() > 1 {
-                    trimmed[parts[0].len()..].trim()
-                } else {
-                    ""
-                };
-
-                let len = if_stack.len();
-                let parent_active = if len > 1 { if_stack[len - 2].0 } else { true };
-                if let Some((ref mut active, ref mut matched)) = if_stack.last_mut() {
-                    if parent_active && !*matched {
-                        let cond = self.eval_condition_str(cond_str, self_id);
-                        *active = cond;
-                        if cond {
-                            *matched = true;
-                        }
-                    } else {
-                        *active = false;
-                    }
-                }
-                continue;
-            } else if first == "else" {
-                let len = if_stack.len();
-                let parent_active = if len > 1 { if_stack[len - 2].0 } else { true };
-                if let Some((ref mut active, ref mut matched)) = if_stack.last_mut() {
-                    if parent_active && !*matched {
-                        *active = true;
-                        *matched = true;
-                    } else {
-                        *active = false;
-                    }
-                }
-                continue;
-            } else if first == "endif" {
-                if_stack.pop();
-                continue;
-            }
-
-            // 現在のブロックが有効（実行対象）か判定
-            let is_active = if_stack.last().map(|&(active, _)| active).unwrap_or(true);
-            if !is_active {
-                continue;
-            }
-
-            // Return 命令: ブロックの残りの実行を直ちに中断
-            if first == "return" {
+            if res.returned {
                 break;
             }
-
-            // Activate 命令の検出
-            if first == "activate" {
-                activated = true;
-                continue;
-            }
-
-            // 通常ステートメント実行
-            self.execute_statement(trimmed, self_id)?;
         }
-
         Ok(activated)
     }
-
-    /// 会話やターミナルの Result Script (テキスト) を実行。
+    
     pub fn execute_result_script(
         &mut self,
         script: &str,
@@ -1126,3 +1053,4 @@ mod tests {
             .any(|n| n.contains("Speak to Colin Moriarty")));
     }
 }
+
