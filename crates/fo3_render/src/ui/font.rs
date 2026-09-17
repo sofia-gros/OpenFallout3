@@ -365,26 +365,87 @@ fn get_alpha_pattern(ch: u8) -> [u8; 7] {
     }
 }
 
-/// 2D 描画命令を集約して頂点バッファを生成するビルダー。
-#[derive(Default)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum UiTexture {
+    SolidColor,
+    Font,
+    Image(String),
+}
+
+impl Default for UiTexture {
+    fn default() -> Self {
+        UiTexture::SolidColor
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct DrawCommand {
+    pub texture: UiTexture,
+    pub index_start: u32,
+    pub index_count: u32,
+}
+
+/// 2D 描画のための頂点とインデックスのバッチ
 pub struct TextBatch {
     pub vertices: Vec<UiVertex>,
     pub indices: Vec<u32>,
+    pub commands: Vec<DrawCommand>,
+    pub current_texture: UiTexture,
+}
+
+impl Default for TextBatch {
+    fn default() -> Self {
+        Self {
+            vertices: Vec::new(),
+            indices: Vec::new(),
+            commands: Vec::new(),
+            current_texture: UiTexture::SolidColor,
+        }
+    }
 }
 
 impl TextBatch {
-    /// バッチをクリア。
+    /// バッチをクリア
     pub fn clear(&mut self) {
         self.vertices.clear();
         self.indices.clear();
+        self.commands.clear();
+        self.current_texture = UiTexture::SolidColor;
     }
 
-    /// ベタ塗り矩形 (背景バー、カーソル、ボーダー) を追加。
+    /// テクスチャの切り替え (DrawCommandの区切り)
+    pub fn set_texture(&mut self, texture: UiTexture) {
+        if self.current_texture != texture {
+            self.current_texture = texture;
+        }
+    }
+
+    fn push_indices(&mut self, new_indices: &[u32]) {
+        let start = self.indices.len() as u32;
+        self.indices.extend_from_slice(new_indices);
+        let count = new_indices.len() as u32;
+
+        if let Some(last_cmd) = self.commands.last_mut() {
+            if last_cmd.texture == self.current_texture {
+                last_cmd.index_count += count;
+                return;
+            }
+        }
+
+        self.commands.push(DrawCommand {
+            texture: self.current_texture.clone(),
+            index_start: start,
+            index_count: count,
+        });
+    }
+
+    /// 単色矩形 (SolidColor) を追加
     pub fn add_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) {
-        self.add_textured_rect(x, y, w, h, [0.0, 0.0, 0.0, 0.0], color);
+        self.set_texture(UiTexture::SolidColor);
+        self.add_textured_rect_internal(x, y, w, h, [0.0, 0.0, 0.0, 0.0], color);
     }
 
-    /// テクスチャ UV 座標を指定した矩形を追加。
+    /// テクスチャ付き矩形 (現在のテクスチャ) を追加
     pub fn add_textured_rect(
         &mut self,
         x: f32,
@@ -392,6 +453,18 @@ impl TextBatch {
         w: f32,
         h: f32,
         uv: [f32; 4], // [u0, v0, u1, v1]
+        color: [f32; 4],
+    ) {
+        self.add_textured_rect_internal(x, y, w, h, uv, color);
+    }
+
+    fn add_textured_rect_internal(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        uv: [f32; 4],
         color: [f32; 4],
     ) {
         let base_idx = self.vertices.len() as u32;
@@ -418,7 +491,7 @@ impl TextBatch {
             color,
         });
 
-        self.indices.extend_from_slice(&[
+        self.push_indices(&[
             base_idx,
             base_idx + 1,
             base_idx + 2,
@@ -428,7 +501,7 @@ impl TextBatch {
         ]);
     }
 
-    /// 文字列を指定座標に描画。スマートクォート等の記号を正規化して文字化けを防止する。
+    /// フォントテキスト (Font) を追加
     pub fn add_text(
         &mut self,
         font: &BitmapFont,
@@ -438,6 +511,7 @@ impl TextBatch {
         scale: f32,
         color: [f32; 4],
     ) {
+        self.set_texture(UiTexture::Font);
         for c in text.chars() {
             let b = normalize_ui_char(c);
             let metric = &font.glyphs[b as usize];
@@ -468,7 +542,7 @@ impl TextBatch {
                 color,
             });
 
-            self.indices.extend_from_slice(&[
+            self.push_indices(&[
                 base_idx,
                 base_idx + 1,
                 base_idx + 2,

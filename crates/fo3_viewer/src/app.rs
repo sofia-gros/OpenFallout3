@@ -964,7 +964,7 @@ impl ViewerState {
         if !ui_batch.indices.is_empty() && !self.active_rtt_bindings.is_empty() {
             self.ui_renderer
                 .update_resolution(&self.queue, 1024.0, 1024.0);
-            self.ui_renderer.upload_batch(&self.device, &ui_batch);
+            self.ui_renderer.upload_batch(&self.device, &self.queue, &ui_batch, &mut self.vfs);
 
             let mut rtt_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("RTT Render Pass"),
@@ -1083,7 +1083,7 @@ impl ViewerState {
                 self.size.width as f32,
                 self.size.height as f32,
             );
-            self.ui_renderer.upload_batch(&self.device, &ui_batch);
+            self.ui_renderer.upload_batch(&self.device, &self.queue, &ui_batch, &mut self.vfs);
 
             let mut ui_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("2D UI Render Pass"),

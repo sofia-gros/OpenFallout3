@@ -390,11 +390,10 @@ impl MenuRuntime {
 
             match node.node_type {
                 NodeType::Image => {
-                    // 背景テクスチャまたはアトラスパーツの描画
                     let color = [
-                        ui_colors::PIPBOY_GREEN[0],
-                        ui_colors::PIPBOY_GREEN[1],
-                        ui_colors::PIPBOY_GREEN[2],
+                        crate::ui_colors::PIPBOY_GREEN[0],
+                        crate::ui_colors::PIPBOY_GREEN[1],
+                        crate::ui_colors::PIPBOY_GREEN[2],
                         layout.alpha,
                     ];
                     let filename = node.traits.get("filename").and_then(|v| match v {
@@ -405,7 +404,8 @@ impl MenuRuntime {
                     let mut rendered_from_atlas = false;
                     if let Some(atlas) = &self.atlas {
                         if let Some(file) = filename {
-                            if let Some((_atlas_tex, sub_tex)) = atlas.lookup(file) {
+                            if let Some((atlas_tex, sub_tex)) = atlas.lookup(file) {
+                                batch.set_texture(crate::ui::font::UiTexture::Image(atlas_tex.to_string()));
                                 batch.add_textured_rect(
                                     layout.x,
                                     layout.y,
@@ -420,8 +420,24 @@ impl MenuRuntime {
                     }
 
                     if !rendered_from_atlas {
+                        if let Some(file) = filename {
+                            if !file.is_empty() && !file.contains("solid") {
+                                batch.set_texture(crate::ui::font::UiTexture::Image(file.to_string()));
+                                batch.add_textured_rect(
+                                    layout.x,
+                                    layout.y,
+                                    layout.width.max(1.0),
+                                    layout.height.max(1.0),
+                                    [0.0, 0.0, 1.0, 1.0],
+                                    color,
+                                );
+                                rendered_from_atlas = true;
+                            }
+                        }
+                    }
+
+                    if !rendered_from_atlas {
                         if node.name.eq_ignore_ascii_case("DM_TextBackground") {
-                            // solid_black 背景矩形
                             batch.add_rect(
                                 layout.x,
                                 layout.y,
@@ -430,7 +446,6 @@ impl MenuRuntime {
                                 [0.0, 0.0, 0.0, 0.85],
                             );
                         } else {
-                            // 単色バー
                             batch.add_rect(
                                 layout.x,
                                 layout.y,
