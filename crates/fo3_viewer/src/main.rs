@@ -19,6 +19,7 @@ mod interactive_anim;
 mod inventory;
 mod loader;
 mod player;
+mod streamer;
 mod types;
 mod ui;
 mod window_input;

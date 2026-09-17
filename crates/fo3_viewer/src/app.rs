@@ -49,6 +49,7 @@ pub struct ViewerState {
     pub clear_color: wgpu::Color,
     pub depth_view: wgpu::TextureView,
     pub scene: RenderScene,
+    pub streamer: Option<crate::streamer::WorldStreamer>,
     pub show_collision: bool,
     pub enable_fog: bool,
     pub headlight: bool,
@@ -324,6 +325,7 @@ impl ViewerState {
             clear_color: loaded.clear_color,
             depth_view,
             scene: loaded.scene,
+            streamer: None,
             show_collision: false,
             enable_fog,
             headlight: false,
@@ -360,6 +362,10 @@ impl ViewerState {
             bink_player: None,
             bink_video_bind_group: None,
         };
+
+        if let ViewerTarget::World(world_edid, _) = target {
+            state.streamer = Some(crate::streamer::WorldStreamer::new(world_edid.clone(), 1)); // 1 radius (3x3 grid)
+        }
 
         // NavGraphの構築
         for record in state.master_context.navm_map.values() {
