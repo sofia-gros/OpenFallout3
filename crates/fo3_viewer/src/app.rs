@@ -436,7 +436,21 @@ impl ViewerState {
         for (edid, form_id) in &self.master_context.quest_edid_map {
             self.vm.edid_map.insert(edid.clone(), *form_id);
         }
-
+        
+        // パッケージ (PACK)、メッセージ (MESG)、アイドル (IDLE) などの EDID も VM で解決できるようにする
+        for (form_id, pack) in &self.master_context.pack_map {
+            if let Some(edid) = &pack.editor_id {
+                self.vm.edid_map.insert(edid.to_ascii_uppercase(), *form_id);
+            }
+        }
+        for (form_id, mesg) in &self.master_context.mesg_map {
+            self.vm.edid_map.insert(mesg.editor_id.to_ascii_uppercase(), *form_id);
+        }
+        for (form_id, idle) in &self.master_context.idle_map {
+            if let Some(edid) = &idle.editor_id {
+                self.vm.edid_map.insert(edid.to_ascii_uppercase(), *form_id);
+            }
+        }
         // 0.1 セル内の配置参照 (REFR / ACHR) の EditorID およびスクリプトを登録
         // 参照元: `references/openmw/components/esm4/loadrefr.cpp` — REFR スクリプトアタッチ
         let esm_path = Path::new(&self.data_dir).join("Fallout3.esm");
