@@ -115,10 +115,6 @@ pub struct ScriptVm {
     pub player_is_female: bool,
     /// フレームデルタタイム秒 (GetSecondsPassed 評価用)
     pub delta_time: f32,
-    /// ステージ Result Script の遅延実行キュー: (QuestFormID, Stage, ScriptSource)
-    /// 実機の setstage は同フレームで連鎖せず、次フレームの GameMode ループで処理される。
-    /// 参照元: Fallout 3 実機ゲームループ — SetStage の遅延実行仕様
-    pub pending_stage_scripts: std::collections::VecDeque<(FormId, u16, String)>,
 }
 
 impl Default for ScriptVm {
@@ -155,7 +151,6 @@ impl Default for ScriptVm {
             evaluate_package_requests: Vec::new(),
             player_is_female: false,
             delta_time: 0.016,
-            pending_stage_scripts: std::collections::VecDeque::new(),
         }
     }
 }
@@ -212,17 +207,14 @@ impl ScriptVm {
         }
     }
 
-    /// クエストのステージを設定し、ステージに紐づく Result Script (SCTX) を遅延実行キューへ積む。
-    /// 実機 Fallout 3 では setstage は次フレームの GameMode ループ開始時に実行される。
-    /// 同フレーム内での setstage 連鎖 (ステージ 5→6→8→9→10 の一気連鎖) を防ぐため、
-    /// Result Script は pending_stage_scripts キューへ積み、app.rs で 1件/フレームで消化する。
-    /// 参照元: Fallout 3 実機ゲームループ仕様 — SetStage 遅延実行
+    /// クエストのステージを設定し、ステージに紐づく Result Script (SCTX) を実行する。
     pub fn set_stage(&mut self, quest_id: FormId, stage: u32) {
         self.quest_stages.insert(quest_id, stage);
         if let Some(script) = self.quest_manager.set_stage(quest_id, stage as u16, None) {
-            // Result Script を即時実行せず遅延キューへ積む
-            self.pending_stage_scripts
-                .push_back((quest_id, stage as u16, script));
+            let lines: Vec<String> = script.lines().map(|s| s.to_string()).collect();
+            if let Err(e) = self.execute_block(&lines, Some(quest_id)) {
+                eprintln!("[Script] SetStage {} ResultScript 実行エラー: {:?}", stage, e);
+            }
         }
     }
 

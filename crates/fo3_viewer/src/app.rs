@@ -656,20 +656,6 @@ impl ViewerState {
             return;
         }
 
-        // -1. ステージ Result Script の遅延実行キューを 1件/フレームで消化
-        // 実機 Fallout 3 では setstage は次フレームの GameMode ループ開始時に処理される。
-        // 参照元: Fallout 3 実機ゲームループ仕様 — SetStage 遅延実行
-        if let Some((quest_id, stage, script)) = self.vm.pending_stage_scripts.pop_front() {
-            println!(
-                "[SetStage 遅延実行] クエスト 0x{:08X} ステージ {} ResultScript 処理開始",
-                quest_id.0, stage
-            );
-            let lines: Vec<String> = script.lines().map(|s| s.to_string()).collect();
-            if let Err(e) = self.vm.execute_block(&lines, Some(quest_id)) {
-                eprintln!("警告: ステージ {} スクリプト実行エラー: {:?}", stage, e);
-            }
-        }
-
         // 0.1 スクリプトからのテレポート移動要求 (MoveTo) の消化
         crate::action::process_teleport_requests(self);
 
