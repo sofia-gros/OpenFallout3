@@ -632,6 +632,7 @@ pub fn load_scene(
             )> = Vec::new();
 
             let cell_inputs: Vec<(
+                u32,
                 Vec<(&fo3_nif::NifFile, fo3_gamebryo_core::NiTransform)>,
                 Option<(&fo3_esm::records::LandRecord, i32, i32)>,
             )> = cells
@@ -669,14 +670,14 @@ pub fn load_scene(
                     let land_info = land
                         .as_ref()
                         .and_then(|l| cell.grid.map(|(gx, gy)| (l, gx, gy)));
-                    (placed_refs, land_info)
+                    (cell.form_id.0, placed_refs, land_info)
                 })
                 .collect();
 
-            let cell_refs: Vec<(&[(&NifFile, NiTransform)], Option<(&LandRecord, i32, i32)>)> =
+            let cell_refs: Vec<(u32, &[(&NifFile, NiTransform)], Option<(&LandRecord, i32, i32)>)> =
                 cell_inputs
                     .iter()
-                    .map(|(refs, land_info)| (refs.as_slice(), *land_info))
+                    .map(|(cell_id, refs, land_info)| (*cell_id, refs.as_slice(), *land_info))
                     .collect();
 
             let landscape_texture_map = esm_reader.read_landscape_texture_map().ok();
@@ -1002,7 +1003,7 @@ pub fn load_scene(
             let mut total_colliders = 0;
 
             // 1. 地形 (LAND) コライダーの登録
-            for (_, land_info) in &cell_inputs {
+            for (_, _, land_info) in &cell_inputs {
                 if let Some((land, gx, gy)) = land_info {
                     let heights = land.compute_heights();
                     if physics_world

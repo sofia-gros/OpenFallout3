@@ -55,6 +55,8 @@ pub struct GpuCollisionMesh {
     pub vertex_buffer: wgpu::Buffer,
     pub num_vertices: u32,
     pub model_bind_group: wgpu::BindGroup,
+    /// このコリジョンが所属するセルの FormID (Worldstreaming 用)
+    pub cell_id: Option<u32>,
 }
 
 /// 単一の NIF ファイルからコリジョンライン頂点群を抽出・構築する。
@@ -273,6 +275,7 @@ impl GpuCollisionMesh {
             vertex_buffer,
             num_vertices: vertices.len() as u32,
             model_bind_group,
+            cell_id: None,
         })
     }
 }

@@ -46,7 +46,7 @@ impl RenderScene {
             device,
             queue,
             context,
-            &[(placed_nifs, land_info)],
+            &[(0, placed_nifs, land_info)],
             landscape_texture_map,
             vfs,
             &mut texture_cache,
@@ -63,6 +63,7 @@ impl RenderScene {
         queue: &wgpu::Queue,
         context: &RenderContext,
         cells_data: &[(
+            u32, // cell form_id
             &[(&NifFile, NiTransform)],
             Option<(&fo3_esm::LandRecord, i32, i32)>,
         )],
@@ -82,9 +83,10 @@ impl RenderScene {
         let mut max = Vec3::splat(f32::MIN);
         let mut found = false;
 
-        for (placed_nifs, land_info) in cells_data {
+        for &(cell_id, placed_nifs, ref land_info) in cells_data {
+            let land_info_val = land_info.clone();
             // 1. 地形 (LAND) メッシュの生成と登録 (4クアドラント下地 + 追加レイヤーブレンド)
-            if let Some((land, grid_x, grid_y)) = *land_info {
+            if let Some((land, grid_x, grid_y)) = land_info_val {
                 let origin_x = grid_x as f32 * fo3_esm::LAND_REAL_SIZE;
                 let origin_y = grid_y as f32 * fo3_esm::LAND_REAL_SIZE;
 
@@ -191,6 +193,7 @@ impl RenderScene {
                             world_bound,
                             bone_palette: None,
                             is_visible: true,
+                            cell_id: Some(cell_id),
                         });
                     }
                 }
@@ -300,6 +303,7 @@ impl RenderScene {
                             world_bound,
                             bone_palette: None,
                             is_visible: true,
+                            cell_id: Some(cell_id),
                         });
                     }
                 }
@@ -318,7 +322,7 @@ impl RenderScene {
             }
 
             // 2. 配置された 3D オブジェクト (REFR) の走査と登録
-            for (nif, world_transform) in *placed_nifs {
+            for &(nif, ref world_transform) in placed_nifs.iter() {
                 let start_idx = meshes.len();
                 if !nif.blocks.is_empty() {
                     bone_world_map.clear();
@@ -344,14 +348,20 @@ impl RenderScene {
                         None,
                     );
 
+                    let end_idx = meshes.len();
+                    for m in &mut meshes[start_idx..end_idx] {
+                        m.cell_id = Some(cell_id);
+                    }
+
                     // コリジョンワイヤーフレームの抽出
                     let col_lines = extract_collision_lines(nif);
-                    if let Some(gpu_col) = GpuCollisionMesh::new(
+                    if let Some(mut gpu_col) = GpuCollisionMesh::new(
                         device,
                         &context.model_bind_group_layout,
                         &col_lines,
                         world_transform,
                     ) {
+                        gpu_col.cell_id = Some(cell_id);
                         collision_meshes.push(gpu_col);
                     }
 

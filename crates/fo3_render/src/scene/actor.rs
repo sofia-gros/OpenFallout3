@@ -74,6 +74,8 @@ pub struct AnimatedRigidMesh {
 pub struct RenderActorInstance {
     /// アクターの FormID または一意の識別番号
     pub form_id: u32,
+    /// このアクターが所属するセルの FormID (Worldstreaming 用)
+    pub cell_id: Option<u32>,
     /// アクター名 (エディタ ID または表示名)
     pub name: String,
     /// ワールド空間変換（セル内の配置位置・回転・スケール）
@@ -636,6 +638,7 @@ impl RenderScene {
 
         let actor = RenderActorInstance {
             form_id,
+            cell_id: None,
             name: name.to_string(),
             world_transform: world_transform.clone(),
             skeleton_nif: nif,
@@ -829,6 +832,7 @@ impl RenderScene {
         let actor_idx = self.actors.len();
         self.actors.push(RenderActorInstance {
             form_id,
+            cell_id: None,
             name: name.to_string(),
             world_transform: world_transform.clone(),
             skeleton_nif,

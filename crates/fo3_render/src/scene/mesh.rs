@@ -38,6 +38,8 @@ pub struct RenderMesh {
     pub bone_palette: Option<crate::gpu_skin::GpuBonePalette>,
     /// メッシュの可視性フラグ (一人称/三人称カリング、Gamebryo 2.6 AppCulled 準拠)
     pub is_visible: bool,
+    /// このメッシュが所属するセルの FormID (Worldstreaming 用)
+    pub cell_id: Option<u32>,
 }
 
 /// NIF の `NiAVObject` からコアトランスフォームへの変換。
@@ -214,6 +216,7 @@ pub fn create_render_mesh_with_override(
         world_bound,
         bone_palette: None,
         is_visible: true,
+        cell_id: None,
     }
 }
 
