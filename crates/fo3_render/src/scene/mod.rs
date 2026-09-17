@@ -264,6 +264,13 @@ impl RenderScene {
         }
     }
 
+    /// Worldstreaming用: 指定したセルの描画リソースを破棄する
+    pub fn unload_cell(&mut self, cell_id: u32) {
+        self.meshes.retain(|m| m.cell_id != Some(cell_id));
+        self.collision_meshes.retain(|c| c.cell_id != Some(cell_id));
+        self.actors.retain(|a| a.cell_id != Some(cell_id));
+    }
+
     /// シーン内のすべてのメッシュを描画する（不透明パス → 半透明パス）。
     /// 参照元: Gamebryo 2.6 レンダリング順序（不透明オブジェクトを先に深度書き込みありで描画し、その後半透明オブジェクトを合成）
     pub fn render<'a>(

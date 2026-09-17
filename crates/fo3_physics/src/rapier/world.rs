@@ -125,6 +125,20 @@ impl RapierPhysicsWorld {
         handles
     }
 
+    /// Worldstreaming用: 指定したセルの物理コライダーを破棄する
+    pub fn unload_cell_physics(&mut self, cell_id: u32) {
+        if let Some(handles) = self.cell_colliders.remove(&cell_id) {
+            for handle in handles {
+                self.collider_set.remove(
+                    handle,
+                    &mut self.island_manager,
+                    &mut self.rigid_body_set,
+                    true,
+                );
+            }
+        }
+    }
+
     /// 地形 (LAND) の 33x33 標高データから静的コライダー (TriMesh) を生成・登録する。
     ///
     /// 参照元: `fo3_esm::LAND_VERTS_PER_SIDE = 33`, `fo3_esm::LAND_REAL_SIZE = 4096.0`
