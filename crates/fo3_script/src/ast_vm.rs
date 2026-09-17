@@ -60,19 +60,34 @@ impl ScriptVm {
         }
     }
 
+    pub fn resolve_variable_name(&self, name: &str, subject: Option<FormId>) -> String {
+        let lname = name.to_lowercase();
+        if let Some(idx) = lname.find('.') {
+            let prefix = &lname[..idx];
+            let suffix = &lname[idx + 1..];
+            if let Ok(id) = self.resolve_form_id(prefix) {
+                if Some(id) == subject {
+                    return suffix.to_string();
+                }
+                return format!("{:08X}.{}", id.0, suffix);
+            }
+        }
+        lname
+    }
+
     pub fn execute_ast_statement(&mut self, stmt: &Statement, self_id: Option<FormId>) -> Result<ExecutionResult, ScriptError> {
         let mut result = ExecutionResult::default();
         match stmt {
             Statement::Set { target, expr } => {
                 let val = self.eval_ast_expr(expr, self_id)?;
-                let target_lower = target.to_ascii_lowercase();
+                let resolved_target = self.resolve_variable_name(target, self_id);
+                self.locals.insert(resolved_target.clone(), val);
                 
-                // 3-layer scope implementation (Partial)
-                if let Some(fid) = self_id {
-                    // Ref storage
-                    self.locals.insert(format!("{:08X}.{}", fid.0, target_lower), val);
-                } else {
-                    self.globals.insert(target_lower, val);
+                // If the subject is a quest, persist the variable immediately
+                if let Some(q_id) = self_id {
+                    if self.quest_manager.quests.contains_key(&q_id) {
+                        self.quest_manager.set_quest_variable(q_id, &resolved_target, val as f64);
+                    }
                 }
             }
             Statement::If { condition, then_block, else_ifs, else_block } => {

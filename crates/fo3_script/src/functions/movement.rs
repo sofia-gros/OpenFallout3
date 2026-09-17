@@ -158,30 +158,17 @@ pub fn execute(
         // 参照元: GECK: MoveTo
         "moveto" => {
             if !args.is_empty() {
-                let target_ref = get_form_id(&args[0])?;
-                let offset_x = if args.len() > 1 { vm.eval_ast_expr(&args[1], subject)? } else { 0.0 };
-                let offset_y = if args.len() > 2 { vm.eval_ast_expr(&args[2], subject)? } else { 0.0 };
-                let offset_z = if args.len() > 3 { vm.eval_ast_expr(&args[3], subject)? } else { 0.0 };
-
-                let px = vm.locals.get(&format!("{:08X}.pos.x", target_ref.0)).copied().unwrap_or(0.0) + offset_x;
-                let py = vm.locals.get(&format!("{:08X}.pos.y", target_ref.0)).copied().unwrap_or(0.0) + offset_y;
-                let pz = vm.locals.get(&format!("{:08X}.pos.z", target_ref.0)).copied().unwrap_or(0.0) + offset_z;
-
-                vm.locals.insert(format!("{:08X}.pos.x", target.0), px);
-                vm.locals.insert(format!("{:08X}.pos.y", target.0), py);
-                vm.locals.insert(format!("{:08X}.pos.z", target.0), pz);
-
-                if let Some(&cell) = vm.locals.get(&format!("{:08X}.cell", target_ref.0)) {
-                    vm.locals.insert(format!("{:08X}.cell", target.0), cell);
-                }
-                if let Some(&ws) = vm.locals.get(&format!("{:08X}.worldspace", target_ref.0)) {
-                    vm.locals.insert(format!("{:08X}.worldspace", target.0), ws);
-                }
-
+                let target_marker = match &args[0] {
+                    Expr::Variable(v) => v.clone(),
+                    Expr::Number(n) => format!("{:08X}", *n as u32),
+                    _ => return Ok(Some(0.0)),
+                };
+                
                 println!(
-                    "[Script] MoveTo: Target {:?} moved to {:?} at ({}, {}, {})",
-                    target, target_ref, px, py, pz
+                    "[Script] MoveTo: Target {:?} moved to {}",
+                    target, target_marker
                 );
+                vm.teleport_requests.push((Some(target), target_marker));
             }
             Ok(Some(0.0))
         }
@@ -189,23 +176,17 @@ pub fn execute(
         // 参照元: GECK: MoveToMarker
         "movetomarker" => {
             if !args.is_empty() {
-                let marker_ref = get_form_id(&args[0])?;
-                let px = vm.locals.get(&format!("{:08X}.pos.x", marker_ref.0)).copied().unwrap_or(0.0);
-                let py = vm.locals.get(&format!("{:08X}.pos.y", marker_ref.0)).copied().unwrap_or(0.0);
-                let pz = vm.locals.get(&format!("{:08X}.pos.z", marker_ref.0)).copied().unwrap_or(0.0);
-
-                vm.locals.insert(format!("{:08X}.pos.x", target.0), px);
-                vm.locals.insert(format!("{:08X}.pos.y", target.0), py);
-                vm.locals.insert(format!("{:08X}.pos.z", target.0), pz);
-
-                if let Some(&cell) = vm.locals.get(&format!("{:08X}.cell", marker_ref.0)) {
-                    vm.locals.insert(format!("{:08X}.cell", target.0), cell);
-                }
-                if let Some(&ws) = vm.locals.get(&format!("{:08X}.worldspace", marker_ref.0)) {
-                    vm.locals.insert(format!("{:08X}.worldspace", target.0), ws);
-                }
-
-                println!("[Script] MoveToMarker: Target {:?} -> Marker {:?}", target, marker_ref);
+                let target_marker = match &args[0] {
+                    Expr::Variable(v) => v.clone(),
+                    Expr::Number(n) => format!("{:08X}", *n as u32),
+                    _ => return Ok(Some(0.0)),
+                };
+                
+                println!(
+                    "[Script] MoveToMarker: Target {:?} moved to {}",
+                    target, target_marker
+                );
+                vm.teleport_requests.push((Some(target), target_marker));
             }
             Ok(Some(0.0))
         }

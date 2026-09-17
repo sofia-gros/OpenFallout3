@@ -1095,6 +1095,7 @@ fn test_render_actor_instance_hierarchy() {
         blend_from: None,
         blend_total: 0.3,
         anim_pose: crate::animation::SkeletonPose::default(),
+        cell_id: None,
         anim_skin_meshes: Vec::new(),
         anim_rigid_meshes: vec![AnimatedRigidMesh {
             mesh_index: 0,

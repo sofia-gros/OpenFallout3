@@ -825,20 +825,16 @@ impl ScriptVm {
                 return v;
             }
         } else {
-            // プレフィックスなし変数 (timer等) -> self_id のクエスト変数を優先確認
+            // プレフィックスなし変数 (timer等) -> locals を優先確認 (同一ブロック内での更新を反映)
+            if let Some(&v) = self.locals.get(&lower) {
+                return v;
+            }
             if let Some(q_id) = self_id {
                 if self.quest_manager.quests.contains_key(&q_id) {
                     if let Some(v) = self.quest_manager.get_quest_variable(q_id, &lower) {
                         return v as f32;
                     }
                 }
-            }
-            if let Some(&v) = self.locals.get(&lower) {
-                return v;
-            }
-            let prefixed = format!("cg00.{}", lower);
-            if let Some(&v) = self.locals.get(&prefixed) {
-                return v;
             }
         }
 

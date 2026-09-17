@@ -35,7 +35,9 @@ const MQ01: FormId = FormId(0x00014E87);
 /// pending_stage_scripts を 1件消化 + GameMode を 1フレーム処理する。
 /// app.rs の update() の動作を模倣。
 fn tick(vm: &mut ScriptVm, dispatcher: &mut EventDispatcher) {
+    println!("[Test] tick: pending_stage_scripts.len() = {}", vm.pending_stage_scripts.len());
     if let Some((quest_id, _, script)) = vm.pending_stage_scripts.pop_front() {
+        println!("[Test] Popped script for quest {:?}:\n{}", quest_id, script);
         let lines: Vec<String> = script.lines().map(|s| s.to_string()).collect();
         let _ = vm.execute_block(&lines, Some(quest_id));
     }

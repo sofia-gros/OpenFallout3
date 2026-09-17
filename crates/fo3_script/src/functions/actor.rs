@@ -55,15 +55,7 @@ pub fn execute(
             println!("[Script] Resurrect: Target {:?}", target);
             Ok(Some(0.0))
         }
-        // MoveTo [TargetRef]
-        "moveto" => {
-            if !args.is_empty() {
-                let target_ref = get_form_id(&args[0])?;
-                let caller = subject.unwrap_or(FormId(0x14));
-                println!("[Script] MoveTo: Caller {:?} moved to {:?}", caller, target_ref);
-            }
-            Ok(Some(0.0))
-        }
+
         // FUN_GetDistance = 1
         "getdistance" => {
             if !args.is_empty() {
