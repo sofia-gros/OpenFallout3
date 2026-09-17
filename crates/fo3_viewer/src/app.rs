@@ -437,14 +437,19 @@ impl ViewerState {
             self.vm.edid_map.insert(edid.clone(), *form_id);
         }
         
-        // パッケージ (PACK)、メッセージ (MESG)、アイドル (IDLE) などの EDID も VM で解決できるようにする
+        // メッセージ (MESG) と サウンド (SOUN) のマップを登録
+        for (edid, form_id) in &self.master_context.mesg_edid_map {
+            self.vm.edid_map.insert(edid.clone(), *form_id);
+        }
+        for (edid, form_id) in &self.master_context.soun_edid_map {
+            self.vm.edid_map.insert(edid.clone(), *form_id);
+        }
+        
+        // パッケージ (PACK) とアイドル (IDLE) の EDID も VM で解決できるようにする
         for (form_id, pack) in &self.master_context.pack_map {
             if let Some(edid) = &pack.editor_id {
                 self.vm.edid_map.insert(edid.to_ascii_uppercase(), *form_id);
             }
-        }
-        for (form_id, mesg) in &self.master_context.mesg_map {
-            self.vm.edid_map.insert(mesg.editor_id.to_ascii_uppercase(), *form_id);
         }
         for (form_id, idle) in &self.master_context.idle_map {
             if let Some(edid) = &idle.editor_id {
