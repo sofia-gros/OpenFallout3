@@ -264,11 +264,21 @@ impl RenderScene {
         }
     }
 
-    /// Worldstreaming用: 指定したセルの描画リソースを破棄する
     pub fn unload_cell(&mut self, cell_id: u32) {
         self.meshes.retain(|m| m.cell_id != Some(cell_id));
         self.collision_meshes.retain(|c| c.cell_id != Some(cell_id));
         self.actors.retain(|a| a.cell_id != Some(cell_id));
+    }
+
+    /// Worldstreaming用: 差分ロードしたシーンを現在のシーンにマージする
+    pub fn append(&mut self, mut other: RenderScene) {
+        self.meshes.append(&mut other.meshes);
+        self.collision_meshes.append(&mut other.collision_meshes);
+        self.anim_skin_meshes.append(&mut other.anim_skin_meshes);
+        self.anim_rigid_meshes.append(&mut other.anim_rigid_meshes);
+        self.actors.append(&mut other.actors);
+        self.refr_mesh_ranges.append(&mut other.refr_mesh_ranges);
+        // bounds_center / bounds_radius は全体の巨大な球になるため、ストリーミング時は再計算不要。
     }
 
     /// シーン内のすべてのメッシュを描画する（不透明パス → 半透明パス）。

@@ -270,7 +270,10 @@ impl QuestManager {
                 }
             })
             .unwrap_or("Unknown Quest");
-        println!("[QuestManager] クエスト \"{}\" (0x{:08X}) 完了", quest_name, quest.0);
+        println!(
+            "[QuestManager] クエスト \"{}\" (0x{:08X}) 完了",
+            quest_name, quest.0
+        );
         let notif = format!("[Quest Completed] {}", quest_name);
         self.notifications.push(notif);
     }
@@ -326,7 +329,10 @@ impl QuestManager {
     /// 目標が失敗しているかどうか判定する。
     /// 参照元: GECK: GetObjectiveFailed <QuestID> <ObjectiveIndex>
     pub fn is_objective_failed(&self, quest: FormId, objective: u32) -> bool {
-        self.objectives_failed.get(&(quest, objective)).copied().unwrap_or(false)
+        self.objectives_failed
+            .get(&(quest, objective))
+            .copied()
+            .unwrap_or(false)
     }
 
     /// クエストに定義されているすべての目標を完了済みにする。
@@ -334,7 +340,8 @@ impl QuestManager {
     pub fn complete_all_objectives(&mut self, quest: FormId) {
         if let Some(record) = self.quests.get(&quest) {
             for obj in &record.objectives {
-                self.objectives_completed.insert((quest, obj.index as u32), true);
+                self.objectives_completed
+                    .insert((quest, obj.index as u32), true);
                 self.objectives_failed.remove(&(quest, obj.index as u32));
             }
         }
@@ -345,7 +352,8 @@ impl QuestManager {
     pub fn fail_all_objectives(&mut self, quest: FormId) {
         if let Some(record) = self.quests.get(&quest) {
             for obj in &record.objectives {
-                self.objectives_failed.insert((quest, obj.index as u32), true);
+                self.objectives_failed
+                    .insert((quest, obj.index as u32), true);
                 self.objectives_completed.remove(&(quest, obj.index as u32));
             }
         }

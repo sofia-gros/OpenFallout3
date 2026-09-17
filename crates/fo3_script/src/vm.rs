@@ -853,7 +853,7 @@ impl ScriptVm {
 
     /// 複数行のスクリプトブロック (If / ElseIf / Else / EndIf / Return / Activate 対応) を実行する。
     /// 戻り値: スクリプト内で明示的に `Activate` 命令が実行されたかどうか
-        pub fn execute_block(
+    pub fn execute_block(
         &mut self,
         lines: &[String],
         self_id: Option<FormId>,
@@ -877,7 +877,7 @@ impl ScriptVm {
         }
         Ok(activated)
     }
-    
+
     pub fn execute_result_script(
         &mut self,
         script: &str,
@@ -1049,4 +1049,3 @@ mod tests {
             .any(|n| n.contains("Speak to Colin Moriarty")));
     }
 }
-

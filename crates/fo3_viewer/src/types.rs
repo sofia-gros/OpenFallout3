@@ -20,6 +20,7 @@ pub enum ViewerTarget {
     Mesh(String),
     Cell(String),
     World(String, Option<(i32, i32)>),
+    WorldGrids(String, Vec<(i32, i32)>),
     /// 単一スキンメッシュ + KF アニメーション再生モード
     Anim {
         nif_path: String,
@@ -44,6 +45,7 @@ pub fn update_window_title(window: &Window, target: &ViewerTarget) {
         ViewerTarget::Mesh(path) => format!("OpenFallout3 - Mesh: {}", path),
         ViewerTarget::Cell(edid) => format!("OpenFallout3 - Cell: {}", edid),
         ViewerTarget::World(edid, _) => format!("OpenFallout3 - World: {}", edid),
+        ViewerTarget::WorldGrids(edid, _) => format!("OpenFallout3 - World Streaming: {}", edid),
         ViewerTarget::Anim { nif_path, kf_path } => {
             format!("OpenFallout3 - Anim: {} + {}", nif_path, kf_path)
         }

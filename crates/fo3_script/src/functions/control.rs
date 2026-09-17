@@ -3,7 +3,7 @@
 //! 参照元: GECK DisablePlayerControls, EnablePlayerControls, SetInCharGen
 
 use crate::parser::Expr;
-use crate::vm::{ScriptVm, ScriptError};
+use crate::vm::{ScriptError, ScriptVm};
 use fo3_esm::FormId;
 
 pub fn execute(
@@ -204,15 +204,11 @@ pub fn execute(
         // FUN_WhichServiceMenu = 323
         // 参照元: references/openmw/components/esm4/script.hpp:184
         // 現在開かれているサービスメニューの種類を取得する (0 = なし)
-        "whichservicemenu" => {
-            Ok(Some(0.0))
-        }
+        "whichservicemenu" => Ok(Some(0.0)),
         // FUN_IsPlayerGrabbedRef = 464
         // 参照元: references/openmw/components/esm4/script.hpp:276
         // オブジェクトが現在プレイヤーによって掴まれている (Zキー把持) か判定する
-        "isplayergrabbedref" => {
-            Ok(Some(0.0))
-        }
+        "isplayergrabbedref" => Ok(Some(0.0)),
         _ => Ok(None),
     }
 }
@@ -227,9 +223,15 @@ mod tests {
 
         // disable / enable controls
         execute("disableplayercontrols", &[], None, &mut vm).unwrap();
-        assert_eq!(execute("getplayercontrolsdisabled", &[], None, &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("getplayercontrolsdisabled", &[], None, &mut vm).unwrap(),
+            Some(1.0)
+        );
         execute("enableplayercontrols", &[], None, &mut vm).unwrap();
-        assert_eq!(execute("getplayercontrolsdisabled", &[], None, &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("getplayercontrolsdisabled", &[], None, &mut vm).unwrap(),
+            Some(0.0)
+        );
 
         // vanity mode
         execute("disablevanitymode", &[], None, &mut vm).unwrap();
@@ -238,13 +240,25 @@ mod tests {
         assert!(vm.player_controls.cam_switch);
 
         // 1st / 3rd person camera
-        assert_eq!(execute("ispc1stperson", &[], None, &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("ispc1stperson", &[], None, &mut vm).unwrap(),
+            Some(1.0)
+        );
         execute("forcethirdperson", &[], None, &mut vm).unwrap();
-        assert_eq!(execute("ispc1stperson", &[], None, &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("ispc1stperson", &[], None, &mut vm).unwrap(),
+            Some(0.0)
+        );
         execute("forcefirstperson", &[], None, &mut vm).unwrap();
-        assert_eq!(execute("ispc1stperson", &[], None, &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("ispc1stperson", &[], None, &mut vm).unwrap(),
+            Some(1.0)
+        );
         execute("togglecamera", &[], None, &mut vm).unwrap();
-        assert_eq!(execute("ispc1stperson", &[], None, &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("ispc1stperson", &[], None, &mut vm).unwrap(),
+            Some(0.0)
+        );
 
         // free camera (tfc)
         execute("tfc", &[], None, &mut vm).unwrap();
@@ -256,13 +270,26 @@ mod tests {
         execute("showclassmenu", &[], None, &mut vm).unwrap();
         assert!(vm.chargen_events.contains(&"showclassmenu".to_string()));
         execute("showspecialbookmenu", &[], None, &mut vm).unwrap();
-        assert!(vm.chargen_events.contains(&"showspecialbookmenu".to_string()));
+        assert!(vm
+            .chargen_events
+            .contains(&"showspecialbookmenu".to_string()));
 
         // sleeping / vats / menus
-        assert_eq!(execute("ispcsleeping", &[], None, &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("getvatsmode", &[], None, &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("whichservicemenu", &[], None, &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("isplayergrabbedref", &[], None, &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("ispcsleeping", &[], None, &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("getvatsmode", &[], None, &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("whichservicemenu", &[], None, &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("isplayergrabbedref", &[], None, &mut vm).unwrap(),
+            Some(0.0)
+        );
     }
 }
-

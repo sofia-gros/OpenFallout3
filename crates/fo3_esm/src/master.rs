@@ -72,7 +72,6 @@ pub struct EsmMasterContext {
     pub navm_map: HashMap<FormId, crate::records::navm::NavMeshRecord>,
 }
 
-
 impl EsmMasterContext {
     /// 新しい空のマスターコンテキストを生成する。
     pub fn new() -> Self {

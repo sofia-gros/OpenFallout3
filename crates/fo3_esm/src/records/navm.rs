@@ -139,7 +139,8 @@ impl NavMeshRecord {
                 SUB_NVCA => {
                     let count = sub.data.len() / 2;
                     for _ in 0..count {
-                        navm.cover_triangles.push(cursor.read_i16::<LittleEndian>()?);
+                        navm.cover_triangles
+                            .push(cursor.read_i16::<LittleEndian>()?);
                     }
                 }
                 SUB_NVDP => {

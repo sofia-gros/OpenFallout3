@@ -364,7 +364,8 @@ impl ViewerState {
         };
 
         if let ViewerTarget::World(world_edid, _) = target {
-            state.streamer = Some(crate::streamer::WorldStreamer::new(world_edid.clone(), 1)); // 1 radius (3x3 grid)
+            state.streamer = Some(crate::streamer::WorldStreamer::new(world_edid.clone(), 1));
+            // 1 radius (3x3 grid)
         }
 
         // NavGraphの構築
@@ -657,12 +658,85 @@ impl ViewerState {
         crate::action::process_package_requests(self);
         crate::action::process_playgroup_requests(self);
 
+        // 0.2.5 差分ロード (WorldStreaming) の処理
+        // プレイヤーの現在位置からグリッドを再計算し、ロード／アンロード対象を検出
+        let mut load_targets = Vec::new();
+        let mut unload_targets = Vec::new();
+        if let Some(streamer) = &mut self.streamer {
+            let player_pos = self.controller.camera.target;
+            if let Some((to_load, to_unload)) = streamer.check_update(player_pos) {
+                println!(
+                    "[WorldStreamer] ストリーミング更新 (ロード: {}, アンロード: {})",
+                    to_load.len(),
+                    to_unload.len()
+                );
+                for g in to_unload {
+                    if let Some(cells) = streamer.loaded_cells_by_grid.remove(&g) {
+                        unload_targets.extend(cells);
+                    }
+                }
+                load_targets = to_load.clone();
+            }
+        }
+
+        // アンロードの実行
+        for cell_id in unload_targets {
+            self.scene.unload_cell(cell_id);
+            // TODO: unload_cell_physics もし実装されていれば呼ぶ
+        }
+
+        // ロードの実行
+        if !load_targets.is_empty() {
+            let world_edid = self.streamer.as_ref().unwrap().world_edid.clone();
+            let mut diff_scene = crate::loader::load_scene(
+                &self.device,
+                &self.queue,
+                &self.context,
+                "A:/Project/OpenFallout3",
+                &crate::types::ViewerTarget::WorldGrids(world_edid, load_targets.clone()),
+                &mut self.vfs,
+                &self.master_context,
+                &mut fo3_render::NifCache::new(),
+                &mut std::collections::HashMap::new(),
+            );
+
+            // ロードしたセルIDを grid ごとに記録するロジックが必要だが
+            // load_scene 側で「どのメッシュがどのセルに属しているか」は mesh.cell_id に入っているため
+            // ひとまず streamer.loaded_cells_by_grid にはロードした mesh の cell_id 一覧を突っ込む（雑だが確実）
+            if let Some(streamer) = &mut self.streamer {
+                let mut cell_ids = std::collections::HashSet::new();
+                for m in &diff_scene.scene.meshes {
+                    if let Some(c) = m.cell_id {
+                        cell_ids.insert(c);
+                    }
+                }
+                // 代表的なグリッド(一つ)に紐づけておく (厳密には ESM から引いたグリッドごとのリストにするべき)
+                if let Some(first_grid) = load_targets.first() {
+                    streamer
+                        .loaded_cells_by_grid
+                        .insert(*first_grid, cell_ids.into_iter().collect());
+                }
+            }
+
+            self.scene.append(diff_scene.scene);
+            self.placed_lights.extend(diff_scene.placed_lights);
+            self.interactables.extend(diff_scene.interactables);
+
+            // 物理ワールドへの統合（Rapier の剛体セットなどをマージ）
+            // TODO: controller.physics_world.append(diff_scene.physics_world) があれば実装
+        }
+
         // AI Package Evaluator を更新
         let mut actor_positions = std::collections::HashMap::new();
         for actor in &self.scene.actors {
             actor_positions.insert(FormId(actor.form_id), actor.world_transform.translation);
         }
-        self.ai.update(&mut self.vm, &self.master_context, &self.nav_graph, &actor_positions);
+        self.ai.update(
+            &mut self.vm,
+            &self.master_context,
+            &self.nav_graph,
+            &actor_positions,
+        );
 
         // 0.3 サウンドエンジンを更新 (音声 DIAL/INFO/SOUN 再生)
         self.vm.chargen_menu_active = self.chargen_menu.is_active();
@@ -793,7 +867,7 @@ impl ViewerState {
                         let current_pos = actor.world_transform.translation;
                         let dir = target_pos - current_pos;
                         let dist = dir.length();
-                        
+
                         if dist < 10.0 {
                             ai_state.path_target_index += 1;
                         } else {
@@ -1008,7 +1082,8 @@ impl ViewerState {
         if !ui_batch.indices.is_empty() && !self.active_rtt_bindings.is_empty() {
             self.ui_renderer
                 .update_resolution(&self.queue, 1024.0, 1024.0);
-            self.ui_renderer.upload_batch(&self.device, &self.queue, &ui_batch, &mut self.vfs);
+            self.ui_renderer
+                .upload_batch(&self.device, &self.queue, &ui_batch, &mut self.vfs);
 
             let mut rtt_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("RTT Render Pass"),
@@ -1127,7 +1202,8 @@ impl ViewerState {
                 self.size.width as f32,
                 self.size.height as f32,
             );
-            self.ui_renderer.upload_batch(&self.device, &self.queue, &ui_batch, &mut self.vfs);
+            self.ui_renderer
+                .upload_batch(&self.device, &self.queue, &ui_batch, &mut self.vfs);
 
             let mut ui_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("2D UI Render Pass"),

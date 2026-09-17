@@ -405,7 +405,9 @@ impl MenuRuntime {
                     if let Some(atlas) = &self.atlas {
                         if let Some(file) = filename {
                             if let Some((atlas_tex, sub_tex)) = atlas.lookup(file) {
-                                batch.set_texture(crate::ui::font::UiTexture::Image(atlas_tex.to_string()));
+                                batch.set_texture(crate::ui::font::UiTexture::Image(
+                                    atlas_tex.to_string(),
+                                ));
                                 batch.add_textured_rect(
                                     layout.x,
                                     layout.y,
@@ -422,7 +424,9 @@ impl MenuRuntime {
                     if !rendered_from_atlas {
                         if let Some(file) = filename {
                             if !file.is_empty() && !file.contains("solid") {
-                                batch.set_texture(crate::ui::font::UiTexture::Image(file.to_string()));
+                                batch.set_texture(crate::ui::font::UiTexture::Image(
+                                    file.to_string(),
+                                ));
                                 batch.add_textured_rect(
                                     layout.x,
                                     layout.y,

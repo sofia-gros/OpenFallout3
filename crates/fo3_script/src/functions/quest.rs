@@ -2,7 +2,7 @@
 //! 参照元: references/openmw/components/esm4/script.hpp
 
 use crate::parser::Expr;
-use crate::vm::{ScriptVm, ScriptError};
+use crate::vm::{ScriptError, ScriptVm};
 use fo3_esm::FormId;
 
 pub fn execute(
@@ -59,7 +59,8 @@ pub fn execute(
                 let q_id = get_form_id(&args[0])?;
                 let index = vm.eval_ast_expr(&args[1], subject)? as u32;
                 let displayed = vm.eval_ast_expr(&args[2], subject)? != 0.0;
-                vm.quest_manager.set_objective_displayed(q_id, index, displayed);
+                vm.quest_manager
+                    .set_objective_displayed(q_id, index, displayed);
             }
             Ok(Some(0.0))
         }
@@ -80,7 +81,8 @@ pub fn execute(
                 let q_id = get_form_id(&args[0])?;
                 let index = vm.eval_ast_expr(&args[1], subject)? as u32;
                 let completed = vm.eval_ast_expr(&args[2], subject)? != 0.0;
-                vm.quest_manager.set_objective_completed(q_id, index, completed);
+                vm.quest_manager
+                    .set_objective_completed(q_id, index, completed);
             }
             Ok(Some(0.0))
         }
@@ -107,7 +109,13 @@ pub fn execute(
             };
             let stage = vm.get_stage(q_id);
             // ステージが 0 より大きく、完了フラグが立っていない場合は実行中
-            Ok(Some(if stage > 0 && !vm.quest_manager.is_quest_completed(q_id) { 1.0 } else { 0.0 }))
+            Ok(Some(
+                if stage > 0 && !vm.quest_manager.is_quest_completed(q_id) {
+                    1.0
+                } else {
+                    0.0
+                },
+            ))
         }
         // StartQuest [QuestID]
         "startquest" => {
@@ -170,7 +178,10 @@ pub fn execute(
                     Expr::Variable(v) => v.as_str(),
                     _ => "",
                 };
-                let val = vm.quest_manager.get_quest_variable(q_id, var_name).unwrap_or(0.0) as f32;
+                let val = vm
+                    .quest_manager
+                    .get_quest_variable(q_id, var_name)
+                    .unwrap_or(0.0) as f32;
                 return Ok(Some(val));
             }
             Ok(Some(0.0))
@@ -231,7 +242,11 @@ pub fn execute(
         // 参照元: GECK: GetCurrentQuest
         // 現在アクティブな追跡クエストの FormID を返す
         "getcurrentquest" => {
-            let current = vm.quest_manager.get_current_quest().map(|q| q.0 as f32).unwrap_or(0.0);
+            let current = vm
+                .quest_manager
+                .get_current_quest()
+                .map(|q| q.0 as f32)
+                .unwrap_or(0.0);
             Ok(Some(current))
         }
         // 参照元: GECK: SetQuestDelay <QuestID> <DelayFloat>
@@ -287,7 +302,10 @@ pub fn execute(
             if !args.is_empty() {
                 let q_id = get_form_id(&args[0])?;
                 let current = vm.quest_manager.get_stage(q_id);
-                println!("[Script] ShowQuestStages: Quest {:?}, Current Stage {}", q_id, current);
+                println!(
+                    "[Script] ShowQuestStages: Quest {:?}, Current Stage {}",
+                    q_id, current
+                );
             }
             Ok(Some(0.0))
         }
@@ -314,85 +332,235 @@ mod tests {
         let quest_id = FormId(0x00014E89);
 
         // startquest / getquestrunning
-        execute("startquest", &[Expr::Number(quest_id.0 as f32)], None, &mut vm).unwrap();
+        execute(
+            "startquest",
+            &[Expr::Number(quest_id.0 as f32)],
+            None,
+            &mut vm,
+        )
+        .unwrap();
         assert_eq!(
-            execute("getquestrunning", &[Expr::Number(quest_id.0 as f32)], None, &mut vm).unwrap(),
+            execute(
+                "getquestrunning",
+                &[Expr::Number(quest_id.0 as f32)],
+                None,
+                &mut vm
+            )
+            .unwrap(),
             Some(1.0)
         );
 
         // setstage / getstage / getstagedone
-        execute("setstage", &[Expr::Number(quest_id.0 as f32), Expr::Number(20.0)], None, &mut vm).unwrap();
+        execute(
+            "setstage",
+            &[Expr::Number(quest_id.0 as f32), Expr::Number(20.0)],
+            None,
+            &mut vm,
+        )
+        .unwrap();
         assert_eq!(
-            execute("getstage", &[Expr::Number(quest_id.0 as f32)], None, &mut vm).unwrap(),
+            execute(
+                "getstage",
+                &[Expr::Number(quest_id.0 as f32)],
+                None,
+                &mut vm
+            )
+            .unwrap(),
             Some(20.0)
         );
         assert_eq!(
-            execute("getstagedone", &[Expr::Number(quest_id.0 as f32), Expr::Number(20.0)], None, &mut vm).unwrap(),
+            execute(
+                "getstagedone",
+                &[Expr::Number(quest_id.0 as f32), Expr::Number(20.0)],
+                None,
+                &mut vm
+            )
+            .unwrap(),
             Some(1.0)
         );
 
         // objectives: set / get / failed
-        execute("setobjectivedisplayed", &[Expr::Number(quest_id.0 as f32), Expr::Number(1.0), Expr::Number(1.0)], None, &mut vm).unwrap();
+        execute(
+            "setobjectivedisplayed",
+            &[
+                Expr::Number(quest_id.0 as f32),
+                Expr::Number(1.0),
+                Expr::Number(1.0),
+            ],
+            None,
+            &mut vm,
+        )
+        .unwrap();
         assert_eq!(
-            execute("getobjectivedisplayed", &[Expr::Number(quest_id.0 as f32), Expr::Number(1.0)], None, &mut vm).unwrap(),
+            execute(
+                "getobjectivedisplayed",
+                &[Expr::Number(quest_id.0 as f32), Expr::Number(1.0)],
+                None,
+                &mut vm
+            )
+            .unwrap(),
             Some(1.0)
         );
-        execute("setobjectivecompleted", &[Expr::Number(quest_id.0 as f32), Expr::Number(1.0), Expr::Number(1.0)], None, &mut vm).unwrap();
+        execute(
+            "setobjectivecompleted",
+            &[
+                Expr::Number(quest_id.0 as f32),
+                Expr::Number(1.0),
+                Expr::Number(1.0),
+            ],
+            None,
+            &mut vm,
+        )
+        .unwrap();
         assert_eq!(
-            execute("getobjectivecompleted", &[Expr::Number(quest_id.0 as f32), Expr::Number(1.0)], None, &mut vm).unwrap(),
+            execute(
+                "getobjectivecompleted",
+                &[Expr::Number(quest_id.0 as f32), Expr::Number(1.0)],
+                None,
+                &mut vm
+            )
+            .unwrap(),
             Some(1.0)
         );
-        execute("setobjectivefailed", &[Expr::Number(quest_id.0 as f32), Expr::Number(1.0), Expr::Number(1.0)], None, &mut vm).unwrap();
+        execute(
+            "setobjectivefailed",
+            &[
+                Expr::Number(quest_id.0 as f32),
+                Expr::Number(1.0),
+                Expr::Number(1.0),
+            ],
+            None,
+            &mut vm,
+        )
+        .unwrap();
         assert_eq!(
-            execute("getobjectivefailed", &[Expr::Number(quest_id.0 as f32), Expr::Number(1.0)], None, &mut vm).unwrap(),
+            execute(
+                "getobjectivefailed",
+                &[Expr::Number(quest_id.0 as f32), Expr::Number(1.0)],
+                None,
+                &mut vm
+            )
+            .unwrap(),
             Some(1.0)
         );
 
         // current quest
-        execute("setcurrentquest", &[Expr::Number(quest_id.0 as f32)], None, &mut vm).unwrap();
+        execute(
+            "setcurrentquest",
+            &[Expr::Number(quest_id.0 as f32)],
+            None,
+            &mut vm,
+        )
+        .unwrap();
         assert_eq!(
             execute("getcurrentquest", &[], None, &mut vm).unwrap(),
             Some(quest_id.0 as f32)
         );
 
         // quest delay
-        execute("setquestdelay", &[Expr::Number(quest_id.0 as f32), Expr::Number(2.5)], None, &mut vm).unwrap();
+        execute(
+            "setquestdelay",
+            &[Expr::Number(quest_id.0 as f32), Expr::Number(2.5)],
+            None,
+            &mut vm,
+        )
+        .unwrap();
         assert_eq!(
-            execute("getquestdelay", &[Expr::Number(quest_id.0 as f32)], None, &mut vm).unwrap(),
+            execute(
+                "getquestdelay",
+                &[Expr::Number(quest_id.0 as f32)],
+                None,
+                &mut vm
+            )
+            .unwrap(),
             Some(2.5)
         );
 
         // quest object
         let item_id = FormId(0x00020000);
         assert_eq!(
-            execute("isquestobject", &[Expr::Number(item_id.0 as f32)], None, &mut vm).unwrap(),
+            execute(
+                "isquestobject",
+                &[Expr::Number(item_id.0 as f32)],
+                None,
+                &mut vm
+            )
+            .unwrap(),
             Some(0.0)
         );
-        execute("setquestobject", &[Expr::Number(item_id.0 as f32), Expr::Number(1.0)], None, &mut vm).unwrap();
+        execute(
+            "setquestobject",
+            &[Expr::Number(item_id.0 as f32), Expr::Number(1.0)],
+            None,
+            &mut vm,
+        )
+        .unwrap();
         assert_eq!(
-            execute("isquestobject", &[Expr::Number(item_id.0 as f32)], None, &mut vm).unwrap(),
+            execute(
+                "isquestobject",
+                &[Expr::Number(item_id.0 as f32)],
+                None,
+                &mut vm
+            )
+            .unwrap(),
             Some(1.0)
         );
 
         // completequest / getquestcompleted
         assert_eq!(
-            execute("getquestcompleted", &[Expr::Number(quest_id.0 as f32)], None, &mut vm).unwrap(),
+            execute(
+                "getquestcompleted",
+                &[Expr::Number(quest_id.0 as f32)],
+                None,
+                &mut vm
+            )
+            .unwrap(),
             Some(0.0)
         );
-        execute("completequest", &[Expr::Number(quest_id.0 as f32)], None, &mut vm).unwrap();
+        execute(
+            "completequest",
+            &[Expr::Number(quest_id.0 as f32)],
+            None,
+            &mut vm,
+        )
+        .unwrap();
         assert_eq!(
-            execute("getquestcompleted", &[Expr::Number(quest_id.0 as f32)], None, &mut vm).unwrap(),
+            execute(
+                "getquestcompleted",
+                &[Expr::Number(quest_id.0 as f32)],
+                None,
+                &mut vm
+            )
+            .unwrap(),
             Some(1.0)
         );
 
         // resetquest
-        execute("resetquest", &[Expr::Number(quest_id.0 as f32)], None, &mut vm).unwrap();
+        execute(
+            "resetquest",
+            &[Expr::Number(quest_id.0 as f32)],
+            None,
+            &mut vm,
+        )
+        .unwrap();
         assert_eq!(
-            execute("getstage", &[Expr::Number(quest_id.0 as f32)], None, &mut vm).unwrap(),
+            execute(
+                "getstage",
+                &[Expr::Number(quest_id.0 as f32)],
+                None,
+                &mut vm
+            )
+            .unwrap(),
             Some(0.0)
         );
         assert_eq!(
-            execute("getquestcompleted", &[Expr::Number(quest_id.0 as f32)], None, &mut vm).unwrap(),
+            execute(
+                "getquestcompleted",
+                &[Expr::Number(quest_id.0 as f32)],
+                None,
+                &mut vm
+            )
+            .unwrap(),
             Some(0.0)
         );
     }

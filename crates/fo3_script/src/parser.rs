@@ -86,7 +86,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-        fn skip_whitespace_and_comments(&mut self) {
+    fn skip_whitespace_and_comments(&mut self) {
         while let Some(&c) = self.input.peek() {
             if c.is_whitespace() && c != '\n' && c != '\r' {
                 self.input.next();
@@ -114,7 +114,8 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 return Token::Newline;
-            }if c.is_alphabetic() || c == '_' {
+            }
+            if c.is_alphabetic() || c == '_' {
                 return self.read_identifier_or_keyword();
             } else if c.is_ascii_digit() || c == '-' || c == '.' {
                 // Could be number or dot
@@ -156,13 +157,13 @@ impl<'a> Lexer<'a> {
         }
     }
 
-        fn read_number(&mut self) -> Token {
+    fn read_number(&mut self) -> Token {
         let mut s = String::new();
         if let Some(&'-') = self.input.peek() {
             s.push('-');
             self.input.next();
         }
-        
+
         // Handle hex: 0x or 0X
         if let Some(&'0') = self.input.peek() {
             s.push('0');
@@ -187,7 +188,7 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        
+
         while let Some(&c) = self.input.peek() {
             if c.is_ascii_digit() || c == '.' {
                 s.push(c);
@@ -204,7 +205,8 @@ impl<'a> Lexer<'a> {
         } else {
             Token::Identifier(s)
         }
-    }fn read_string(&mut self) -> Token {
+    }
+    fn read_string(&mut self) -> Token {
         self.input.next(); // skip "
         let mut s = String::new();
         while let Some(&c) = self.input.peek() {
@@ -272,7 +274,7 @@ impl<'a> Parser<'a> {
         &self.current_token
     }
 
-        pub fn parse_statements(&mut self) -> Result<Vec<Statement>, String> {
+    pub fn parse_statements(&mut self) -> Result<Vec<Statement>, String> {
         let mut stmts = Vec::new();
         while self.current_token != Token::EOF {
             if self.current_token == Token::Newline {
@@ -283,7 +285,8 @@ impl<'a> Parser<'a> {
             stmts.push(stmt);
         }
         Ok(stmts)
-    }    fn parse_statement(&mut self) -> Result<Statement, String> {
+    }
+    fn parse_statement(&mut self) -> Result<Statement, String> {
         while self.current_token == Token::Newline {
             self.advance();
         }
@@ -368,7 +371,7 @@ impl<'a> Parser<'a> {
         Ok(Statement::Set { target, expr })
     }
 
-        fn skip_newlines(&mut self) {
+    fn skip_newlines(&mut self) {
         while self.current_token == Token::Newline {
             self.advance();
         }
@@ -381,7 +384,9 @@ impl<'a> Parser<'a> {
         let mut then_block = Vec::new();
         loop {
             self.skip_newlines();
-            if matches!(self.current_token, Token::Keyword(ref k) if k == "elseif" || k == "else" || k == "endif" || k == "end") || self.current_token == Token::EOF {
+            if matches!(self.current_token, Token::Keyword(ref k) if k == "elseif" || k == "else" || k == "endif" || k == "end")
+                || self.current_token == Token::EOF
+            {
                 break;
             }
             then_block.push(self.parse_statement()?);
@@ -397,7 +402,9 @@ impl<'a> Parser<'a> {
                     let mut ei_block = Vec::new();
                     loop {
                         self.skip_newlines();
-                        if matches!(self.current_token, Token::Keyword(ref k2) if k2 == "elseif" || k2 == "else" || k2 == "endif" || k2 == "end") || self.current_token == Token::EOF {
+                        if matches!(self.current_token, Token::Keyword(ref k2) if k2 == "elseif" || k2 == "else" || k2 == "endif" || k2 == "end")
+                            || self.current_token == Token::EOF
+                        {
                             break;
                         }
                         ei_block.push(self.parse_statement()?);
@@ -417,7 +424,9 @@ impl<'a> Parser<'a> {
                 let mut e_block = Vec::new();
                 loop {
                     self.skip_newlines();
-                    if matches!(self.current_token, Token::Keyword(ref k2) if k2 == "endif" || k2 == "end") || self.current_token == Token::EOF {
+                    if matches!(self.current_token, Token::Keyword(ref k2) if k2 == "endif" || k2 == "end")
+                        || self.current_token == Token::EOF
+                    {
                         break;
                     }
                     e_block.push(self.parse_statement()?);
@@ -456,8 +465,13 @@ impl<'a> Parser<'a> {
         if self.current_token == Token::Newline {
             self.advance();
         }
-        Ok(Statement::Call { subject, command, args })
-    }fn parse_expression(&mut self, precedence: u8) -> Result<Expr, String> {
+        Ok(Statement::Call {
+            subject,
+            command,
+            args,
+        })
+    }
+    fn parse_expression(&mut self, precedence: u8) -> Result<Expr, String> {
         let mut left = match self.current_token.clone() {
             Token::Number(n) => {
                 self.advance();
@@ -568,9 +582,3 @@ fn test_hex_parsing2() {
     let mut p = crate::parser::Parser::new("setstage 0x00014E89 10\n");
     println!("{:#?}", p.parse_statements());
 }
-
-
-
-
-
-

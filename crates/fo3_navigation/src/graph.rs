@@ -1,7 +1,7 @@
 use fo3_esm::records::navm::{NavMeshRecord, NavMeshTriangle};
+use fo3_esm::types::FormId;
 use glam::Vec3;
 use std::collections::HashMap;
-use fo3_esm::types::FormId;
 
 #[derive(Clone, Debug)]
 pub struct Node {
@@ -36,14 +36,14 @@ impl NavGraph {
 
     pub fn add_navmesh(&mut self, record: &NavMeshRecord) {
         let mut mesh_nodes = Vec::with_capacity(record.triangles.len());
-        
+
         let mut nvex_index = 0;
 
         for (i, tri) in record.triangles.iter().enumerate() {
             let v0 = record.vertices[tri.vertices[0] as usize];
             let v1 = record.vertices[tri.vertices[1] as usize];
             let v2 = record.vertices[tri.vertices[2] as usize];
-            
+
             let center = Vec3::new(
                 (v0[0] + v1[0] + v2[0]) / 3.0,
                 (v0[1] + v1[1] + v2[1]) / 3.0,

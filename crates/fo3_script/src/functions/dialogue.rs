@@ -2,7 +2,7 @@
 //! 参照元: references/openmw/components/esm4/script.hpp:50, 123, 141, 172, 435, 436
 
 use crate::parser::Expr;
-use crate::vm::{ScriptVm, ScriptError};
+use crate::vm::{ScriptError, ScriptVm};
 use fo3_esm::FormId;
 
 pub fn execute(
@@ -58,9 +58,7 @@ pub fn execute(
             Ok(Some(0.0))
         }
         // FUN_IsGreetingPlayer = 123
-        "isgreetingplayer" => {
-            Ok(Some(0.0))
-        }
+        "isgreetingplayer" => Ok(Some(0.0)),
         // FUN_IsTalking = 141
         "istalking" => {
             let talking = !vm.say_queue.is_empty();
@@ -71,9 +69,7 @@ pub fn execute(
             Ok(Some(0.0)) // Neutral
         }
         // FUN_GetDialogueEmotionValue = 436 (0..100)
-        "getdialogueemotionvalue" => {
-            Ok(Some(50.0))
-        }
+        "getdialogueemotionvalue" => Ok(Some(50.0)),
         // 参照元: GECK: SayTo <TargetActorRef> <TopicID>
         // 対象のアクターに向けて指定トピックのセリフを発話する
         "sayto" => {
@@ -207,7 +203,8 @@ pub fn execute(
             } else {
                 true
             };
-            vm.locals.insert("showsubtitles".to_string(), if enable { 1.0 } else { 0.0 });
+            vm.locals
+                .insert("showsubtitles".to_string(), if enable { 1.0 } else { 0.0 });
             println!("[Script] ShowSubtitles: {}", enable);
             Ok(Some(0.0))
         }
@@ -223,8 +220,12 @@ pub fn execute(
         "lookat" => {
             if !args.is_empty() {
                 let other_ref = get_form_id(&args[0])?;
-                vm.locals.insert(format!("{:08X}.lookat", target.0), other_ref.0 as f32);
-                println!("[Script] LookAt: Target {:?} -> Other {:?}", target, other_ref);
+                vm.locals
+                    .insert(format!("{:08X}.lookat", target.0), other_ref.0 as f32);
+                println!(
+                    "[Script] LookAt: Target {:?} -> Other {:?}",
+                    target, other_ref
+                );
             }
             Ok(Some(0.0))
         }
@@ -243,45 +244,94 @@ mod tests {
         let player = FormId(0x00000014);
 
         // saydone (キューが空なら 1.0)
-        assert_eq!(execute("saydone", &[], Some(actor), &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("saydone", &[], Some(actor), &mut vm).unwrap(),
+            Some(1.0)
+        );
 
         // sayto
         execute(
             "sayto",
-            &[Expr::Number(player.0 as f32), Expr::Variable("TopicGreeting".into())],
+            &[
+                Expr::Number(player.0 as f32),
+                Expr::Variable("TopicGreeting".into()),
+            ],
             Some(actor),
             &mut vm,
         )
         .unwrap();
         assert_eq!(vm.say_queue.len(), 1);
-        assert_eq!(execute("saydone", &[], Some(actor), &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("istalking", &[], Some(actor), &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("saydone", &[], Some(actor), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("istalking", &[], Some(actor), &mut vm).unwrap(),
+            Some(1.0)
+        );
 
         // addtopic / removetopic
-        execute("addtopic", &[Expr::Variable("TopicRumors".into())], None, &mut vm).unwrap();
+        execute(
+            "addtopic",
+            &[Expr::Variable("TopicRumors".into())],
+            None,
+            &mut vm,
+        )
+        .unwrap();
         assert!(vm.quest_manager.has_topic("TopicRumors"));
-        execute("removetopic", &[Expr::Variable("TopicRumors".into())], None, &mut vm).unwrap();
+        execute(
+            "removetopic",
+            &[Expr::Variable("TopicRumors".into())],
+            None,
+            &mut vm,
+        )
+        .unwrap();
         assert!(!vm.quest_manager.has_topic("TopicRumors"));
 
         // getisvoicetype
         let vt = FormId(0x00030001);
         assert_eq!(
-            execute("getisvoicetype", &[Expr::Number(vt.0 as f32)], Some(actor), &mut vm).unwrap(),
+            execute(
+                "getisvoicetype",
+                &[Expr::Number(vt.0 as f32)],
+                Some(actor),
+                &mut vm
+            )
+            .unwrap(),
             Some(0.0)
         );
-        vm.locals.insert(format!("{:08X}.voicetype", actor.0), vt.0 as f32);
+        vm.locals
+            .insert(format!("{:08X}.voicetype", actor.0), vt.0 as f32);
         assert_eq!(
-            execute("getisvoicetype", &[Expr::Number(vt.0 as f32)], Some(actor), &mut vm).unwrap(),
+            execute(
+                "getisvoicetype",
+                &[Expr::Number(vt.0 as f32)],
+                Some(actor),
+                &mut vm
+            )
+            .unwrap(),
             Some(1.0)
         );
 
         // startconversation
-        execute("startconversation", &[Expr::Number(player.0 as f32)], Some(actor), &mut vm).unwrap();
-        assert_eq!(vm.locals.get(&format!("{:08X}.in_conversation", actor.0)), Some(&1.0));
+        execute(
+            "startconversation",
+            &[Expr::Number(player.0 as f32)],
+            Some(actor),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            vm.locals.get(&format!("{:08X}.in_conversation", actor.0)),
+            Some(&1.0)
+        );
 
         // forcegreeting
         execute("forcegreeting", &[], Some(actor), &mut vm).unwrap();
-        assert_eq!(vm.locals.get(&format!("{:08X}.forcegreeting", actor.0)), Some(&1.0));
+        assert_eq!(
+            vm.locals.get(&format!("{:08X}.forcegreeting", actor.0)),
+            Some(&1.0)
+        );
 
         // goodbye
         execute("goodbye", &[], None, &mut vm).unwrap();
@@ -293,8 +343,17 @@ mod tests {
 
         // lookat / stoplookat
         let other = FormId(0x00040001);
-        execute("lookat", &[Expr::Number(other.0 as f32)], Some(actor), &mut vm).unwrap();
-        assert_eq!(vm.locals.get(&format!("{:08X}.lookat", actor.0)), Some(&(other.0 as f32)));
+        execute(
+            "lookat",
+            &[Expr::Number(other.0 as f32)],
+            Some(actor),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            vm.locals.get(&format!("{:08X}.lookat", actor.0)),
+            Some(&(other.0 as f32))
+        );
         execute("stoplookat", &[], Some(actor), &mut vm).unwrap();
     }
 }

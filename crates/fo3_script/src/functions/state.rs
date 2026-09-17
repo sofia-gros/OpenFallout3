@@ -2,7 +2,7 @@
 //! 参照元: references/openmw/components/esm4/script.hpp
 
 use crate::parser::Expr;
-use crate::vm::{ScriptVm, ScriptError};
+use crate::vm::{ScriptError, ScriptVm};
 use fo3_esm::FormId;
 
 pub fn execute(
@@ -95,9 +95,7 @@ pub fn execute(
             Ok(Some(0.0))
         }
         // FUN_GetScale = 24
-        "getscale" => {
-            Ok(Some(1.0))
-        }
+        "getscale" => Ok(Some(1.0)),
         // SetScale [Scale]
         "setscale" => {
             if !args.is_empty() {
@@ -106,13 +104,9 @@ pub fn execute(
             Ok(Some(0.0))
         }
         // FUN_GetDestroyed = 203
-        "getdestroyed" => {
-            Ok(Some(0.0))
-        }
+        "getdestroyed" => Ok(Some(0.0)),
         // SetDestroyed [1 or 0]
-        "setdestroyed" => {
-            Ok(Some(0.0))
-        }
+        "setdestroyed" => Ok(Some(0.0)),
         // PlaySound [SoundEDID]
         "playsound" => {
             if !args.is_empty() {
@@ -161,9 +155,7 @@ pub fn execute(
         // FUN_GetDestructionStage = 471
         // 参照元: references/openmw/components/esm4/script.hpp:280
         // オブジェクトの現在の破壊段階を取得する (0 = 未破壊)
-        "getdestructablestate" | "getdestructionstage" => {
-            Ok(Some(0.0))
-        }
+        "getdestructablestate" | "getdestructionstage" => Ok(Some(0.0)),
         // SetDestructionStage [Stage]
         // 参照元: GECK Wiki `SetDestructionStage`
         // オブジェクトの破壊段階を設定する
@@ -185,9 +177,7 @@ pub fn execute(
         // ResetHealth
         // 参照元: GECK Wiki `ResetHealth`
         // オブジェクト/アクターのヘルスを最大値にリセットする
-        "resethealth" => {
-            Ok(Some(0.0))
-        }
+        "resethealth" => Ok(Some(0.0)),
         // FUN_IsOwner = 278
         // 参照元: references/openmw/components/esm4/script.hpp:166
         // オブジェクトの所有者が指定されたアクターまたはファクションか判定する
@@ -209,9 +199,7 @@ pub fn execute(
         // FUN_IsInInterior = 300
         // 参照元: references/openmw/components/esm4/script.hpp:174
         // 現在のセルが室内（インテリア）かどうか判定する (1.0 = 室内, 0.0 = 屋外)
-        "isininterior" => {
-            Ok(Some(0.0))
-        }
+        "isininterior" => Ok(Some(0.0)),
         // FUN_GetInWorldspace = 310
         // 参照元: references/openmw/components/esm4/script.hpp:178
         // オブジェクトが指定されたワールドスペース内に存在するか判定する
@@ -251,9 +239,7 @@ pub fn execute(
         // FUN_GetDefaultOpen = 215
         // 参照元: references/openmw/components/esm4/script.hpp:161
         // ドアなどのオブジェクトがデフォルトで開いた状態かを判定する
-        "getdefaultopen" => {
-            Ok(Some(0.0))
-        }
+        "getdefaultopen" => Ok(Some(0.0)),
         // SetDefaultOpen [0/1]
         // 参照元: GECK Wiki `SetDefaultOpen`
         // ドアなどのオブジェクトのデフォルト開閉状態を設定する
@@ -266,33 +252,23 @@ pub fn execute(
         // FUN_IsRaining = 62
         // 参照元: references/openmw/components/esm4/script.hpp:104
         // 現在雨が降っているかどうか判定する
-        "israining" => {
-            Ok(Some(0.0))
-        }
+        "israining" => Ok(Some(0.0)),
         // FUN_IsSnowing = 75
         // 参照元: references/openmw/components/esm4/script.hpp:117
         // 現在雪が降っているかどうか判定する
-        "issnowing" => {
-            Ok(Some(0.0))
-        }
+        "issnowing" => Ok(Some(0.0)),
         // FUN_IsCloudy = 267
         // 参照元: references/openmw/components/esm4/script.hpp:164
         // 現在の天候が曇りかどうか判定する
-        "iscloudy" => {
-            Ok(Some(0.0))
-        }
+        "iscloudy" => Ok(Some(0.0)),
         // FUN_IsPleasant = 266
         // 参照元: references/openmw/components/esm4/script.hpp:163
         // 現在の天候が快晴・心地よい天気かどうか判定する
-        "ispleasant" => {
-            Ok(Some(1.0))
-        }
+        "ispleasant" => Ok(Some(1.0)),
         // FUN_GetCurrentWeatherPercent = 148
         // 参照元: references/openmw/components/esm4/script.hpp:148
         // 現在の天候への遷移率 (0.0〜1.0) を取得する
-        "getcurrentweatherpercent" => {
-            Ok(Some(1.0))
-        }
+        "getcurrentweatherpercent" => Ok(Some(1.0)),
         // FUN_GetIsCurrentWeather = 149
         // 参照元: references/openmw/components/esm4/script.hpp:149
         // 現在の天候が指定された天候IDと一致するか判定する
@@ -326,21 +302,15 @@ pub fn execute(
         // FUN_HasLoaded3D = 558
         // 参照元: references/openmw/components/esm4/script.hpp:298
         // オブジェクトの3Dメッシュがメモリ上にロードされているか判定する
-        "hasloaded3d" => {
-            Ok(Some(1.0))
-        }
+        "hasloaded3d" => Ok(Some(1.0)),
         // FUN_GetIsLockBroken = 522
         // 参照元: references/openmw/components/esm4/script.hpp:292
         // ドアやコンテナの鍵が破壊されているか判定する
-        "getislockbroken" => {
-            Ok(Some(0.0))
-        }
+        "getislockbroken" => Ok(Some(0.0)),
         // FUN_GetUnconscious = 242
         // 参照元: references/openmw/components/esm4/script.hpp:242
         // 対象が気絶状態にあるか判定する
-        "getunconscious" => {
-            Ok(Some(0.0))
-        }
+        "getunconscious" => Ok(Some(0.0)),
         // SetUnconscious [0/1]
         // 参照元: GECK Wiki `SetUnconscious`
         // 対象の気絶状態を設定する
@@ -353,9 +323,7 @@ pub fn execute(
         // FUN_GetRestrained = 244
         // 参照元: references/openmw/components/esm4/script.hpp:244
         // 対象が拘束状態にあるか判定する
-        "getrestrained" => {
-            Ok(Some(0.0))
-        }
+        "getrestrained" => Ok(Some(0.0)),
         // SetRestrained [0/1]
         // 参照元: GECK Wiki `SetRestrained`
         // 対象の拘束状態を設定する
@@ -380,37 +348,121 @@ mod tests {
         let obj = FormId(0x1000);
 
         // enable / disable / getdisabled
-        assert_eq!(execute("getdisabled", &[], Some(obj), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("getdisabled", &[], Some(obj), &mut vm).unwrap(),
+            Some(0.0)
+        );
         execute("disable", &[], Some(obj), &mut vm).unwrap();
-        assert_eq!(execute("getdisabled", &[], Some(obj), &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("getdisabled", &[], Some(obj), &mut vm).unwrap(),
+            Some(1.0)
+        );
         execute("enable", &[], Some(obj), &mut vm).unwrap();
-        assert_eq!(execute("getdisabled", &[], Some(obj), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("getdisabled", &[], Some(obj), &mut vm).unwrap(),
+            Some(0.0)
+        );
 
         // lock / unlock / getlocked
-        assert_eq!(execute("getlocked", &[], Some(obj), &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("getlocked", &[], Some(obj), &mut vm).unwrap(),
+            Some(1.0)
+        );
         execute("unlock", &[], Some(obj), &mut vm).unwrap();
-        assert_eq!(execute("getlocked", &[], Some(obj), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("getlocked", &[], Some(obj), &mut vm).unwrap(),
+            Some(0.0)
+        );
 
         // activate / isactionref
-        assert_eq!(execute("activate", &[], Some(obj), &mut vm).unwrap(), Some(1.0));
-        assert_eq!(execute("isactionref", &[Expr::Number(player.0 as f32)], Some(obj), &mut vm).unwrap(), Some(1.0));
-        assert_eq!(execute("isactionref", &[Expr::Number(0x9999 as f32)], Some(obj), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("activate", &[], Some(obj), &mut vm).unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(
+            execute(
+                "isactionref",
+                &[Expr::Number(player.0 as f32)],
+                Some(obj),
+                &mut vm
+            )
+            .unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(
+            execute(
+                "isactionref",
+                &[Expr::Number(0x9999 as f32)],
+                Some(obj),
+                &mut vm
+            )
+            .unwrap(),
+            Some(0.0)
+        );
 
         // destruction / health
-        assert_eq!(execute("getdestructablestate", &[], Some(obj), &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("damageobject", &[Expr::Number(50.0)], Some(obj), &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("resethealth", &[], Some(obj), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("getdestructablestate", &[], Some(obj), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("damageobject", &[Expr::Number(50.0)], Some(obj), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("resethealth", &[], Some(obj), &mut vm).unwrap(),
+            Some(0.0)
+        );
 
         // world / cell / weather
-        assert_eq!(execute("isininterior", &[], Some(obj), &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("getisinsamecell", &[Expr::Number(player.0 as f32)], Some(obj), &mut vm).unwrap(), Some(1.0));
-        assert_eq!(execute("ispleasant", &[], None, &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("isininterior", &[], Some(obj), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute(
+                "getisinsamecell",
+                &[Expr::Number(player.0 as f32)],
+                Some(obj),
+                &mut vm
+            )
+            .unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(
+            execute("ispleasant", &[], None, &mut vm).unwrap(),
+            Some(1.0)
+        );
         assert_eq!(execute("israining", &[], None, &mut vm).unwrap(), Some(0.0));
 
         // references / load
-        assert_eq!(execute("getisreference", &[Expr::Number(obj.0 as f32)], Some(obj), &mut vm).unwrap(), Some(1.0));
-        assert_eq!(execute("getisreference", &[Expr::Number(player.0 as f32)], Some(obj), &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("hasloaded3d", &[], Some(obj), &mut vm).unwrap(), Some(1.0));
-        assert_eq!(execute("getunconscious", &[], Some(obj), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute(
+                "getisreference",
+                &[Expr::Number(obj.0 as f32)],
+                Some(obj),
+                &mut vm
+            )
+            .unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(
+            execute(
+                "getisreference",
+                &[Expr::Number(player.0 as f32)],
+                Some(obj),
+                &mut vm
+            )
+            .unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("hasloaded3d", &[], Some(obj), &mut vm).unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(
+            execute("getunconscious", &[], Some(obj), &mut vm).unwrap(),
+            Some(0.0)
+        );
     }
 }

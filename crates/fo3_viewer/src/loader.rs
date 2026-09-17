@@ -183,7 +183,10 @@ pub fn load_scene(
                 HashMap::new(),
             )
         }
-        ViewerTarget::Cell(..) | ViewerTarget::World(..) | ViewerTarget::NewGame { .. } => {
+        ViewerTarget::Cell(..)
+        | ViewerTarget::World(..)
+        | ViewerTarget::WorldGrids(..)
+        | ViewerTarget::NewGame { .. } => {
             let esm_path = Path::new(data_dir).join("Fallout3.esm");
             let mut esm_reader = EsmReader::open(&esm_path).expect("Failed to open Fallout3.esm");
 
@@ -234,6 +237,24 @@ pub fn load_scene(
                         );
                     }
                     cells
+                }
+                ViewerTarget::WorldGrids(world_edid, grids) => {
+                    let (_, group_start, group_end) = esm_reader
+                        .find_world_by_edid(world_edid)
+                        .expect("Failed to search world")
+                        .unwrap();
+                    let mut all_cells = Vec::new();
+                    for g in grids {
+                        if let Ok((_, mut cells)) = esm_reader.read_cells_in_world_region(
+                            group_start,
+                            group_end,
+                            Some(*g),
+                            0,
+                        ) {
+                            all_cells.append(&mut cells);
+                        }
+                    }
+                    all_cells
                 }
                 _ => unreachable!(),
             };
@@ -674,11 +695,14 @@ pub fn load_scene(
                 })
                 .collect();
 
-            let cell_refs: Vec<(u32, &[(&NifFile, NiTransform)], Option<(&LandRecord, i32, i32)>)> =
-                cell_inputs
-                    .iter()
-                    .map(|(cell_id, refs, land_info)| (*cell_id, refs.as_slice(), *land_info))
-                    .collect();
+            let cell_refs: Vec<(
+                u32,
+                &[(&NifFile, NiTransform)],
+                Option<(&LandRecord, i32, i32)>,
+            )> = cell_inputs
+                .iter()
+                .map(|(cell_id, refs, land_info)| (*cell_id, refs.as_slice(), *land_info))
+                .collect();
 
             let landscape_texture_map = esm_reader.read_landscape_texture_map().ok();
             if let Some(ref tex_map) = landscape_texture_map {
@@ -1006,9 +1030,15 @@ pub fn load_scene(
             for (cell_id, _, land_info) in &cell_inputs {
                 if let Some((land, gx, gy)) = land_info {
                     let heights = land.compute_heights();
-                    if let Some((_, col_handle)) = physics_world.add_land_collision(&heights, *gx, *gy) {
+                    if let Some((_, col_handle)) =
+                        physics_world.add_land_collision(&heights, *gx, *gy)
+                    {
                         total_colliders += 1;
-                        physics_world.cell_colliders.entry(*cell_id).or_default().push(col_handle);
+                        physics_world
+                            .cell_colliders
+                            .entry(*cell_id)
+                            .or_default()
+                            .push(col_handle);
                     }
                 }
             }
@@ -1016,7 +1046,11 @@ pub fn load_scene(
             // 2. 配置オブジェクト (REFR) コライダーの登録および RefrBinding 構築
             let mut refr_bindings = HashMap::new();
             let mut flat_idx = 0;
-            for (cell_id, cell_items) in cells.iter().zip(all_cell_items.iter()).map(|(c, items)| (c.0.form_id.0, items)) {
+            for (cell_id, cell_items) in cells
+                .iter()
+                .zip(all_cell_items.iter())
+                .map(|(c, items)| (c.0.form_id.0, items))
+            {
                 for (form_id, nif, world_transform, _record_type, _model_path) in cell_items {
                     let col_data = extract_collision_data(nif);
                     let mut rigid_bodies = Vec::new();
@@ -1030,89 +1064,93 @@ pub fn load_scene(
                             *form_id as u128,
                         );
                         let col_handles: Vec<_> = handles.iter().map(|(_, c)| *c).collect();
-                        physics_world.cell_colliders.entry(cell_id).or_default().extend(col_handles);
+                        physics_world
+                            .cell_colliders
+                            .entry(cell_id)
+                            .or_default()
+                            .extend(col_handles);
                         rigid_bodies = handles.into_iter().map(|(rb, _)| rb).collect();
                     }
-                let mesh_range = scene
-                    .refr_mesh_ranges
-                    .get(flat_idx)
-                    .cloned()
-                    .unwrap_or(0..0);
-                flat_idx += 1;
-                let all_meshes: Vec<usize> = (mesh_range.start..mesh_range.end).collect();
+                    let mesh_range = scene
+                        .refr_mesh_ranges
+                        .get(flat_idx)
+                        .cloned()
+                        .unwrap_or(0..0);
+                    flat_idx += 1;
+                    let all_meshes: Vec<usize> = (mesh_range.start..mesh_range.end).collect();
 
-                let open_clip =
-                    fo3_render::animation::AnimationClip::from_nif_sequence(nif, "Open");
-                let close_clip =
-                    fo3_render::animation::AnimationClip::from_nif_sequence(nif, "Close");
+                    let open_clip =
+                        fo3_render::animation::AnimationClip::from_nif_sequence(nif, "Open");
+                    let close_clip =
+                        fo3_render::animation::AnimationClip::from_nif_sequence(nif, "Close");
 
-                let mut static_mesh_indices = Vec::new();
-                let mut static_rigid_bodies = Vec::new();
-                let mut moving_parts = Vec::new();
+                    let mut static_mesh_indices = Vec::new();
+                    let mut static_rigid_bodies = Vec::new();
+                    let mut moving_parts = Vec::new();
 
-                if let Some(ref clip) = open_clip {
-                    // NIF にシーケンスがある場合 (Vault ドア、スライディングドア、Shack ドア等)
-                    for (channel_name, _) in &clip.channels {
+                    if let Some(ref clip) = open_clip {
+                        // NIF にシーケンスがある場合 (Vault ドア、スライディングドア、Shack ドア等)
+                        for (channel_name, _) in &clip.channels {
+                            moving_parts.push(MovingPartBinding {
+                                mesh_indices: all_meshes.clone(),
+                                rigid_bodies: rigid_bodies.clone(),
+                                node_name: channel_name.clone(),
+                                local_bind_matrix: glam::Mat4::IDENTITY,
+                                pivot_offset: glam::Vec3::ZERO,
+                                rotation_axis: glam::Vec3::Z,
+                                max_angle: -std::f32::consts::PI * 0.5,
+                            });
+                        }
+                    } else if all_meshes.len() > 1 {
+                        // シーケンスがなく複数メッシュが存在する場合 (例: 金属箱 MetalBox01)
+                        // 最初のメッシュを固定本体、2番目以降を可動蓋とする
+                        static_mesh_indices.push(all_meshes[0]);
+                        if !rigid_bodies.is_empty() {
+                            static_rigid_bodies.push(rigid_bodies[0]);
+                        }
+                        let moving_meshes = all_meshes[1..].to_vec();
+                        let moving_rb = if rigid_bodies.len() > 1 {
+                            rigid_bodies[1..].to_vec()
+                        } else {
+                            Vec::new()
+                        };
                         moving_parts.push(MovingPartBinding {
-                            mesh_indices: all_meshes.clone(),
-                            rigid_bodies: rigid_bodies.clone(),
-                            node_name: channel_name.clone(),
+                            mesh_indices: moving_meshes,
+                            rigid_bodies: moving_rb,
+                            node_name: "Lid".to_string(),
+                            local_bind_matrix: glam::Mat4::IDENTITY,
+                            pivot_offset: glam::Vec3::new(0.0, -15.0, 10.0),
+                            rotation_axis: glam::Vec3::X,
+                            max_angle: std::f32::consts::PI * 0.45,
+                        });
+                    } else {
+                        // 単一メッシュのドア等: 全体をヒンジ回転パーツとする
+                        moving_parts.push(MovingPartBinding {
+                            mesh_indices: all_meshes,
+                            rigid_bodies,
+                            node_name: "Door".to_string(),
                             local_bind_matrix: glam::Mat4::IDENTITY,
                             pivot_offset: glam::Vec3::ZERO,
                             rotation_axis: glam::Vec3::Z,
                             max_angle: -std::f32::consts::PI * 0.5,
                         });
                     }
-                } else if all_meshes.len() > 1 {
-                    // シーケンスがなく複数メッシュが存在する場合 (例: 金属箱 MetalBox01)
-                    // 最初のメッシュを固定本体、2番目以降を可動蓋とする
-                    static_mesh_indices.push(all_meshes[0]);
-                    if !rigid_bodies.is_empty() {
-                        static_rigid_bodies.push(rigid_bodies[0]);
-                    }
-                    let moving_meshes = all_meshes[1..].to_vec();
-                    let moving_rb = if rigid_bodies.len() > 1 {
-                        rigid_bodies[1..].to_vec()
-                    } else {
-                        Vec::new()
-                    };
-                    moving_parts.push(MovingPartBinding {
-                        mesh_indices: moving_meshes,
-                        rigid_bodies: moving_rb,
-                        node_name: "Lid".to_string(),
-                        local_bind_matrix: glam::Mat4::IDENTITY,
-                        pivot_offset: glam::Vec3::new(0.0, -15.0, 10.0),
-                        rotation_axis: glam::Vec3::X,
-                        max_angle: std::f32::consts::PI * 0.45,
-                    });
-                } else {
-                    // 単一メッシュのドア等: 全体をヒンジ回転パーツとする
-                    moving_parts.push(MovingPartBinding {
-                        mesh_indices: all_meshes,
-                        rigid_bodies,
-                        node_name: "Door".to_string(),
-                        local_bind_matrix: glam::Mat4::IDENTITY,
-                        pivot_offset: glam::Vec3::ZERO,
-                        rotation_axis: glam::Vec3::Z,
-                        max_angle: -std::f32::consts::PI * 0.5,
-                    });
-                }
 
-                refr_bindings.insert(
-                    *form_id,
-                    RefrBinding {
-                        form_id: *form_id,
-                        static_mesh_indices,
-                        static_rigid_bodies,
-                        moving_parts,
-                        base_translation: world_transform.translation,
-                        base_rotation: glam::Quat::from_mat3(&world_transform.rotation),
-                        open_clip,
-                        close_clip,
-                        nif: Some(nif.clone()),
-                    },
-                );
-            }
+                    refr_bindings.insert(
+                        *form_id,
+                        RefrBinding {
+                            form_id: *form_id,
+                            static_mesh_indices,
+                            static_rigid_bodies,
+                            moving_parts,
+                            base_translation: world_transform.translation,
+                            base_rotation: glam::Quat::from_mat3(&world_transform.rotation),
+                            open_clip,
+                            close_clip,
+                            nif: Some(nif.clone()),
+                        },
+                    );
+                }
             } // end cell_id loop
             println!("物理ワールド構築完了: 登録剛体数 {}", total_colliders);
             (

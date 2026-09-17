@@ -2,7 +2,7 @@
 //! 参照元: references/openmw/components/esm4/script.hpp:214, 223, 449
 
 use crate::parser::Expr;
-use crate::vm::{ScriptVm, ScriptError};
+use crate::vm::{ScriptError, ScriptVm};
 use fo3_esm::FormId;
 
 pub fn execute(
@@ -49,7 +49,10 @@ pub fn execute(
                 let perk_id = get_form_id(&args[0])?;
                 let key = format!("{:08X}.perk.{:08X}", target.0, perk_id.0);
                 vm.locals.remove(&key);
-                println!("[Script] RemovePerk: Target {:?}, Perk {:?}", target, perk_id);
+                println!(
+                    "[Script] RemovePerk: Target {:?}, Perk {:?}",
+                    target, perk_id
+                );
             }
             Ok(Some(0.0))
         }
@@ -59,7 +62,10 @@ pub fn execute(
                 let spell_id = get_form_id(&args[0])?;
                 let key = format!("{:08X}.spell.{:08X}", target.0, spell_id.0);
                 vm.locals.insert(key, 1.0);
-                println!("[Script] AddSpell: Target {:?}, Spell {:?}", target, spell_id);
+                println!(
+                    "[Script] AddSpell: Target {:?}, Spell {:?}",
+                    target, spell_id
+                );
             }
             Ok(Some(0.0))
         }
@@ -69,7 +75,10 @@ pub fn execute(
                 let spell_id = get_form_id(&args[0])?;
                 let key = format!("{:08X}.spell.{:08X}", target.0, spell_id.0);
                 vm.locals.remove(&key);
-                println!("[Script] RemoveSpell: Target {:?}, Spell {:?}", target, spell_id);
+                println!(
+                    "[Script] RemoveSpell: Target {:?}, Spell {:?}",
+                    target, spell_id
+                );
             }
             Ok(Some(0.0))
         }
@@ -106,7 +115,10 @@ pub fn execute(
                     None
                 };
                 let caster = subject.unwrap_or(FormId(0x14));
-                println!("[Script] Cast: Caster {:?}, Spell {:?}, Target {:?}", caster, spell_id, cast_target);
+                println!(
+                    "[Script] Cast: Caster {:?}, Spell {:?}, Target {:?}",
+                    caster, spell_id, cast_target
+                );
             }
             Ok(Some(0.0))
         }
@@ -125,7 +137,9 @@ pub fn execute(
         // 参照元: GECK command: DispelAllSpells
         "dispelallspells" | "removespells" => {
             let prefix = format!("{:08X}.spell.", target.0);
-            let keys_to_remove: Vec<String> = vm.locals.keys()
+            let keys_to_remove: Vec<String> = vm
+                .locals
+                .keys()
                 .filter(|k| k.starts_with(&prefix))
                 .cloned()
                 .collect();
@@ -185,7 +199,11 @@ pub fn execute(
                 let query_align = vm.eval_ast_expr(&args[0], subject)? as u32;
                 let key = format!("{:08X}.alignment", target.0);
                 let current_align = vm.locals.get(&key).copied().unwrap_or(1.0) as u32; // デフォルト中立
-                return Ok(Some(if query_align == current_align { 1.0 } else { 0.0 }));
+                return Ok(Some(if query_align == current_align {
+                    1.0
+                } else {
+                    0.0
+                }));
             }
             Ok(Some(0.0))
         }
@@ -266,7 +284,10 @@ pub fn execute(
                 };
                 let key = format!("{:08X}.perk.{:08X}", target.0, perk_id.0);
                 vm.locals.insert(key, rank);
-                println!("[Script] AddPerkRank: Target {:?}, Perk {:?}, Rank {}", target, perk_id, rank);
+                println!(
+                    "[Script] AddPerkRank: Target {:?}, Perk {:?}, Rank {}",
+                    target, perk_id, rank
+                );
             }
             Ok(Some(0.0))
         }
@@ -284,7 +305,10 @@ pub fn execute(
         "playshader" => {
             if !args.is_empty() {
                 let shader_id = get_form_id(&args[0])?;
-                println!("[Script] PlayShader: Target {:?}, Shader {:?}", target, shader_id);
+                println!(
+                    "[Script] PlayShader: Target {:?}, Shader {:?}",
+                    target, shader_id
+                );
             }
             Ok(Some(0.0))
         }
@@ -292,7 +316,10 @@ pub fn execute(
         "removeshader" => {
             if !args.is_empty() {
                 let shader_id = get_form_id(&args[0])?;
-                println!("[Script] RemoveShader: Target {:?}, Shader {:?}", target, shader_id);
+                println!(
+                    "[Script] RemoveShader: Target {:?}, Shader {:?}",
+                    target, shader_id
+                );
             }
             Ok(Some(0.0))
         }
@@ -300,7 +327,10 @@ pub fn execute(
         "triggerhitshader" => {
             if !args.is_empty() {
                 let shader_id = get_form_id(&args[0])?;
-                println!("[Script] TriggerHitShader: Target {:?}, Shader {:?}", target, shader_id);
+                println!(
+                    "[Script] TriggerHitShader: Target {:?}, Shader {:?}",
+                    target, shader_id
+                );
             }
             Ok(Some(0.0))
         }
@@ -320,42 +350,188 @@ mod tests {
         let perk_id = FormId(0x00094EBF);
 
         // Spell
-        assert_eq!(execute("isspelltarget", &[Expr::Number(spell_id.0 as f32)], Some(player), &mut vm).unwrap(), Some(0.0));
-        execute("addspell", &[Expr::Number(spell_id.0 as f32)], Some(player), &mut vm).unwrap();
-        assert_eq!(execute("isspelltarget", &[Expr::Number(spell_id.0 as f32)], Some(player), &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute(
+                "isspelltarget",
+                &[Expr::Number(spell_id.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(0.0)
+        );
+        execute(
+            "addspell",
+            &[Expr::Number(spell_id.0 as f32)],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "isspelltarget",
+                &[Expr::Number(spell_id.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(1.0)
+        );
 
         // Cast & Dispel
-        execute("cast", &[Expr::Number(spell_id.0 as f32), Expr::Number(player.0 as f32)], Some(player), &mut vm).unwrap();
-        execute("dispel", &[Expr::Number(spell_id.0 as f32)], Some(player), &mut vm).unwrap();
-        assert_eq!(execute("isspelltarget", &[Expr::Number(spell_id.0 as f32)], Some(player), &mut vm).unwrap(), Some(0.0));
+        execute(
+            "cast",
+            &[
+                Expr::Number(spell_id.0 as f32),
+                Expr::Number(player.0 as f32),
+            ],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
+        execute(
+            "dispel",
+            &[Expr::Number(spell_id.0 as f32)],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "isspelltarget",
+                &[Expr::Number(spell_id.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(0.0)
+        );
 
         // DispelAllSpells
-        execute("addspell", &[Expr::Number(spell_id.0 as f32)], Some(player), &mut vm).unwrap();
+        execute(
+            "addspell",
+            &[Expr::Number(spell_id.0 as f32)],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
         execute("dispelallspells", &[], Some(player), &mut vm).unwrap();
-        assert_eq!(execute("isspelltarget", &[Expr::Number(spell_id.0 as f32)], Some(player), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute(
+                "isspelltarget",
+                &[Expr::Number(spell_id.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(0.0)
+        );
 
         // Perk & PerkRank
-        assert_eq!(execute("hasperk", &[Expr::Number(perk_id.0 as f32)], Some(player), &mut vm).unwrap(), Some(0.0));
-        execute("addperk", &[Expr::Number(perk_id.0 as f32)], Some(player), &mut vm).unwrap();
-        assert_eq!(execute("hasperk", &[Expr::Number(perk_id.0 as f32)], Some(player), &mut vm).unwrap(), Some(1.0));
-        execute("addperkrank", &[Expr::Number(perk_id.0 as f32), Expr::Number(3.0)], Some(player), &mut vm).unwrap();
-        assert_eq!(execute("getperkrank", &[Expr::Number(perk_id.0 as f32)], Some(player), &mut vm).unwrap(), Some(3.0));
-        execute("removeperk", &[Expr::Number(perk_id.0 as f32)], Some(player), &mut vm).unwrap();
-        assert_eq!(execute("hasperk", &[Expr::Number(perk_id.0 as f32)], Some(player), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute(
+                "hasperk",
+                &[Expr::Number(perk_id.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(0.0)
+        );
+        execute(
+            "addperk",
+            &[Expr::Number(perk_id.0 as f32)],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "hasperk",
+                &[Expr::Number(perk_id.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(1.0)
+        );
+        execute(
+            "addperkrank",
+            &[Expr::Number(perk_id.0 as f32), Expr::Number(3.0)],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "getperkrank",
+                &[Expr::Number(perk_id.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(3.0)
+        );
+        execute(
+            "removeperk",
+            &[Expr::Number(perk_id.0 as f32)],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "hasperk",
+                &[Expr::Number(perk_id.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(0.0)
+        );
 
         // ImageSpaceModifier (imod, rimod)
-        execute("imod", &[Expr::Variable("PipboyImod".into())], Some(player), &mut vm).unwrap();
+        execute(
+            "imod",
+            &[Expr::Variable("PipboyImod".into())],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
         assert_eq!(vm.active_imods, vec!["PipboyImod".to_string()]);
-        execute("rimod", &[Expr::Variable("PipboyImod".into())], Some(player), &mut vm).unwrap();
+        execute(
+            "rimod",
+            &[Expr::Variable("PipboyImod".into())],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
         assert!(vm.active_imods.is_empty());
 
         // Status & Conditions
-        assert_eq!(execute("hasloaded3d", &[], Some(player), &mut vm).unwrap(), Some(1.0));
-        assert_eq!(execute("canhaveflames", &[], Some(player), &mut vm).unwrap(), Some(1.0));
-        assert_eq!(execute("getradiationlevel", &[], Some(player), &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("getdisease", &[], Some(player), &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("getvampire", &[], Some(player), &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("isincombat", &[], Some(player), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("hasloaded3d", &[], Some(player), &mut vm).unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(
+            execute("canhaveflames", &[], Some(player), &mut vm).unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(
+            execute("getradiationlevel", &[], Some(player), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("getdisease", &[], Some(player), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("getvampire", &[], Some(player), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("isincombat", &[], Some(player), &mut vm).unwrap(),
+            Some(0.0)
+        );
     }
 }
-

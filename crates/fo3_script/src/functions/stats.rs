@@ -2,7 +2,7 @@
 //! 参照元: references/openmw/components/esm4/script.hpp:77, 277, 431, 495
 
 use crate::parser::Expr;
-use crate::vm::{ScriptVm, ScriptError};
+use crate::vm::{ScriptError, ScriptVm};
 use fo3_esm::FormId;
 
 pub fn execute(
@@ -467,58 +467,235 @@ mod tests {
         let actor = FormId(0x1000);
 
         // レベル操作のテスト
-        assert_eq!(execute("getlevel", &[], Some(actor), &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("getlevel", &[], Some(actor), &mut vm).unwrap(),
+            Some(1.0)
+        );
         execute("setlevel", &[Expr::Number(5.0)], Some(actor), &mut vm).unwrap();
-        assert_eq!(execute("getlevel", &[], Some(actor), &mut vm).unwrap(), Some(5.0));
+        assert_eq!(
+            execute("getlevel", &[], Some(actor), &mut vm).unwrap(),
+            Some(5.0)
+        );
         execute("modpclevel", &[Expr::Number(2.0)], Some(actor), &mut vm).unwrap();
-        assert_eq!(execute("getlevel", &[], Some(actor), &mut vm).unwrap(), Some(7.0));
+        assert_eq!(
+            execute("getlevel", &[], Some(actor), &mut vm).unwrap(),
+            Some(7.0)
+        );
         execute("advlevel", &[], Some(actor), &mut vm).unwrap();
-        assert_eq!(execute("getlevel", &[], Some(actor), &mut vm).unwrap(), Some(8.0));
+        assert_eq!(
+            execute("getlevel", &[], Some(actor), &mut vm).unwrap(),
+            Some(8.0)
+        );
 
         // ActorValue情報の取得・ダメージ・回復
-        execute("setav", &[Expr::Variable("strength".into()), Expr::Number(10.0)], Some(actor), &mut vm).unwrap();
-        assert_eq!(execute("getavinfo", &[Expr::Variable("strength".into())], Some(actor), &mut vm).unwrap(), Some(10.0));
-        execute("damageavinfo", &[Expr::Variable("strength".into()), Expr::Number(3.0)], Some(actor), &mut vm).unwrap();
-        assert_eq!(execute("getavinfo", &[Expr::Variable("strength".into())], Some(actor), &mut vm).unwrap(), Some(7.0));
-        execute("restoreavinfo", &[Expr::Variable("strength".into()), Expr::Number(2.0)], Some(actor), &mut vm).unwrap();
-        assert_eq!(execute("getavinfo", &[Expr::Variable("strength".into())], Some(actor), &mut vm).unwrap(), Some(9.0));
+        execute(
+            "setav",
+            &[Expr::Variable("strength".into()), Expr::Number(10.0)],
+            Some(actor),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "getavinfo",
+                &[Expr::Variable("strength".into())],
+                Some(actor),
+                &mut vm
+            )
+            .unwrap(),
+            Some(10.0)
+        );
+        execute(
+            "damageavinfo",
+            &[Expr::Variable("strength".into()), Expr::Number(3.0)],
+            Some(actor),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "getavinfo",
+                &[Expr::Variable("strength".into())],
+                Some(actor),
+                &mut vm
+            )
+            .unwrap(),
+            Some(7.0)
+        );
+        execute(
+            "restoreavinfo",
+            &[Expr::Variable("strength".into()), Expr::Number(2.0)],
+            Some(actor),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "getavinfo",
+                &[Expr::Variable("strength".into())],
+                Some(actor),
+                &mut vm
+            )
+            .unwrap(),
+            Some(9.0)
+        );
 
         // 取引ゴールド
-        assert_eq!(execute("getbartergold", &[], Some(actor), &mut vm).unwrap(), Some(100.0));
-        execute("setbartergold", &[Expr::Number(500.0)], Some(actor), &mut vm).unwrap();
-        assert_eq!(execute("getbartergold", &[], Some(actor), &mut vm).unwrap(), Some(500.0));
-        execute("modbartergold", &[Expr::Number(150.0)], Some(actor), &mut vm).unwrap();
-        assert_eq!(execute("getbartergold", &[], Some(actor), &mut vm).unwrap(), Some(650.0));
+        assert_eq!(
+            execute("getbartergold", &[], Some(actor), &mut vm).unwrap(),
+            Some(100.0)
+        );
+        execute(
+            "setbartergold",
+            &[Expr::Number(500.0)],
+            Some(actor),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute("getbartergold", &[], Some(actor), &mut vm).unwrap(),
+            Some(500.0)
+        );
+        execute(
+            "modbartergold",
+            &[Expr::Number(150.0)],
+            Some(actor),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute("getbartergold", &[], Some(actor), &mut vm).unwrap(),
+            Some(650.0)
+        );
 
         // 放射線
-        assert_eq!(execute("getradiationlevel", &[], Some(actor), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("getradiationlevel", &[], Some(actor), &mut vm).unwrap(),
+            Some(0.0)
+        );
         execute("damagerad", &[Expr::Number(50.0)], Some(actor), &mut vm).unwrap();
-        assert_eq!(execute("getradiationlevel", &[], Some(actor), &mut vm).unwrap(), Some(50.0));
+        assert_eq!(
+            execute("getradiationlevel", &[], Some(actor), &mut vm).unwrap(),
+            Some(50.0)
+        );
         execute("restorerad", &[Expr::Number(20.0)], Some(actor), &mut vm).unwrap();
-        assert_eq!(execute("getradiationlevel", &[], Some(actor), &mut vm).unwrap(), Some(30.0));
+        assert_eq!(
+            execute("getradiationlevel", &[], Some(actor), &mut vm).unwrap(),
+            Some(30.0)
+        );
 
         // 武器耐久度、アーマーDR、脅威比率、XP
-        assert_eq!(execute("getweaponhealthperc", &[], Some(actor), &mut vm).unwrap(), Some(1.0));
-        assert_eq!(execute("getarmorratingupperbody", &[], Some(actor), &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("getthreatratio", &[], Some(actor), &mut vm).unwrap(), Some(1.0));
-        assert_eq!(execute("getxpfornextlevel", &[], Some(actor), &mut vm).unwrap(), Some(8000.0)); // レベル8 * 1000
+        assert_eq!(
+            execute("getweaponhealthperc", &[], Some(actor), &mut vm).unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(
+            execute("getarmorratingupperbody", &[], Some(actor), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("getthreatratio", &[], Some(actor), &mut vm).unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(
+            execute("getxpfornextlevel", &[], Some(actor), &mut vm).unwrap(),
+            Some(8000.0)
+        ); // レベル8 * 1000
         execute("rewardxp", &[Expr::Number(250.0)], Some(actor), &mut vm).unwrap();
 
         // 統計値（MiscStat）
-        assert_eq!(execute("getpcmiscstat", &[Expr::Number(1.0)], None, &mut vm).unwrap(), Some(0.0));
-        execute("setpcmiscstat", &[Expr::Number(1.0), Expr::Number(10.0)], None, &mut vm).unwrap();
-        assert_eq!(execute("getpcmiscstat", &[Expr::Number(1.0)], None, &mut vm).unwrap(), Some(10.0));
-        execute("modpcmiscstat", &[Expr::Number(1.0), Expr::Number(5.0)], None, &mut vm).unwrap();
-        assert_eq!(execute("getpcmiscstat", &[Expr::Number(1.0)], None, &mut vm).unwrap(), Some(15.0));
+        assert_eq!(
+            execute("getpcmiscstat", &[Expr::Number(1.0)], None, &mut vm).unwrap(),
+            Some(0.0)
+        );
+        execute(
+            "setpcmiscstat",
+            &[Expr::Number(1.0), Expr::Number(10.0)],
+            None,
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute("getpcmiscstat", &[Expr::Number(1.0)], None, &mut vm).unwrap(),
+            Some(10.0)
+        );
+        execute(
+            "modpcmiscstat",
+            &[Expr::Number(1.0), Expr::Number(5.0)],
+            None,
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute("getpcmiscstat", &[Expr::Number(1.0)], None, &mut vm).unwrap(),
+            Some(15.0)
+        );
 
         // 評判（Reputation）
         let faction = FormId(0x3000);
-        assert_eq!(execute("getreputation", &[Expr::Number(faction.0 as f32)], Some(actor), &mut vm).unwrap(), Some(0.0));
-        execute("setreputation", &[Expr::Number(faction.0 as f32), Expr::Number(80.0)], Some(actor), &mut vm).unwrap();
-        assert_eq!(execute("getreputation", &[Expr::Number(faction.0 as f32)], Some(actor), &mut vm).unwrap(), Some(80.0));
-        execute("modreputation", &[Expr::Number(faction.0 as f32), Expr::Number(10.0)], Some(actor), &mut vm).unwrap();
-        assert_eq!(execute("getreputation", &[Expr::Number(faction.0 as f32)], Some(actor), &mut vm).unwrap(), Some(90.0));
-        assert_eq!(execute("getreputationpct", &[Expr::Number(faction.0 as f32)], Some(actor), &mut vm).unwrap(), Some(50.0));
-        assert_eq!(execute("getreputationthreshold", &[Expr::Number(faction.0 as f32)], Some(actor), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute(
+                "getreputation",
+                &[Expr::Number(faction.0 as f32)],
+                Some(actor),
+                &mut vm
+            )
+            .unwrap(),
+            Some(0.0)
+        );
+        execute(
+            "setreputation",
+            &[Expr::Number(faction.0 as f32), Expr::Number(80.0)],
+            Some(actor),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "getreputation",
+                &[Expr::Number(faction.0 as f32)],
+                Some(actor),
+                &mut vm
+            )
+            .unwrap(),
+            Some(80.0)
+        );
+        execute(
+            "modreputation",
+            &[Expr::Number(faction.0 as f32), Expr::Number(10.0)],
+            Some(actor),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "getreputation",
+                &[Expr::Number(faction.0 as f32)],
+                Some(actor),
+                &mut vm
+            )
+            .unwrap(),
+            Some(90.0)
+        );
+        assert_eq!(
+            execute(
+                "getreputationpct",
+                &[Expr::Number(faction.0 as f32)],
+                Some(actor),
+                &mut vm
+            )
+            .unwrap(),
+            Some(50.0)
+        );
+        assert_eq!(
+            execute(
+                "getreputationthreshold",
+                &[Expr::Number(faction.0 as f32)],
+                Some(actor),
+                &mut vm
+            )
+            .unwrap(),
+            Some(0.0)
+        );
     }
 }

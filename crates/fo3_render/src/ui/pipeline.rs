@@ -21,7 +21,7 @@ pub struct UiRenderer {
     texture_bind_group_layout: wgpu::BindGroupLayout,
     uniform_bind_group: wgpu::BindGroup,
     uniform_buffer: wgpu::Buffer,
-    
+
     // Texture caches
     font_bind_group: wgpu::BindGroup,
     solid_color_bind_group: wgpu::BindGroup,
@@ -80,7 +80,11 @@ impl UiRenderer {
         // 単色テクスチャ生成 (SolidColor)
         let solid_color_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("UI Solid Color Texture"),
-            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -101,9 +105,14 @@ impl UiRenderer {
                 bytes_per_row: Some(4),
                 rows_per_image: Some(1),
             },
-            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
         );
-        let solid_color_view = solid_color_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let solid_color_view =
+            solid_color_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("UI Sampler"),
@@ -126,10 +135,10 @@ impl UiRenderer {
         });
 
         // Group 0: Uniform (Resolution)
-        let uniform_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("UI Uniform Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("UI Uniform Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
@@ -138,43 +147,41 @@ impl UiRenderer {
                         min_binding_size: None,
                     },
                     count: None,
-                },
-            ],
-        });
+                }],
+            });
 
         let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("UI Uniform Bind Group"),
             layout: &uniform_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
         });
 
         // Group 1: Texture
-        let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("UI Texture Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("UI Texture Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
 
         let font_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("UI Font Texture Bind Group"),
@@ -341,7 +348,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             if let crate::ui::font::UiTexture::Image(ref path) = cmd.texture {
                 if !self.dynamic_bind_groups.contains_key(path) {
                     if let Ok(bytes) = vfs.read(path) {
-                        if let Ok(gpu_tex) = crate::texture::GpuTexture::from_dds_bytes(device, queue, &bytes, Some(path)) {
+                        if let Ok(gpu_tex) = crate::texture::GpuTexture::from_dds_bytes(
+                            device,
+                            queue,
+                            &bytes,
+                            Some(path),
+                        ) {
                             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                                 label: Some(path),
                                 layout: &self.texture_bind_group_layout,
@@ -352,7 +364,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                                     },
                                     wgpu::BindGroupEntry {
                                         binding: 1,
-                                        resource: wgpu::BindingResource::Sampler(&self.default_sampler),
+                                        resource: wgpu::BindingResource::Sampler(
+                                            &self.default_sampler,
+                                        ),
                                     },
                                 ],
                             });
@@ -399,12 +413,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 let bind_group = match &cmd.texture {
                     crate::ui::font::UiTexture::SolidColor => &self.solid_color_bind_group,
                     crate::ui::font::UiTexture::Font => &self.font_bind_group,
-                    crate::ui::font::UiTexture::Image(path) => {
-                        self.dynamic_bind_groups.get(path).unwrap_or(&self.solid_color_bind_group)
-                    }
+                    crate::ui::font::UiTexture::Image(path) => self
+                        .dynamic_bind_groups
+                        .get(path)
+                        .unwrap_or(&self.solid_color_bind_group),
                 };
                 render_pass.set_bind_group(1, bind_group, &[]);
-                render_pass.draw_indexed(cmd.index_start..(cmd.index_start + cmd.index_count), 0, 0..1);
+                render_pass.draw_indexed(
+                    cmd.index_start..(cmd.index_start + cmd.index_count),
+                    0,
+                    0..1,
+                );
             }
         }
     }

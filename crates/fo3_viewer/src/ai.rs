@@ -18,7 +18,6 @@ pub struct ActorAiState {
     pub path_target_index: usize,
 }
 
-
 #[derive(Default)]
 pub struct AiManager {
     pub actors: HashMap<FormId, ActorAiState>,
@@ -119,7 +118,10 @@ impl AiManager {
                         // 目的地座標を取得してNavPathを算出
                         if let Some(loc) = &pack.location {
                             if let Some(target_fid) = loc.form_id {
-                                if let (Some(&start_pos), Some(&end_pos)) = (actor_positions.get(&state.form_id), actor_positions.get(&target_fid)) {
+                                if let (Some(&start_pos), Some(&end_pos)) = (
+                                    actor_positions.get(&state.form_id),
+                                    actor_positions.get(&target_fid),
+                                ) {
                                     // 簡易的に最も近いNavMeshポリゴンを探索 (本来は空間分割・レイキャスト)
                                     let mut best_start = None;
                                     let mut best_start_dist = f32::MAX;
@@ -141,8 +143,11 @@ impl AiManager {
                                         }
                                     }
 
-                                    if let (Some((sm, st)), Some((em, et))) = (best_start, best_end) {
-                                        state.current_path = fo3_navigation::astar::find_path(nav_graph, sm, st, em, et);
+                                    if let (Some((sm, st)), Some((em, et))) = (best_start, best_end)
+                                    {
+                                        state.current_path = fo3_navigation::astar::find_path(
+                                            nav_graph, sm, st, em, et,
+                                        );
                                         state.path_target_index = 0;
                                         if let Some(path) = &state.current_path {
                                             println!("[AiManager] NPC 0x{:08X} の経路を算出しました (Waypoints: {})", state.form_id.0, path.points.len());

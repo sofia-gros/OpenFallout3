@@ -2,7 +2,7 @@
 //! 参照元: references/openmw/components/esm4/script.hpp
 
 use crate::parser::Expr;
-use crate::vm::{ScriptVm, ScriptError};
+use crate::vm::{ScriptError, ScriptVm};
 use fo3_esm::FormId;
 
 pub fn execute(
@@ -206,15 +206,11 @@ pub fn execute(
         // FUN_IsTimePassing = 265
         // 参照元: references/openmw/components/esm4/script.hpp:162
         // 睡眠・待機・ファストトラベル等の時間経過処理中か判定する
-        "istimepassing" => {
-            Ok(Some(0.0))
-        }
+        "istimepassing" => Ok(Some(0.0)),
         // GetTimeSinceActivated
         // 参照元: GECK Wiki `GetTimeSinceActivated`
         // 直近のアクティベートからの経過秒数を取得する
-        "gettimesinceactivated" => {
-            Ok(Some(0.0))
-        }
+        "gettimesinceactivated" => Ok(Some(0.0)),
         _ => Ok(None),
     }
 }
@@ -228,40 +224,80 @@ mod tests {
         let mut vm = ScriptVm::new();
 
         // abs
-        assert_eq!(execute("abs", &[Expr::Number(-42.5)], None, &mut vm).unwrap(), Some(42.5));
-        assert_eq!(execute("abs", &[Expr::Number(10.0)], None, &mut vm).unwrap(), Some(10.0));
+        assert_eq!(
+            execute("abs", &[Expr::Number(-42.5)], None, &mut vm).unwrap(),
+            Some(42.5)
+        );
+        assert_eq!(
+            execute("abs", &[Expr::Number(10.0)], None, &mut vm).unwrap(),
+            Some(10.0)
+        );
 
         // sin / cos / tan
-        let sin_val = execute("sin", &[Expr::Number(90.0)], None, &mut vm).unwrap().unwrap();
+        let sin_val = execute("sin", &[Expr::Number(90.0)], None, &mut vm)
+            .unwrap()
+            .unwrap();
         assert!((sin_val - 1.0).abs() < 1e-5);
-        let cos_val = execute("cos", &[Expr::Number(0.0)], None, &mut vm).unwrap().unwrap();
+        let cos_val = execute("cos", &[Expr::Number(0.0)], None, &mut vm)
+            .unwrap()
+            .unwrap();
         assert!((cos_val - 1.0).abs() < 1e-5);
-        let tan_val = execute("tan", &[Expr::Number(45.0)], None, &mut vm).unwrap().unwrap();
+        let tan_val = execute("tan", &[Expr::Number(45.0)], None, &mut vm)
+            .unwrap()
+            .unwrap();
         assert!((tan_val - 1.0).abs() < 1e-4);
 
         // asin / acos / atan
-        let asin_val = execute("asin", &[Expr::Number(1.0)], None, &mut vm).unwrap().unwrap();
+        let asin_val = execute("asin", &[Expr::Number(1.0)], None, &mut vm)
+            .unwrap()
+            .unwrap();
         assert!((asin_val - 90.0).abs() < 1e-4);
-        let acos_val = execute("acos", &[Expr::Number(1.0)], None, &mut vm).unwrap().unwrap();
+        let acos_val = execute("acos", &[Expr::Number(1.0)], None, &mut vm)
+            .unwrap()
+            .unwrap();
         assert!(acos_val.abs() < 1e-4);
-        let atan_val = execute("atan", &[Expr::Number(1.0)], None, &mut vm).unwrap().unwrap();
+        let atan_val = execute("atan", &[Expr::Number(1.0)], None, &mut vm)
+            .unwrap()
+            .unwrap();
         assert!((atan_val - 45.0).abs() < 1e-4);
 
         // sqrt / floor / ceil / round
-        assert_eq!(execute("sqrt", &[Expr::Number(16.0)], None, &mut vm).unwrap(), Some(4.0));
-        assert_eq!(execute("floor", &[Expr::Number(3.7)], None, &mut vm).unwrap(), Some(3.0));
-        assert_eq!(execute("ceil", &[Expr::Number(3.2)], None, &mut vm).unwrap(), Some(4.0));
-        assert_eq!(execute("round", &[Expr::Number(3.5)], None, &mut vm).unwrap(), Some(4.0));
+        assert_eq!(
+            execute("sqrt", &[Expr::Number(16.0)], None, &mut vm).unwrap(),
+            Some(4.0)
+        );
+        assert_eq!(
+            execute("floor", &[Expr::Number(3.7)], None, &mut vm).unwrap(),
+            Some(3.0)
+        );
+        assert_eq!(
+            execute("ceil", &[Expr::Number(3.2)], None, &mut vm).unwrap(),
+            Some(4.0)
+        );
+        assert_eq!(
+            execute("round", &[Expr::Number(3.5)], None, &mut vm).unwrap(),
+            Some(4.0)
+        );
 
         // exp / log
-        let exp_val = execute("exp", &[Expr::Number(1.0)], None, &mut vm).unwrap().unwrap();
+        let exp_val = execute("exp", &[Expr::Number(1.0)], None, &mut vm)
+            .unwrap()
+            .unwrap();
         assert!((exp_val - std::f32::consts::E).abs() < 1e-4);
-        let log_val = execute("log", &[Expr::Number(std::f32::consts::E)], None, &mut vm).unwrap().unwrap();
+        let log_val = execute("log", &[Expr::Number(std::f32::consts::E)], None, &mut vm)
+            .unwrap()
+            .unwrap();
         assert!((log_val - 1.0).abs() < 1e-4);
 
         // days passed / time passing
         vm.globals.insert("gamedayspassed".into(), 5.0);
-        assert_eq!(execute("getdayspassed", &[], None, &mut vm).unwrap(), Some(5.0));
-        assert_eq!(execute("istimepassing", &[], None, &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("getdayspassed", &[], None, &mut vm).unwrap(),
+            Some(5.0)
+        );
+        assert_eq!(
+            execute("istimepassing", &[], None, &mut vm).unwrap(),
+            Some(0.0)
+        );
     }
 }

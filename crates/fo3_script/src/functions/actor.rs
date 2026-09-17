@@ -2,7 +2,7 @@
 //! 参照元: references/openmw/components/esm4/script.hpp
 
 use crate::parser::Expr;
-use crate::vm::{ScriptVm, ScriptError};
+use crate::vm::{ScriptError, ScriptVm};
 use fo3_esm::FormId;
 
 pub fn execute(
@@ -40,9 +40,7 @@ pub fn execute(
             Ok(Some(0.0))
         }
         // FUN_GetDead = 46
-        "getdead" => {
-            Ok(Some(0.0))
-        }
+        "getdead" => Ok(Some(0.0)),
         // Kill
         "kill" => {
             let target = subject.unwrap_or(FormId(0x14));
@@ -66,9 +64,7 @@ pub fn execute(
             Ok(Some(0.0))
         }
         // FUN_GetLevel = 80
-        "getlevel" => {
-            Ok(Some(1.0))
-        }
+        "getlevel" => Ok(Some(1.0)),
         // FUN_GetIsRace = 69
         "getisrace" => {
             if !args.is_empty() {
@@ -105,9 +101,7 @@ pub fn execute(
             Ok(Some(0.0))
         }
         // FUN_IsInCombat = 289
-        "isincombat" => {
-            Ok(Some(0.0))
-        }
+        "isincombat" => Ok(Some(0.0)),
         // EvaluatePackage / EVP
         "evp" | "evaluatepackage" => {
             let caller = subject.unwrap_or(FormId(0x14));
@@ -121,15 +115,16 @@ pub fn execute(
             Ok(Some(0.0))
         }
         // FUN_GetHeadingAngle = 99
-        "getheadingangle" => {
-            Ok(Some(0.0))
-        }
+        "getheadingangle" => Ok(Some(0.0)),
         // LookAt [TargetRef]
         "lookat" => {
             if !args.is_empty() {
                 let target_ref = get_form_id(&args[0])?;
                 let caller = subject.unwrap_or(FormId(0x14));
-                println!("[Script] LookAt: Caller {:?} looking at {:?}", caller, target_ref);
+                println!(
+                    "[Script] LookAt: Caller {:?} looking at {:?}",
+                    caller, target_ref
+                );
             }
             Ok(Some(0.0))
         }
@@ -175,15 +170,16 @@ pub fn execute(
                 };
                 let key = format!("{:08X}.essential", base_id.0);
                 vm.locals.insert(key, flag);
-                println!("[Script] SetEssential: Base {:?}, Essential: {}", base_id, flag);
+                println!(
+                    "[Script] SetEssential: Base {:?}, Essential: {}",
+                    base_id, flag
+                );
             }
             Ok(Some(0.0))
         }
         // FUN_IsActor = 353
         // アクター（NPC/クリーチャー）判定
-        "isactor" => {
-            Ok(Some(1.0))
-        }
+        "isactor" => Ok(Some(1.0)),
         // FUN_IsChild = 365
         // 子供判定
         "ischild" => {
@@ -217,7 +213,11 @@ pub fn execute(
             if args.len() >= 2 {
                 let target_ref = get_form_id(&args[0])?;
                 let val = vm.eval_ast_expr(&args[1], subject)?;
-                let key = format!("{:08X}.disposition.{:08X}", subject.unwrap_or(FormId(0x14)).0, target_ref.0);
+                let key = format!(
+                    "{:08X}.disposition.{:08X}",
+                    subject.unwrap_or(FormId(0x14)).0,
+                    target_ref.0
+                );
                 vm.locals.insert(key, val);
             }
             Ok(Some(0.0))
@@ -228,7 +228,11 @@ pub fn execute(
             if args.len() >= 2 {
                 let target_ref = get_form_id(&args[0])?;
                 let delta = vm.eval_ast_expr(&args[1], subject)?;
-                let key = format!("{:08X}.disposition.{:08X}", subject.unwrap_or(FormId(0x14)).0, target_ref.0);
+                let key = format!(
+                    "{:08X}.disposition.{:08X}",
+                    subject.unwrap_or(FormId(0x14)).0,
+                    target_ref.0
+                );
                 let cur = vm.locals.get(&key).copied().unwrap_or(50.0);
                 vm.locals.insert(key, cur + delta);
             }
@@ -269,9 +273,7 @@ pub fn execute(
         }
         // FUN_IsTurning = 26
         // 旋回中判定
-        "isturning" => {
-            Ok(Some(0.0))
-        }
+        "isturning" => Ok(Some(0.0)),
         // FUN_IsWeaponOut = 101
         // 武器を構えているか判定
         "isweaponout" => {
@@ -304,9 +306,7 @@ pub fn execute(
         }
         // FUN_GetWeaponAnimType = 108
         // 武器アニメーション種別 (0: 素手, 1: 片手剣, 2: 両手剣, 3: 弓, 4: 片手銃, 5: 両手ライフル, 6: 重火器等)
-        "getweaponanimtype" => {
-            Ok(Some(0.0))
-        }
+        "getweaponanimtype" => Ok(Some(0.0)),
         // FUN_IsGuard = 125
         // 衛兵NPC判定
         "isguard" => {
@@ -317,9 +317,7 @@ pub fn execute(
         }
         // FUN_GetWalkSpeed = 142
         // 歩行速度取得 (デフォルト 100.0)
-        "getwalkspeed" => {
-            Ok(Some(100.0))
-        }
+        "getwalkspeed" => Ok(Some(100.0)),
         // FUN_GetIsCreature = 64
         // クリーチャー判定
         "getiscreature" => {
@@ -330,24 +328,16 @@ pub fn execute(
         }
         // FUN_GetIsCreatureType = 438
         // クリーチャー種別判定
-        "getiscreaturetype" => {
-            Ok(Some(0.0))
-        }
+        "getiscreaturetype" => Ok(Some(0.0)),
         // FUN_IsActorEvil = 313
         // 悪人アクター判定
-        "isactorevil" => {
-            Ok(Some(0.0))
-        }
+        "isactorevil" => Ok(Some(0.0)),
         // FUN_IsActorAVictim = 314
         // 被害者アクター判定
-        "isactoravictim" => {
-            Ok(Some(0.0))
-        }
+        "isactoravictim" => Ok(Some(0.0)),
         // FUN_GetIsPlayableRace = 254
         // プレイ可能種族判定
-        "getisplayable" | "getisplayablerace" => {
-            Ok(Some(1.0))
-        }
+        "getisplayable" | "getisplayablerace" => Ok(Some(1.0)),
         // FUN_GetIsVoiceType = 427
         // 音声タイプ一致判定
         "getisvoicetype" => {
@@ -387,9 +377,7 @@ pub fn execute(
         }
         // FUN_GetShouldAttack = 66
         // 攻撃すべきか判定
-        "getshouldattack" => {
-            Ok(Some(0.0))
-        }
+        "getshouldattack" => Ok(Some(0.0)),
         // Dismount
         // 乗騎から降りる
         "dismount" => {
@@ -399,14 +387,10 @@ pub fn execute(
         }
         // FUN_IsRidingHorse = 327
         // 乗馬中判定
-        "isridinghorse" => {
-            Ok(Some(0.0))
-        }
+        "isridinghorse" => Ok(Some(0.0)),
         // FUN_GetActorsInHigh = 557
         // 高優先度処理アクター数取得
-        "getactorsinhigh" => {
-            Ok(Some(1.0))
-        }
+        "getactorsinhigh" => Ok(Some(1.0)),
         // FUN_GetIgnoreFriendlyHits = 338
         // 味方誤射無視フラグ取得
         "getignorefriendlyhits" => {
@@ -430,9 +414,7 @@ pub fn execute(
         }
         // FUN_IsPlayersLastRiddenHorse = 339
         // プレイヤーが最後に乗った馬か判定
-        "isplayerslastriddenhorse" => {
-            Ok(Some(0.0))
-        }
+        "isplayerslastriddenhorse" => Ok(Some(0.0)),
         // FUN_GetTimeDead = 361
         // 死亡経過時間を取得
         "gettimedead" => {
@@ -443,49 +425,31 @@ pub fn execute(
         }
         // FUN_GetCauseofDeath = 397
         // 死因コードを取得
-        "getcauseofdeath" => {
-            Ok(Some(0.0))
-        }
+        "getcauseofdeath" => Ok(Some(0.0)),
         // FUN_IsLimbGone = 398
         // 指定部位の欠損判定
-        "islimbgone" => {
-            Ok(Some(0.0))
-        }
+        "islimbgone" => Ok(Some(0.0)),
         // FUN_HasFriendDisposition = 403
         // 友好関係判定
-        "hasfrienddisposition" => {
-            Ok(Some(1.0))
-        }
+        "hasfrienddisposition" => Ok(Some(1.0)),
         // FUN_IsKiller = 409
         // 対象を殺害したアクターか判定
-        "iskiller" => {
-            Ok(Some(0.0))
-        }
+        "iskiller" => Ok(Some(0.0)),
         // FUN_IsKillerObject = 410
         // 対象を殺害したオブジェクトか判定
-        "iskillerobject" => {
-            Ok(Some(0.0))
-        }
+        "iskillerobject" => Ok(Some(0.0)),
         // FUN_GetKillingBlowLimb = 496
         // とどめを刺した部位コードを取得
-        "getkillingblowlimb" => {
-            Ok(Some(0.0))
-        }
+        "getkillingblowlimb" => Ok(Some(0.0)),
         // FUN_GetConcussed = 489
         // 脳震盪状態判定
-        "getconcussed" => {
-            Ok(Some(0.0))
-        }
+        "getconcussed" => Ok(Some(0.0)),
         // FUN_IsCombatTarget = 515
         // 戦闘対象判定
-        "iscombattarget" => {
-            Ok(Some(0.0))
-        }
+        "iscombattarget" => Ok(Some(0.0)),
         // FUN_IsInCriticalStage = 531
         // クリティカル分解/溶解状態判定
-        "isincriticalstage" => {
-            Ok(Some(0.0))
-        }
+        "isincriticalstage" => Ok(Some(0.0)),
         _ => Ok(None),
     }
 }
@@ -501,47 +465,140 @@ mod tests {
         let actor = FormId(0x1000);
 
         // ゴースト属性のテスト
-        assert_eq!(execute("getisghost", &[], Some(actor), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("getisghost", &[], Some(actor), &mut vm).unwrap(),
+            Some(0.0)
+        );
         execute("setghost", &[Expr::Number(1.0)], Some(actor), &mut vm).unwrap();
-        assert_eq!(execute("getisghost", &[], Some(actor), &mut vm).unwrap(), Some(1.0));
-        assert_eq!(execute("getghost", &[], Some(actor), &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("getisghost", &[], Some(actor), &mut vm).unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(
+            execute("getghost", &[], Some(actor), &mut vm).unwrap(),
+            Some(1.0)
+        );
 
         // 不死（Essential）判定のテスト
-        assert_eq!(execute("isessential", &[], Some(actor), &mut vm).unwrap(), Some(0.0));
-        execute("setessential", &[Expr::Number(actor.0 as f32), Expr::Number(1.0)], None, &mut vm).unwrap();
-        assert_eq!(execute("isessential", &[], Some(actor), &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("isessential", &[], Some(actor), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        execute(
+            "setessential",
+            &[Expr::Number(actor.0 as f32), Expr::Number(1.0)],
+            None,
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute("isessential", &[], Some(actor), &mut vm).unwrap(),
+            Some(1.0)
+        );
 
         // アクター、子供、チームメイト判定
-        assert_eq!(execute("isactor", &[], Some(actor), &mut vm).unwrap(), Some(1.0));
-        assert_eq!(execute("ischild", &[], Some(actor), &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("isplayerteammate", &[], Some(actor), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("isactor", &[], Some(actor), &mut vm).unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(
+            execute("ischild", &[], Some(actor), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("isplayerteammate", &[], Some(actor), &mut vm).unwrap(),
+            Some(0.0)
+        );
 
         // 好感度（Disposition）のテスト
-        assert_eq!(execute("getdisposition", &[], Some(actor), &mut vm).unwrap(), Some(50.0));
+        assert_eq!(
+            execute("getdisposition", &[], Some(actor), &mut vm).unwrap(),
+            Some(50.0)
+        );
         let target_npc = FormId(0x2000);
-        execute("setdisposition", &[Expr::Number(target_npc.0 as f32), Expr::Number(75.0)], Some(actor), &mut vm).unwrap();
-        execute("moddisposition", &[Expr::Number(target_npc.0 as f32), Expr::Number(10.0)], Some(actor), &mut vm).unwrap();
+        execute(
+            "setdisposition",
+            &[Expr::Number(target_npc.0 as f32), Expr::Number(75.0)],
+            Some(actor),
+            &mut vm,
+        )
+        .unwrap();
+        execute(
+            "moddisposition",
+            &[Expr::Number(target_npc.0 as f32), Expr::Number(10.0)],
+            Some(actor),
+            &mut vm,
+        )
+        .unwrap();
 
         // 状態判定（睡眠、スニーク、走行、移動、武器構え）
-        assert_eq!(execute("getsleeping", &[], Some(actor), &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("issneaking", &[], Some(actor), &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("isrunning", &[], Some(actor), &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("ismoving", &[], Some(actor), &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("isweaponout", &[], Some(actor), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("getsleeping", &[], Some(actor), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("issneaking", &[], Some(actor), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("isrunning", &[], Some(actor), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("ismoving", &[], Some(actor), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("isweaponout", &[], Some(actor), &mut vm).unwrap(),
+            Some(0.0)
+        );
         execute("setweaponout", &[Expr::Number(1.0)], Some(actor), &mut vm).unwrap();
-        assert_eq!(execute("isweaponout", &[], Some(actor), &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("isweaponout", &[], Some(actor), &mut vm).unwrap(),
+            Some(1.0)
+        );
 
         // 誤射無視フラグ
-        assert_eq!(execute("getignorefriendlyhits", &[], Some(actor), &mut vm).unwrap(), Some(0.0));
-        execute("setignorefriendlyhits", &[Expr::Number(1.0)], Some(actor), &mut vm).unwrap();
-        assert_eq!(execute("getignorefriendlyhits", &[], Some(actor), &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("getignorefriendlyhits", &[], Some(actor), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        execute(
+            "setignorefriendlyhits",
+            &[Expr::Number(1.0)],
+            Some(actor),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute("getignorefriendlyhits", &[], Some(actor), &mut vm).unwrap(),
+            Some(1.0)
+        );
 
         // その他の判定
-        assert_eq!(execute("getknockedstate", &[], Some(actor), &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("isguard", &[], Some(actor), &mut vm).unwrap(), Some(0.0));
-        assert_eq!(execute("getisplayable", &[], Some(actor), &mut vm).unwrap(), Some(1.0));
-        assert_eq!(execute("getactorsinhigh", &[], Some(actor), &mut vm).unwrap(), Some(1.0));
-        assert_eq!(execute("hasfrienddisposition", &[], Some(actor), &mut vm).unwrap(), Some(1.0));
-        assert_eq!(execute("iscombattarget", &[], Some(actor), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("getknockedstate", &[], Some(actor), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("isguard", &[], Some(actor), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        assert_eq!(
+            execute("getisplayable", &[], Some(actor), &mut vm).unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(
+            execute("getactorsinhigh", &[], Some(actor), &mut vm).unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(
+            execute("hasfrienddisposition", &[], Some(actor), &mut vm).unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(
+            execute("iscombattarget", &[], Some(actor), &mut vm).unwrap(),
+            Some(0.0)
+        );
     }
 }

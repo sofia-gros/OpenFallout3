@@ -1,5 +1,5 @@
-use glam::Vec3;
 use fo3_esm::types::FormId;
+use glam::Vec3;
 
 #[derive(Clone, Debug)]
 pub struct NavPath {

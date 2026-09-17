@@ -2,7 +2,7 @@
 //! 参照元: references/openmw/components/esm4/script.hpp:61, 63, 71, 73, 122, 454, 455
 
 use crate::parser::Expr;
-use crate::vm::{ScriptVm, ScriptError};
+use crate::vm::{ScriptError, ScriptVm};
 use fo3_esm::FormId;
 
 pub fn execute(
@@ -28,7 +28,10 @@ pub fn execute(
                 let flag = vm.eval_ast_expr(&args[0], subject)? != 0.0;
                 let key = format!("{:08X}.teammate", target.0);
                 vm.locals.insert(key, if flag { 1.0 } else { 0.0 });
-                println!("[Script] SetPlayerTeammate: Target {:?}, Teammate: {}", target, flag);
+                println!(
+                    "[Script] SetPlayerTeammate: Target {:?}, Teammate: {}",
+                    target, flag
+                );
             }
             Ok(Some(0.0))
         }
@@ -41,7 +44,11 @@ pub fn execute(
         // FUN_GetPlayerTeammateCount = 455
         "getplayerteammatecount" => {
             // 現在の仲間数を集計
-            let count = vm.locals.iter().filter(|(k, &v)| k.ends_with(".teammate") && v != 0.0).count();
+            let count = vm
+                .locals
+                .iter()
+                .filter(|(k, &v)| k.ends_with(".teammate") && v != 0.0)
+                .count();
             Ok(Some(count as f32))
         }
         // FUN_GetInFaction = 71
@@ -108,13 +115,9 @@ pub fn execute(
             Ok(Some(0.0))
         }
         // FUN_GetAlarmed = 61
-        "getalarmed" => {
-            Ok(Some(0.0))
-        }
+        "getalarmed" => Ok(Some(0.0)),
         // FUN_GetAttacked = 63
-        "getattacked" => {
-            Ok(Some(0.0))
-        }
+        "getattacked" => Ok(Some(0.0)),
         // FUN_GetCrime = 122
         "getcrime" => {
             let gold = vm.globals.get("crimegold").copied().unwrap_or(0.0);
@@ -145,9 +148,11 @@ pub fn execute(
             if !args.is_empty() {
                 let enemy = get_form_id(&args[0])?;
                 vm.locals.insert(format!("{:08X}.incombat", target.0), 1.0);
-                vm.locals.insert(format!("{:08X}.combattarget", target.0), enemy.0 as f32);
+                vm.locals
+                    .insert(format!("{:08X}.combattarget", target.0), enemy.0 as f32);
                 vm.locals.insert(format!("{:08X}.incombat", enemy.0), 1.0);
-                vm.locals.insert(format!("{:08X}.combattarget", enemy.0), target.0 as f32);
+                vm.locals
+                    .insert(format!("{:08X}.combattarget", enemy.0), target.0 as f32);
                 println!("[Script] StartCombat: Target {:?} vs {:?}", target, enemy);
             }
             Ok(Some(0.0))
@@ -156,7 +161,8 @@ pub fn execute(
         // 参照元: GECK: StopCombat
         "stopcombat" => {
             vm.locals.insert(format!("{:08X}.incombat", target.0), 0.0);
-            vm.locals.insert(format!("{:08X}.combattarget", target.0), 0.0);
+            vm.locals
+                .insert(format!("{:08X}.combattarget", target.0), 0.0);
             println!("[Script] StopCombat: Target {:?}", target);
             Ok(Some(0.0))
         }
@@ -164,7 +170,8 @@ pub fn execute(
         // 参照元: GECK: StopCombatAtOnce
         "stopcombatatonce" => {
             vm.locals.insert(format!("{:08X}.incombat", target.0), 0.0);
-            vm.locals.insert(format!("{:08X}.combattarget", target.0), 0.0);
+            vm.locals
+                .insert(format!("{:08X}.combattarget", target.0), 0.0);
             println!("[Script] StopCombatAtOnce: Target {:?}", target);
             Ok(Some(0.0))
         }
@@ -213,7 +220,8 @@ pub fn execute(
         // EvaluatePackage / EVP
         // 参照元: GECK: EvaluatePackage
         "evaluatepackage" | "evp" => {
-            vm.locals.insert(format!("{:08X}.evp_requested", target.0), 1.0);
+            vm.locals
+                .insert(format!("{:08X}.evp_requested", target.0), 1.0);
             println!("[Script] EvaluatePackage: Target {:?}", target);
             Ok(Some(0.0))
         }
@@ -222,15 +230,20 @@ pub fn execute(
         "addscriptpackage" => {
             if !args.is_empty() {
                 let pkg = get_form_id(&args[0])?;
-                vm.locals.insert(format!("{:08X}.scriptpackage", target.0), pkg.0 as f32);
-                println!("[Script] AddScriptPackage: Target {:?}, Package {:?}", target, pkg);
+                vm.locals
+                    .insert(format!("{:08X}.scriptpackage", target.0), pkg.0 as f32);
+                println!(
+                    "[Script] AddScriptPackage: Target {:?}, Package {:?}",
+                    target, pkg
+                );
             }
             Ok(Some(0.0))
         }
         // RemoveScriptPackage [PackageRef]
         // 参照元: GECK: RemoveScriptPackage
         "removescriptpackage" => {
-            vm.locals.insert(format!("{:08X}.scriptpackage", target.0), 0.0);
+            vm.locals
+                .insert(format!("{:08X}.scriptpackage", target.0), 0.0);
             println!("[Script] RemoveScriptPackage: Target {:?}", target);
             Ok(Some(0.0))
         }
@@ -248,7 +261,11 @@ pub fn execute(
                 let expected_pkg = get_form_id(&args[0])?;
                 let key = format!("{:08X}.currentpackage", target.0);
                 let cur = vm.locals.get(&key).copied().unwrap_or(0.0);
-                return Ok(Some(if cur == expected_pkg.0 as f32 { 1.0 } else { 0.0 }));
+                return Ok(Some(if cur == expected_pkg.0 as f32 {
+                    1.0
+                } else {
+                    0.0
+                }));
             }
             Ok(Some(0.0))
         }
@@ -264,8 +281,12 @@ pub fn execute(
         "startpursuing" => {
             if !args.is_empty() {
                 let other_ref = get_form_id(&args[0])?;
-                vm.locals.insert(format!("{:08X}.pursuing", target.0), other_ref.0 as f32);
-                println!("[Script] StartPursuing: Target {:?} pursuing {:?}", target, other_ref);
+                vm.locals
+                    .insert(format!("{:08X}.pursuing", target.0), other_ref.0 as f32);
+                println!(
+                    "[Script] StartPursuing: Target {:?} pursuing {:?}",
+                    target, other_ref
+                );
             }
             Ok(Some(0.0))
         }
@@ -279,9 +300,21 @@ pub fn execute(
         // FUN_GetShouldAttack = 66
         // 参照元: references/openmw/components/esm4/script.hpp:108 (FUN_GetShouldAttack = 66)
         "getshouldattack" => {
-            let incombat = vm.locals.get(&format!("{:08X}.incombat", target.0)).copied().unwrap_or(0.0);
-            let alert = vm.locals.get(&format!("{:08X}.alert", target.0)).copied().unwrap_or(0.0);
-            Ok(Some(if incombat != 0.0 || alert != 0.0 { 1.0 } else { 0.0 }))
+            let incombat = vm
+                .locals
+                .get(&format!("{:08X}.incombat", target.0))
+                .copied()
+                .unwrap_or(0.0);
+            let alert = vm
+                .locals
+                .get(&format!("{:08X}.alert", target.0))
+                .copied()
+                .unwrap_or(0.0);
+            Ok(Some(if incombat != 0.0 || alert != 0.0 {
+                1.0
+            } else {
+                0.0
+            }))
         }
         // FUN_GetThreatRatio = 478
         // 参照元: references/openmw/components/esm4/script.hpp:282 (FUN_GetThreatRatio = 478)
@@ -296,18 +329,18 @@ pub fn execute(
         }
         // FUN_GetFactionCombatReaction = 411
         // 参照元: references/openmw/components/esm4/script.hpp:256 (FUN_GetFactionCombatReaction = 411)
-        "getfactioncombatreaction" => {
-            Ok(Some(0.0))
-        }
+        "getfactioncombatreaction" => Ok(Some(0.0)),
         // FUN_GetGroupMemberCount = 416
         // 参照元: references/openmw/components/esm4/script.hpp:258 (FUN_GetGroupMemberCount = 416)
-        "getgroupmembercount" => {
-            Ok(Some(1.0))
-        }
+        "getgroupmembercount" => Ok(Some(1.0)),
         // FUN_GetGroupTargetCount = 417
         // 参照元: references/openmw/components/esm4/script.hpp:259 (FUN_GetGroupTargetCount = 417)
         "getgrouptargetcount" => {
-            let incombat = vm.locals.get(&format!("{:08X}.incombat", target.0)).copied().unwrap_or(0.0);
+            let incombat = vm
+                .locals
+                .get(&format!("{:08X}.incombat", target.0))
+                .copied()
+                .unwrap_or(0.0);
             Ok(Some(if incombat != 0.0 { 1.0 } else { 0.0 }))
         }
         // FUN_GetDetected = 45
@@ -337,8 +370,12 @@ pub fn execute(
         "setunconscious" => {
             if !args.is_empty() {
                 let flag = vm.eval_ast_expr(&args[0], subject)?;
-                vm.locals.insert(format!("{:08X}.unconscious", target.0), flag);
-                println!("[Script] SetUnconscious: Target {:?}, Flag {}", target, flag);
+                vm.locals
+                    .insert(format!("{:08X}.unconscious", target.0), flag);
+                println!(
+                    "[Script] SetUnconscious: Target {:?}, Flag {}",
+                    target, flag
+                );
             }
             Ok(Some(0.0))
         }
@@ -354,7 +391,8 @@ pub fn execute(
         "setrestrained" => {
             if !args.is_empty() {
                 let flag = vm.eval_ast_expr(&args[0], subject)?;
-                vm.locals.insert(format!("{:08X}.restrained", target.0), flag);
+                vm.locals
+                    .insert(format!("{:08X}.restrained", target.0), flag);
                 println!("[Script] SetRestrained: Target {:?}, Flag {}", target, flag);
             }
             Ok(Some(0.0))
@@ -370,7 +408,8 @@ pub fn execute(
         // 参照元: GECK: ResetAI
         "resetai" => {
             vm.locals.insert(format!("{:08X}.incombat", target.0), 0.0);
-            vm.locals.insert(format!("{:08X}.combattarget", target.0), 0.0);
+            vm.locals
+                .insert(format!("{:08X}.combattarget", target.0), 0.0);
             vm.locals.insert(format!("{:08X}.alert", target.0), 0.0);
             vm.locals.insert(format!("{:08X}.pursuing", target.0), 0.0);
             println!("[Script] ResetAI: Target {:?}", target);
@@ -381,7 +420,8 @@ pub fn execute(
         "setignorefriendlyhits" => {
             if !args.is_empty() {
                 let flag = vm.eval_ast_expr(&args[0], subject)?;
-                vm.locals.insert(format!("{:08X}.ignorefriendlyhits", target.0), flag);
+                vm.locals
+                    .insert(format!("{:08X}.ignorefriendlyhits", target.0), flag);
             }
             Ok(Some(0.0))
         }
@@ -408,34 +448,103 @@ mod tests {
         let pkg_id = FormId(0x3001);
 
         // Combat
-        assert_eq!(execute("getincombat", &[], Some(actor1), &mut vm).unwrap(), Some(0.0));
-        execute("startcombat", &[Expr::Number(actor2.0 as f32)], Some(actor1), &mut vm).unwrap();
-        assert_eq!(execute("getincombat", &[], Some(actor1), &mut vm).unwrap(), Some(1.0));
-        assert_eq!(execute("getcombattarget", &[], Some(actor1), &mut vm).unwrap(), Some(actor2.0 as f32));
-        assert_eq!(execute("iscombattarget", &[Expr::Number(actor2.0 as f32)], Some(actor1), &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("getincombat", &[], Some(actor1), &mut vm).unwrap(),
+            Some(0.0)
+        );
+        execute(
+            "startcombat",
+            &[Expr::Number(actor2.0 as f32)],
+            Some(actor1),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute("getincombat", &[], Some(actor1), &mut vm).unwrap(),
+            Some(1.0)
+        );
+        assert_eq!(
+            execute("getcombattarget", &[], Some(actor1), &mut vm).unwrap(),
+            Some(actor2.0 as f32)
+        );
+        assert_eq!(
+            execute(
+                "iscombattarget",
+                &[Expr::Number(actor2.0 as f32)],
+                Some(actor1),
+                &mut vm
+            )
+            .unwrap(),
+            Some(1.0)
+        );
 
         execute("stopcombatatonce", &[], Some(actor1), &mut vm).unwrap();
-        assert_eq!(execute("getincombat", &[], Some(actor1), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute("getincombat", &[], Some(actor1), &mut vm).unwrap(),
+            Some(0.0)
+        );
 
         // Alert
         execute("setalert", &[Expr::Number(1.0)], Some(actor1), &mut vm).unwrap();
-        assert_eq!(execute("getalert", &[], Some(actor1), &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("getalert", &[], Some(actor1), &mut vm).unwrap(),
+            Some(1.0)
+        );
 
         // Package
-        execute("addscriptpackage", &[Expr::Number(pkg_id.0 as f32)], Some(actor1), &mut vm).unwrap();
+        execute(
+            "addscriptpackage",
+            &[Expr::Number(pkg_id.0 as f32)],
+            Some(actor1),
+            &mut vm,
+        )
+        .unwrap();
         execute("evaluatepackage", &[], Some(actor1), &mut vm).unwrap();
-        assert_eq!(vm.locals.get(&format!("{:08X}.evp_requested", actor1.0)).copied(), Some(1.0));
+        assert_eq!(
+            vm.locals
+                .get(&format!("{:08X}.evp_requested", actor1.0))
+                .copied(),
+            Some(1.0)
+        );
 
         // Pursuing
-        execute("startpursuing", &[Expr::Number(actor2.0 as f32)], Some(actor1), &mut vm).unwrap();
-        assert_eq!(vm.locals.get(&format!("{:08X}.pursuing", actor1.0)).copied(), Some(actor2.0 as f32));
+        execute(
+            "startpursuing",
+            &[Expr::Number(actor2.0 as f32)],
+            Some(actor1),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            vm.locals
+                .get(&format!("{:08X}.pursuing", actor1.0))
+                .copied(),
+            Some(actor2.0 as f32)
+        );
         execute("stoppursuing", &[], Some(actor1), &mut vm).unwrap();
-        assert_eq!(vm.locals.get(&format!("{:08X}.pursuing", actor1.0)).copied(), Some(0.0));
+        assert_eq!(
+            vm.locals
+                .get(&format!("{:08X}.pursuing", actor1.0))
+                .copied(),
+            Some(0.0)
+        );
 
         // Unconscious & Restrained
-        execute("setunconscious", &[Expr::Number(1.0)], Some(actor1), &mut vm).unwrap();
-        assert_eq!(execute("getunconscious", &[], Some(actor1), &mut vm).unwrap(), Some(1.0));
+        execute(
+            "setunconscious",
+            &[Expr::Number(1.0)],
+            Some(actor1),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute("getunconscious", &[], Some(actor1), &mut vm).unwrap(),
+            Some(1.0)
+        );
         execute("setrestrained", &[Expr::Number(1.0)], Some(actor1), &mut vm).unwrap();
-        assert_eq!(execute("getrestrained", &[], Some(actor1), &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("getrestrained", &[], Some(actor1), &mut vm).unwrap(),
+            Some(1.0)
+        );
     }
 }

@@ -2,7 +2,7 @@
 //! 参照元: references/openmw/components/esm4/script.hpp
 
 use crate::parser::Expr;
-use crate::vm::{ScriptVm, ScriptError};
+use crate::vm::{ScriptError, ScriptVm};
 use fo3_esm::FormId;
 
 pub fn execute(
@@ -77,7 +77,10 @@ pub fn execute(
                 let item_id = get_form_id(&args[0])?;
                 let target = subject.unwrap_or(FormId(0x14));
                 // 将来的にインベントリ/アクター装備マネージャーへ通知
-                println!("[Script] EquipItem: Target {:?}, Item {:?}", target, item_id);
+                println!(
+                    "[Script] EquipItem: Target {:?}, Item {:?}",
+                    target, item_id
+                );
             }
             Ok(Some(0.0))
         }
@@ -86,7 +89,10 @@ pub fn execute(
             if !args.is_empty() {
                 let item_id = get_form_id(&args[0])?;
                 let target = subject.unwrap_or(FormId(0x14));
-                println!("[Script] UnequipItem: Target {:?}, Item {:?}", target, item_id);
+                println!(
+                    "[Script] UnequipItem: Target {:?}, Item {:?}",
+                    target, item_id
+                );
             }
             Ok(Some(0.0))
         }
@@ -177,9 +183,7 @@ pub fn execute(
         // FUN_GetUsedItemActivate = 259
         // GetUsedItemActivate
         // 参照元: references/openmw/components/esm4/script.hpp:205
-        "getuseditemactivate" => {
-            Ok(Some(0.0))
-        }
+        "getuseditemactivate" => Ok(Some(0.0)),
         // FUN_GetIsUsedItemEquipType = 480
         // GetIsUsedItemEquipType [EquipType]
         // 参照元: references/openmw/components/esm4/script.hpp:283
@@ -202,7 +206,10 @@ pub fn execute(
             if !args.is_empty() {
                 let health_perc = vm.eval_ast_expr(&args[0], subject)?;
                 let target = subject.unwrap_or(FormId(0x14));
-                println!("[Script] SetWeaponHealthPerc: Target {:?}, Perc {}", target, health_perc);
+                println!(
+                    "[Script] SetWeaponHealthPerc: Target {:?}, Perc {}",
+                    target, health_perc
+                );
             }
             Ok(Some(0.0))
         }
@@ -284,16 +291,17 @@ pub fn execute(
                 if target == FormId(0x14) {
                     vm.inventory.remove(&note_id);
                 }
-                println!("[Script] RemoveNote: Target {:?}, Note {:?}", target, note_id);
+                println!(
+                    "[Script] RemoveNote: Target {:?}, Note {:?}",
+                    target, note_id
+                );
             }
             Ok(Some(0.0))
         }
         // FUN_GetAmountSoldStolen = 190
         // GetAmountSoldStolen
         // 参照元: references/openmw/components/esm4/script.hpp:178
-        "getamountsoldstolen" => {
-            Ok(Some(0.0))
-        }
+        "getamountsoldstolen" => Ok(Some(0.0)),
         // FUN_GetBarterGold = 264
         // GetBarterGold
         // 参照元: references/openmw/components/esm4/script.hpp:206
@@ -304,21 +312,15 @@ pub fn execute(
         // FUN_GetClothingValue = 41
         // GetClothingValue
         // 参照元: references/openmw/components/esm4/script.hpp:88
-        "getclothingvalue" => {
-            Ok(Some(10.0))
-        }
+        "getclothingvalue" => Ok(Some(10.0)),
         // FUN_GetArmorRating = 81
         // GetArmorRating
         // 参照元: references/openmw/components/esm4/script.hpp:122
-        "getarmorrating" => {
-            Ok(Some(0.0))
-        }
+        "getarmorrating" => Ok(Some(0.0)),
         // FUN_GetArmorRatingUpperBody = 274
         // GetArmorRatingUpperBody
         // 参照元: references/openmw/components/esm4/script.hpp:210
-        "getarmorratingupperbody" => {
-            Ok(Some(0.0))
-        }
+        "getarmorratingupperbody" => Ok(Some(0.0)),
         // ShowRepairMenu
         "showrepairmenu" => {
             let target = subject.unwrap_or(FormId(0x14));
@@ -335,7 +337,10 @@ pub fn execute(
         "damageobject" => {
             if !args.is_empty() {
                 let damage = vm.eval_ast_expr(&args[0], subject)?;
-                println!("[Script] DamageObject: Subject {:?}, Damage {}", subject, damage);
+                println!(
+                    "[Script] DamageObject: Subject {:?}, Damage {}",
+                    subject, damage
+                );
             }
             Ok(Some(0.0))
         }
@@ -344,14 +349,21 @@ pub fn execute(
             if !args.is_empty() {
                 let dest_id = get_form_id(&args[0])?;
                 let src_id = subject.unwrap_or(FormId(0x14));
-                println!("[Script] DuplicateAllItems: From {:?} To {:?}", src_id, dest_id);
+                println!(
+                    "[Script] DuplicateAllItems: From {:?} To {:?}",
+                    src_id, dest_id
+                );
             }
             Ok(Some(0.0))
         }
         // GetInv
         "getinv" => {
             let target = subject.unwrap_or(FormId(0x14));
-            println!("[Script] GetInv: Target {:?}, ItemCount: {}", target, vm.inventory.len());
+            println!(
+                "[Script] GetInv: Target {:?}, ItemCount: {}",
+                target,
+                vm.inventory.len()
+            );
             for (item_id, count) in &vm.inventory {
                 println!("  Item {:08X}: Count {}", item_id.0, count);
             }
@@ -373,45 +385,189 @@ mod tests {
         let caps = FormId(0x0000000F);
 
         // AddItem & GetItemCount
-        execute("additem", &[Expr::Number(stimpak.0 as f32), Expr::Number(5.0)], Some(player), &mut vm).unwrap();
-        assert_eq!(execute("getitemcount", &[Expr::Number(stimpak.0 as f32)], Some(player), &mut vm).unwrap(), Some(5.0));
+        execute(
+            "additem",
+            &[Expr::Number(stimpak.0 as f32), Expr::Number(5.0)],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "getitemcount",
+                &[Expr::Number(stimpak.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(5.0)
+        );
 
         // AddItemHealthPercent
         let pistol = FormId(0x0000434F);
-        execute("additemhealthpercent", &[Expr::Number(pistol.0 as f32), Expr::Number(1.0), Expr::Number(85.0)], Some(player), &mut vm).unwrap();
-        assert_eq!(execute("getitemcount", &[Expr::Number(pistol.0 as f32)], Some(player), &mut vm).unwrap(), Some(1.0));
+        execute(
+            "additemhealthpercent",
+            &[
+                Expr::Number(pistol.0 as f32),
+                Expr::Number(1.0),
+                Expr::Number(85.0),
+            ],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "getitemcount",
+                &[Expr::Number(pistol.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(1.0)
+        );
 
         // GetGold
-        execute("additem", &[Expr::Number(caps.0 as f32), Expr::Number(150.0)], Some(player), &mut vm).unwrap();
-        assert_eq!(execute("getgold", &[], Some(player), &mut vm).unwrap(), Some(150.0));
+        execute(
+            "additem",
+            &[Expr::Number(caps.0 as f32), Expr::Number(150.0)],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute("getgold", &[], Some(player), &mut vm).unwrap(),
+            Some(150.0)
+        );
 
         // EquipItem & GetEquipped
-        execute("equipitem", &[Expr::Number(pistol.0 as f32)], Some(player), &mut vm).unwrap();
-        assert_eq!(execute("getequipped", &[Expr::Number(pistol.0 as f32)], Some(player), &mut vm).unwrap(), Some(1.0));
+        execute(
+            "equipitem",
+            &[Expr::Number(pistol.0 as f32)],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "getequipped",
+                &[Expr::Number(pistol.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(1.0)
+        );
 
         // RemoveItem
-        execute("removeitem", &[Expr::Number(stimpak.0 as f32), Expr::Number(2.0)], Some(player), &mut vm).unwrap();
-        assert_eq!(execute("getitemcount", &[Expr::Number(stimpak.0 as f32)], Some(player), &mut vm).unwrap(), Some(3.0));
+        execute(
+            "removeitem",
+            &[Expr::Number(stimpak.0 as f32), Expr::Number(2.0)],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "getitemcount",
+                &[Expr::Number(stimpak.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(3.0)
+        );
 
         // AddNote & GetHasNote & RemoveNote
         let note = FormId(0x0002A123);
-        assert_eq!(execute("gethasnote", &[Expr::Number(note.0 as f32)], Some(player), &mut vm).unwrap(), Some(0.0));
-        execute("addnote", &[Expr::Number(note.0 as f32)], Some(player), &mut vm).unwrap();
-        assert_eq!(execute("gethasnote", &[Expr::Number(note.0 as f32)], Some(player), &mut vm).unwrap(), Some(1.0));
-        execute("removenote", &[Expr::Number(note.0 as f32)], Some(player), &mut vm).unwrap();
-        assert_eq!(execute("gethasnote", &[Expr::Number(note.0 as f32)], Some(player), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute(
+                "gethasnote",
+                &[Expr::Number(note.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(0.0)
+        );
+        execute(
+            "addnote",
+            &[Expr::Number(note.0 as f32)],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "gethasnote",
+                &[Expr::Number(note.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(1.0)
+        );
+        execute(
+            "removenote",
+            &[Expr::Number(note.0 as f32)],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "gethasnote",
+                &[Expr::Number(note.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(0.0)
+        );
 
         // Conditions & Getters
-        assert_eq!(execute("getweaponhealthperc", &[], Some(player), &mut vm).unwrap(), Some(100.0));
-        assert_eq!(execute("getbartergold", &[], Some(player), &mut vm).unwrap(), Some(500.0));
-        assert_eq!(execute("getuseditemlevel", &[], Some(player), &mut vm).unwrap(), Some(1.0));
+        assert_eq!(
+            execute("getweaponhealthperc", &[], Some(player), &mut vm).unwrap(),
+            Some(100.0)
+        );
+        assert_eq!(
+            execute("getbartergold", &[], Some(player), &mut vm).unwrap(),
+            Some(500.0)
+        );
+        assert_eq!(
+            execute("getuseditemlevel", &[], Some(player), &mut vm).unwrap(),
+            Some(1.0)
+        );
 
         // Drop & RemoveAllItems
-        execute("drop", &[Expr::Number(stimpak.0 as f32), Expr::Number(1.0)], Some(player), &mut vm).unwrap();
-        assert_eq!(execute("getitemcount", &[Expr::Number(stimpak.0 as f32)], Some(player), &mut vm).unwrap(), Some(2.0));
+        execute(
+            "drop",
+            &[Expr::Number(stimpak.0 as f32), Expr::Number(1.0)],
+            Some(player),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute(
+                "getitemcount",
+                &[Expr::Number(stimpak.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(2.0)
+        );
         execute("dropme", &[], Some(stimpak), &mut vm).unwrap();
         execute("removeallitems", &[], Some(player), &mut vm).unwrap();
-        assert_eq!(execute("getitemcount", &[Expr::Number(stimpak.0 as f32)], Some(player), &mut vm).unwrap(), Some(0.0));
+        assert_eq!(
+            execute(
+                "getitemcount",
+                &[Expr::Number(stimpak.0 as f32)],
+                Some(player),
+                &mut vm
+            )
+            .unwrap(),
+            Some(0.0)
+        );
     }
 }
-

@@ -2,7 +2,7 @@
 //! 参照元: references/openmw/components/esm4/script.hpp:6, 8, 10, 11, 32, 67, 310
 
 use crate::parser::Expr;
-use crate::vm::{ScriptVm, ScriptError};
+use crate::vm::{ScriptError, ScriptVm};
 use fo3_esm::FormId;
 
 pub fn execute(
@@ -149,8 +149,12 @@ pub fn execute(
                 vm.locals.insert(format!("{:08X}.pos.y", target.0), y);
                 vm.locals.insert(format!("{:08X}.pos.z", target.0), z);
                 vm.locals.insert(format!("{:08X}.angle.z", target.0), az);
-                vm.locals.insert(format!("{:08X}.cell", target.0), cell_id.0 as f32);
-                println!("[Script] PositionCell: Target {:?} -> ({}, {}, {}) Cell {:?}", target, x, y, z, cell_id);
+                vm.locals
+                    .insert(format!("{:08X}.cell", target.0), cell_id.0 as f32);
+                println!(
+                    "[Script] PositionCell: Target {:?} -> ({}, {}, {}) Cell {:?}",
+                    target, x, y, z, cell_id
+                );
             }
             Ok(Some(0.0))
         }
@@ -163,7 +167,7 @@ pub fn execute(
                     Expr::Number(n) => format!("{:08X}", *n as u32),
                     _ => return Ok(Some(0.0)),
                 };
-                
+
                 println!(
                     "[Script] MoveTo: Target {:?} moved to {}",
                     target, target_marker
@@ -181,7 +185,7 @@ pub fn execute(
                     Expr::Number(n) => format!("{:08X}", *n as u32),
                     _ => return Ok(Some(0.0)),
                 };
-                
+
                 println!(
                     "[Script] MoveToMarker: Target {:?} moved to {}",
                     target, target_marker
@@ -196,13 +200,37 @@ pub fn execute(
         "getdistance" => {
             if !args.is_empty() {
                 let other_ref = get_form_id(&args[0])?;
-                let x1 = vm.locals.get(&format!("{:08X}.pos.x", target.0)).copied().unwrap_or(0.0);
-                let y1 = vm.locals.get(&format!("{:08X}.pos.y", target.0)).copied().unwrap_or(0.0);
-                let z1 = vm.locals.get(&format!("{:08X}.pos.z", target.0)).copied().unwrap_or(0.0);
+                let x1 = vm
+                    .locals
+                    .get(&format!("{:08X}.pos.x", target.0))
+                    .copied()
+                    .unwrap_or(0.0);
+                let y1 = vm
+                    .locals
+                    .get(&format!("{:08X}.pos.y", target.0))
+                    .copied()
+                    .unwrap_or(0.0);
+                let z1 = vm
+                    .locals
+                    .get(&format!("{:08X}.pos.z", target.0))
+                    .copied()
+                    .unwrap_or(0.0);
 
-                let x2 = vm.locals.get(&format!("{:08X}.pos.x", other_ref.0)).copied().unwrap_or(0.0);
-                let y2 = vm.locals.get(&format!("{:08X}.pos.y", other_ref.0)).copied().unwrap_or(0.0);
-                let z2 = vm.locals.get(&format!("{:08X}.pos.z", other_ref.0)).copied().unwrap_or(0.0);
+                let x2 = vm
+                    .locals
+                    .get(&format!("{:08X}.pos.x", other_ref.0))
+                    .copied()
+                    .unwrap_or(0.0);
+                let y2 = vm
+                    .locals
+                    .get(&format!("{:08X}.pos.y", other_ref.0))
+                    .copied()
+                    .unwrap_or(0.0);
+                let z2 = vm
+                    .locals
+                    .get(&format!("{:08X}.pos.z", other_ref.0))
+                    .copied()
+                    .unwrap_or(0.0);
 
                 let dx = x1 - x2;
                 let dy = y1 - y2;
@@ -218,17 +246,37 @@ pub fn execute(
         "getheadingangle" => {
             if !args.is_empty() {
                 let other_ref = get_form_id(&args[0])?;
-                let x1 = vm.locals.get(&format!("{:08X}.pos.x", target.0)).copied().unwrap_or(0.0);
-                let y1 = vm.locals.get(&format!("{:08X}.pos.y", target.0)).copied().unwrap_or(0.0);
+                let x1 = vm
+                    .locals
+                    .get(&format!("{:08X}.pos.x", target.0))
+                    .copied()
+                    .unwrap_or(0.0);
+                let y1 = vm
+                    .locals
+                    .get(&format!("{:08X}.pos.y", target.0))
+                    .copied()
+                    .unwrap_or(0.0);
 
-                let x2 = vm.locals.get(&format!("{:08X}.pos.x", other_ref.0)).copied().unwrap_or(0.0);
-                let y2 = vm.locals.get(&format!("{:08X}.pos.y", other_ref.0)).copied().unwrap_or(0.0);
+                let x2 = vm
+                    .locals
+                    .get(&format!("{:08X}.pos.x", other_ref.0))
+                    .copied()
+                    .unwrap_or(0.0);
+                let y2 = vm
+                    .locals
+                    .get(&format!("{:08X}.pos.y", other_ref.0))
+                    .copied()
+                    .unwrap_or(0.0);
 
                 let dx = x2 - x1;
                 let dy = y2 - y1;
                 let target_angle_deg = dx.atan2(dy).to_degrees();
 
-                let my_angle_deg = vm.locals.get(&format!("{:08X}.angle.z", target.0)).copied().unwrap_or(0.0);
+                let my_angle_deg = vm
+                    .locals
+                    .get(&format!("{:08X}.angle.z", target.0))
+                    .copied()
+                    .unwrap_or(0.0);
                 let mut diff = target_angle_deg - my_angle_deg;
                 while diff > 180.0 {
                     diff -= 360.0;
@@ -249,8 +297,12 @@ pub fn execute(
                     _ => "z".to_string(),
                 };
                 let speed = vm.eval_ast_expr(&args[1], subject)?;
-                vm.locals.insert(format!("{:08X}.rotatespeed.{}", target.0, axis), speed);
-                println!("[Script] Rotate: Target {:?}, Axis {}, Speed {}", target, axis, speed);
+                vm.locals
+                    .insert(format!("{:08X}.rotatespeed.{}", target.0, axis), speed);
+                println!(
+                    "[Script] Rotate: Target {:?}, Axis {}, Speed {}",
+                    target, axis, speed
+                );
             }
             Ok(Some(0.0))
         }
@@ -260,9 +312,21 @@ pub fn execute(
             if !args.is_empty() {
                 let marker_ref = get_form_id(&args[0])?;
                 let player = FormId(0x14);
-                let px = vm.locals.get(&format!("{:08X}.pos.x", marker_ref.0)).copied().unwrap_or(0.0);
-                let py = vm.locals.get(&format!("{:08X}.pos.y", marker_ref.0)).copied().unwrap_or(0.0);
-                let pz = vm.locals.get(&format!("{:08X}.pos.z", marker_ref.0)).copied().unwrap_or(0.0);
+                let px = vm
+                    .locals
+                    .get(&format!("{:08X}.pos.x", marker_ref.0))
+                    .copied()
+                    .unwrap_or(0.0);
+                let py = vm
+                    .locals
+                    .get(&format!("{:08X}.pos.y", marker_ref.0))
+                    .copied()
+                    .unwrap_or(0.0);
+                let pz = vm
+                    .locals
+                    .get(&format!("{:08X}.pos.z", marker_ref.0))
+                    .copied()
+                    .unwrap_or(0.0);
 
                 vm.locals.insert(format!("{:08X}.pos.x", player.0), px);
                 vm.locals.insert(format!("{:08X}.pos.y", player.0), py);
@@ -341,8 +405,16 @@ pub fn execute(
         "getlineofsight" => {
             if !args.is_empty() {
                 let other_ref = get_form_id(&args[0])?;
-                let c1 = vm.locals.get(&format!("{:08X}.cell", target.0)).copied().unwrap_or(0.0);
-                let c2 = vm.locals.get(&format!("{:08X}.cell", other_ref.0)).copied().unwrap_or(0.0);
+                let c1 = vm
+                    .locals
+                    .get(&format!("{:08X}.cell", target.0))
+                    .copied()
+                    .unwrap_or(0.0);
+                let c2 = vm
+                    .locals
+                    .get(&format!("{:08X}.cell", other_ref.0))
+                    .copied()
+                    .unwrap_or(0.0);
                 return Ok(Some(if c1 == c2 { 1.0 } else { 0.0 }));
             }
             Ok(Some(1.0))
@@ -371,7 +443,11 @@ pub fn execute(
         // FUN_IsPlayerMovingIntoNewSpace = 358
         // 参照元: references/openmw/components/esm4/script.hpp:238 (FUN_IsPlayerMovingIntoNewSpace = 358)
         "isplayermovingintonewspace" => {
-            let val = vm.locals.get("player_moving_into_new_space").copied().unwrap_or(0.0);
+            let val = vm
+                .locals
+                .get("player_moving_into_new_space")
+                .copied()
+                .unwrap_or(0.0);
             Ok(Some(val))
         }
         // FUN_GetScale = 24
@@ -414,8 +490,12 @@ pub fn execute(
         "look" | "lookat" => {
             if !args.is_empty() {
                 let other_ref = get_form_id(&args[0])?;
-                vm.locals.insert(format!("{:08X}.lookat", target.0), other_ref.0 as f32);
-                println!("[Script] LookAt: Target {:?} looking at {:?}", target, other_ref);
+                vm.locals
+                    .insert(format!("{:08X}.lookat", target.0), other_ref.0 as f32);
+                println!(
+                    "[Script] LookAt: Target {:?} looking at {:?}",
+                    target, other_ref
+                );
             }
             Ok(Some(0.0))
         }
@@ -454,29 +534,105 @@ mod tests {
         let marker = FormId(0x2001);
 
         // Position & Angle
-        execute("setpos", &[Expr::Variable("x".into()), Expr::Number(100.0)], Some(npc1), &mut vm).unwrap();
-        execute("setpos", &[Expr::Variable("y".into()), Expr::Number(200.0)], Some(npc1), &mut vm).unwrap();
-        execute("setpos", &[Expr::Variable("z".into()), Expr::Number(50.0)], Some(npc1), &mut vm).unwrap();
-        execute("setangle", &[Expr::Variable("z".into()), Expr::Number(90.0)], Some(npc1), &mut vm).unwrap();
+        execute(
+            "setpos",
+            &[Expr::Variable("x".into()), Expr::Number(100.0)],
+            Some(npc1),
+            &mut vm,
+        )
+        .unwrap();
+        execute(
+            "setpos",
+            &[Expr::Variable("y".into()), Expr::Number(200.0)],
+            Some(npc1),
+            &mut vm,
+        )
+        .unwrap();
+        execute(
+            "setpos",
+            &[Expr::Variable("z".into()), Expr::Number(50.0)],
+            Some(npc1),
+            &mut vm,
+        )
+        .unwrap();
+        execute(
+            "setangle",
+            &[Expr::Variable("z".into()), Expr::Number(90.0)],
+            Some(npc1),
+            &mut vm,
+        )
+        .unwrap();
 
-        assert_eq!(execute("getpos", &[Expr::Variable("x".into())], Some(npc1), &mut vm).unwrap(), Some(100.0));
-        assert_eq!(execute("getangle", &[Expr::Variable("z".into())], Some(npc1), &mut vm).unwrap(), Some(90.0));
+        assert_eq!(
+            execute("getpos", &[Expr::Variable("x".into())], Some(npc1), &mut vm).unwrap(),
+            Some(100.0)
+        );
+        assert_eq!(
+            execute(
+                "getangle",
+                &[Expr::Variable("z".into())],
+                Some(npc1),
+                &mut vm
+            )
+            .unwrap(),
+            Some(90.0)
+        );
 
         // MoveTo
-        execute("setpos", &[Expr::Variable("x".into()), Expr::Number(500.0)], Some(marker), &mut vm).unwrap();
-        execute("setpos", &[Expr::Variable("y".into()), Expr::Number(200.0)], Some(marker), &mut vm).unwrap();
-        execute("setpos", &[Expr::Variable("z".into()), Expr::Number(50.0)], Some(marker), &mut vm).unwrap();
-        execute("moveto", &[Expr::Number(marker.0 as f32)], Some(npc1), &mut vm).unwrap();
-        assert_eq!(execute("getpos", &[Expr::Variable("x".into())], Some(npc1), &mut vm).unwrap(), Some(500.0));
+        execute(
+            "setpos",
+            &[Expr::Variable("x".into()), Expr::Number(500.0)],
+            Some(marker),
+            &mut vm,
+        )
+        .unwrap();
+        execute(
+            "setpos",
+            &[Expr::Variable("y".into()), Expr::Number(200.0)],
+            Some(marker),
+            &mut vm,
+        )
+        .unwrap();
+        execute(
+            "setpos",
+            &[Expr::Variable("z".into()), Expr::Number(50.0)],
+            Some(marker),
+            &mut vm,
+        )
+        .unwrap();
+        execute(
+            "moveto",
+            &[Expr::Number(marker.0 as f32)],
+            Some(npc1),
+            &mut vm,
+        )
+        .unwrap();
+        assert_eq!(
+            execute("getpos", &[Expr::Variable("x".into())], Some(npc1), &mut vm).unwrap(),
+            Some(500.0)
+        );
 
         // Distance
-        let dist = execute("getdistance", &[Expr::Number(marker.0 as f32)], Some(npc1), &mut vm).unwrap().unwrap();
+        let dist = execute(
+            "getdistance",
+            &[Expr::Number(marker.0 as f32)],
+            Some(npc1),
+            &mut vm,
+        )
+        .unwrap()
+        .unwrap();
         assert!(dist < 0.001);
 
         // Scale
         execute("setscale", &[Expr::Number(1.5)], Some(npc1), &mut vm).unwrap();
-        assert_eq!(execute("getscale", &[], Some(npc1), &mut vm).unwrap(), Some(1.5));
+        assert_eq!(
+            execute("getscale", &[], Some(npc1), &mut vm).unwrap(),
+            Some(1.5)
+        );
         execute("modscale", &[Expr::Number(0.5)], Some(npc1), &mut vm).unwrap();
-        assert_eq!(execute("getscale", &[], Some(npc1), &mut vm).unwrap(), Some(2.0));
+        assert_eq!(
+            execute("getscale", &[], Some(npc1), &mut vm).unwrap(),
+            Some(2.0)
+        );
     }
 }

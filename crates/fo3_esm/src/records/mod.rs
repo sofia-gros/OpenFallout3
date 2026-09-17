@@ -20,6 +20,7 @@ pub mod items;
 pub mod lvli;
 pub mod mesg;
 pub mod misc_items;
+pub mod navm;
 pub mod npc;
 pub mod otft;
 pub mod pack;
@@ -27,7 +28,6 @@ pub mod quest;
 pub mod scpt;
 pub mod soun;
 pub mod term;
-pub mod navm;
 
 pub use armo::ArmorRecord;
 pub use cell::{CellLighting, CellRecord};
@@ -48,6 +48,9 @@ pub use ltex::LtexRecord;
 pub use lvli::{LvliRecord, LvloEntry};
 pub use mesg::MesgRecord;
 pub use misc_items::{AlchRecord, BookRecord, KeymRecord};
+pub use navm::{
+    NavMeshDoor, NavMeshExternalConnection, NavMeshGrid, NavMeshRecord, NavMeshTriangle,
+};
 pub use npc::{InventoryItem, NpcRecord};
 pub use otft::OtftRecord;
 pub use pack::{PackIdleCollection, PackLocation, PackRecord, PackSchedule, PackTarget, PackType};
@@ -60,4 +63,3 @@ pub use term::{TermMenuItem, TermRecord};
 pub use tes4::Tes4Header;
 pub use txst::TextureSetRecord;
 pub use wrld::WorldRecord;
-pub use navm::{NavMeshRecord, NavMeshTriangle, NavMeshDoor, NavMeshExternalConnection, NavMeshGrid};
