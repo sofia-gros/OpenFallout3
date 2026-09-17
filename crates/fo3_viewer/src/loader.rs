@@ -1003,14 +1003,12 @@ pub fn load_scene(
             let mut total_colliders = 0;
 
             // 1. 地形 (LAND) コライダーの登録
-            for (_, _, land_info) in &cell_inputs {
+            for (cell_id, _, land_info) in &cell_inputs {
                 if let Some((land, gx, gy)) = land_info {
                     let heights = land.compute_heights();
-                    if physics_world
-                        .add_land_collision(&heights, *gx, *gy)
-                        .is_some()
-                    {
+                    if let Some((_, col_handle)) = physics_world.add_land_collision(&heights, *gx, *gy) {
                         total_colliders += 1;
+                        physics_world.cell_colliders.entry(*cell_id).or_default().push(col_handle);
                     }
                 }
             }
@@ -1018,22 +1016,23 @@ pub fn load_scene(
             // 2. 配置オブジェクト (REFR) コライダーの登録および RefrBinding 構築
             let mut refr_bindings = HashMap::new();
             let mut flat_idx = 0;
-            for (form_id, nif, world_transform, _record_type, _model_path) in
-                all_cell_items.iter().flat_map(|items| items.iter())
-            {
-                let col_data = extract_collision_data(nif);
-                let mut rigid_bodies = Vec::new();
-                if !col_data.bodies.is_empty() {
-                    total_colliders += col_data.bodies.len();
-                    let quat = glam::Quat::from_mat3(&world_transform.rotation);
-                    let handles = physics_world.add_nif_collision_with_user_data(
-                        &col_data,
-                        world_transform.translation,
-                        quat,
-                        *form_id as u128,
-                    );
-                    rigid_bodies = handles.into_iter().map(|(rb, _)| rb).collect();
-                }
+            for (cell_id, cell_items) in cells.iter().zip(all_cell_items.iter()).map(|(c, items)| (c.0.form_id.0, items)) {
+                for (form_id, nif, world_transform, _record_type, _model_path) in cell_items {
+                    let col_data = extract_collision_data(nif);
+                    let mut rigid_bodies = Vec::new();
+                    if !col_data.bodies.is_empty() {
+                        total_colliders += col_data.bodies.len();
+                        let quat = glam::Quat::from_mat3(&world_transform.rotation);
+                        let handles = physics_world.add_nif_collision_with_user_data(
+                            &col_data,
+                            world_transform.translation,
+                            quat,
+                            *form_id as u128,
+                        );
+                        let col_handles: Vec<_> = handles.iter().map(|(_, c)| *c).collect();
+                        physics_world.cell_colliders.entry(cell_id).or_default().extend(col_handles);
+                        rigid_bodies = handles.into_iter().map(|(rb, _)| rb).collect();
+                    }
                 let mesh_range = scene
                     .refr_mesh_ranges
                     .get(flat_idx)
@@ -1114,6 +1113,7 @@ pub fn load_scene(
                     },
                 );
             }
+            } // end cell_id loop
             println!("物理ワールド構築完了: 登録剛体数 {}", total_colliders);
             (
                 scene,

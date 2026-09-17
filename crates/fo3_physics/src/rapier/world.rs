@@ -25,6 +25,8 @@ pub struct RapierPhysicsWorld {
     pub multibody_joint_set: MultibodyJointSet,
     pub ccd_solver: CCDSolver,
     pub query_pipeline: QueryPipeline,
+    /// Worldstreaming 用: セルごとの生成コライダーハンドルリスト
+    pub cell_colliders: std::collections::HashMap<u32, Vec<ColliderHandle>>,
 }
 
 impl Default for RapierPhysicsWorld {
@@ -54,6 +56,7 @@ impl RapierPhysicsWorld {
             multibody_joint_set: MultibodyJointSet::new(),
             ccd_solver: CCDSolver::new(),
             query_pipeline: QueryPipeline::new(),
+            cell_colliders: std::collections::HashMap::new(),
         }
     }
 
