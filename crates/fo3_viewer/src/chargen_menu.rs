@@ -95,9 +95,6 @@ impl ChargenMenu {
                     }
                     KeyCode::Enter | KeyCode::NumpadEnter => {
                         println!("[ChargenMenu] プレイヤー名決定: \"{}\"", name);
-                        // 名前決定後、Stage 42 へ進行
-                        let cg00_id = fo3_esm::FormId(0x0001F388);
-                        vm.set_stage(cg00_id, 42);
                         self.mode = ChargenMode::None;
                         true
                     }
@@ -173,15 +170,6 @@ impl ChargenMenu {
                                 HAIRS[*hair_index],
                             );
                             vm.player_is_female = *is_female;
-                            // キャラメイク完了後、Stage 62 -> 65 へ進行
-                            let cg00_id = fo3_esm::FormId(0x0001F388);
-                            vm.set_stage(cg00_id, 62);
-                            let _ = vm.execute_statement(
-                                "player.addScriptPackage CG00PlayerSection4",
-                                None,
-                            );
-                            vm.set_stage(cg00_id, 65);
-                            let _ = vm.execute_statement("setstage CG00 80", None);
                             self.mode = ChargenMode::None;
                         } else {
                             // 項目送り

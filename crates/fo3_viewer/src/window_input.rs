@@ -37,6 +37,9 @@ pub fn handle_input_event(state: &mut AppState, event: WindowEvent, event_loop: 
         WindowEvent::KeyboardInput { event, .. } => {
             let pressed = event.state == ElementState::Pressed;
             if let PhysicalKey::Code(key) = event.physical_key {
+                if pressed {
+                    println!("[INPUT:KEY] {:?}", key);
+                }
                 // キャラクター作成メニュー (RaceSexMenu / NameMenu) のキー・テキスト入力
                 if pressed && state.chargen_menu.is_active() {
                     if let Some(text) = &event.text {
@@ -70,13 +73,6 @@ pub fn handle_input_event(state: &mut AppState, event: WindowEvent, event_loop: 
                                 if idx < mesg.buttons.len() {
                                     state.vm.show_messages.remove(0);
                                     state.vm.set_button_pressed(idx as i32);
-                                    if msg_id.eq_ignore_ascii_case("CG00ChooseSexMessage") {
-                                        state.vm.player_is_female = idx == 1;
-                                        println!(
-                                            "[Chargen] プレイヤー性別決定: is_female={}",
-                                            state.vm.player_is_female
-                                        );
-                                    }
                                     println!(
                                         "[MessageMenu] ボタン選択: {} -> GetButtonPressed",
                                         idx

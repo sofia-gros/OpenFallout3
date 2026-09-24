@@ -162,9 +162,12 @@ pub fn execute(
         // 参照元: GECK: MoveTo
         "moveto" => {
             if !args.is_empty() {
-                let target_marker = match &args[0] {
-                    Expr::Variable(v) => v.clone(),
-                    Expr::Number(n) => format!("{:08X}", *n as u32),
+                let (target_marker, marker_id) = match &args[0] {
+                    Expr::Variable(v) => (v.clone(), vm.resolve_form_id(v).ok()),
+                    Expr::Number(n) => {
+                        let id = FormId(*n as u32);
+                        (format!("{:08X}", id.0), Some(id))
+                    }
                     _ => return Ok(Some(0.0)),
                 };
 
@@ -172,6 +175,15 @@ pub fn execute(
                     "[Script] MoveTo: Target {:?} moved to {}",
                     target, target_marker
                 );
+                if let Some(marker_id) = marker_id {
+                    for axis in &["x", "y", "z"] {
+                        let m_key = format!("{:08X}.pos.{}", marker_id.0, axis);
+                        if let Some(&val) = vm.locals.get(&m_key) {
+                            let t_key = format!("{:08X}.pos.{}", target.0, axis);
+                            vm.locals.insert(t_key, val);
+                        }
+                    }
+                }
                 vm.teleport_requests.push((Some(target), target_marker));
             }
             Ok(Some(0.0))
@@ -180,9 +192,12 @@ pub fn execute(
         // 参照元: GECK: MoveToMarker
         "movetomarker" => {
             if !args.is_empty() {
-                let target_marker = match &args[0] {
-                    Expr::Variable(v) => v.clone(),
-                    Expr::Number(n) => format!("{:08X}", *n as u32),
+                let (target_marker, marker_id) = match &args[0] {
+                    Expr::Variable(v) => (v.clone(), vm.resolve_form_id(v).ok()),
+                    Expr::Number(n) => {
+                        let id = FormId(*n as u32);
+                        (format!("{:08X}", id.0), Some(id))
+                    }
                     _ => return Ok(Some(0.0)),
                 };
 
@@ -190,6 +205,15 @@ pub fn execute(
                     "[Script] MoveToMarker: Target {:?} moved to {}",
                     target, target_marker
                 );
+                if let Some(marker_id) = marker_id {
+                    for axis in &["x", "y", "z"] {
+                        let m_key = format!("{:08X}.pos.{}", marker_id.0, axis);
+                        if let Some(&val) = vm.locals.get(&m_key) {
+                            let t_key = format!("{:08X}.pos.{}", target.0, axis);
+                            vm.locals.insert(t_key, val);
+                        }
+                    }
+                }
                 vm.teleport_requests.push((Some(target), target_marker));
             }
             Ok(Some(0.0))

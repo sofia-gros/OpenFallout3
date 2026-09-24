@@ -101,8 +101,8 @@ impl AiManager {
                         script_vars,
                     };
 
-                    // 全条件が true か評価
-                    if fo3_script::evaluate_conditions(&pack.conditions, &cond_ctx) {
+                    // 条件が true のものを選択
+                    if fo3_script::evaluate_conditions(&pack.conditions, &cond_ctx, vm) {
                         active_pack = Some(*pkg_id);
                         break; // 条件に合致する最初のパッケージを選択
                     }

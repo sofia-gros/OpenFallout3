@@ -33,7 +33,7 @@ pub struct ConditionContext {
 }
 
 /// 単一の `TargetCondition` を評価する。
-pub fn evaluate_single_condition(cond: &TargetCondition, ctx: &ConditionContext) -> bool {
+pub fn evaluate_single_condition(cond: &TargetCondition, ctx: &ConditionContext, vm: &crate::vm::ScriptVm) -> bool {
     let actual_value = match cond.function_index {
         FN_GET_IS_SEX | FN_GET_PC_IS_SEX => {
             // 対象の性別 (param1: 0 = Male, 1 = Female)
@@ -102,13 +102,39 @@ pub fn evaluate_single_condition(cond: &TargetCondition, ctx: &ConditionContext)
             ctx.speaker_pos.distance(ctx.player_pos)
         }
         FN_GET_SCRIPT_VARIABLE => {
-            // スクリプト変数取得 (param1: Refr FormID, param2: Var Index)
+            // 対象オブジェクトのローカル変数 (param1: Refr FormID, param2: Var Index)
             let refr_id = FormId(cond.param1);
             let var_idx = cond.param2;
-            ctx.script_vars
-                .get(&(refr_id, var_idx))
-                .copied()
-                .unwrap_or(0.0)
+            
+            // 1. Refr FormID にアタッチされているスクリプトを特定 (Refrまたは直接Script FormID)
+            let script_id = vm.attached_scripts.get(&refr_id).copied()
+                .or_else(|| vm.scripts.get(&refr_id).map(|s| s.form_id));
+            
+            let mut val = 0.0;
+            if let Some(s_id) = script_id {
+                // 2. スクリプトレコードから変数名を取得
+                if let Some(scpt) = vm.scripts.get(&s_id) {
+                    let local_var = scpt.local_vars.iter().find(|v| v.index == var_idx)
+                        .or_else(|| scpt.local_vars.get(var_idx as usize));
+                        
+                    if let Some(local_var) = local_var {
+                        let var_name_lower = local_var.name.to_lowercase();
+                        let cross_ref_key = format!("{:08X}.{}", refr_id.0, var_name_lower);
+                        
+                        // 3. vm.globals / locals から値を取得
+                        if let Some(&v) = vm.globals.get(&cross_ref_key) {
+                            val = v;
+                        } else if let Some(&v) = vm.locals.get(&cross_ref_key) {
+                            val = v;
+                        } else if let Some(&v) = vm.locals.get(&var_name_lower) {
+                            val = v;
+                        } else {
+                            val = 0.0;
+                        }
+                    }
+                }
+            }
+            val
         }
         _ => {
             // 未実装関数は一旦true扱い(Fallout 3 の進行停止を防ぐため)
@@ -134,8 +160,8 @@ pub fn evaluate_single_condition(cond: &TargetCondition, ctx: &ConditionContext)
 /// 複数条件式リスト（AND / OR 結合）を順次評価する。
 ///
 /// 参照元: `references/openmw/components/esm4/loadinfo.cpp:81-105`
-/// `operator` の bit 0 (0x01) が立っている場合は OR 結合。
-pub fn evaluate_conditions(conditions: &[TargetCondition], ctx: &ConditionContext) -> bool {
+/// `operator` の bit 0 (0x01) がセットされていれば OR 条件
+pub fn evaluate_conditions(conditions: &[TargetCondition], ctx: &ConditionContext, vm: &crate::vm::ScriptVm) -> bool {
     if conditions.is_empty() {
         return true;
     }
@@ -145,7 +171,7 @@ pub fn evaluate_conditions(conditions: &[TargetCondition], ctx: &ConditionContex
 
     for cond in conditions {
         let is_or = (cond.operator & 0x01) != 0;
-        let result = evaluate_single_condition(cond, ctx);
+        let result = evaluate_single_condition(cond, ctx, vm);
 
         if is_or {
             current_or_group = current_or_group || result;
@@ -204,10 +230,11 @@ mod tests {
             reference: FormId(0),
         };
 
-        assert!(evaluate_conditions(&[cond1.clone(), cond2.clone()], &ctx));
+        let vm = crate::vm::ScriptVm::default();
+        assert!(evaluate_conditions(&[cond1.clone(), cond2.clone()], &ctx, &vm));
 
         // ステージが異なる場合は不一致
         ctx.quest_stages.insert(quest_id, 30);
-        assert!(!evaluate_conditions(&[cond1, cond2], &ctx));
+        assert!(!evaluate_conditions(&[cond1, cond2], &ctx, &vm));
     }
 }

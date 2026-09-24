@@ -53,6 +53,8 @@ impl Iterator for PcmStreamSource {
         if self.eof.load(Ordering::Acquire) {
             return None;
         }
+        // バッファ枯渇時のビジーポーリングによるCPU 100%過負荷を防止
+        std::thread::sleep(Duration::from_millis(5));
         Some(0.0)
     }
 }
@@ -124,6 +126,8 @@ pub struct BinkPlayer {
     pub finished: bool,
     pub texture: wgpu::Texture,
     pub texture_view: wgpu::TextureView,
+    /// 前回のフレーム描画時刻 (30fps 固定タイマー用)
+    last_frame_time: std::time::Instant,
     _audio_process: Option<Child>,
     _audio_thread: Option<JoinHandle<()>>,
     audio_stop: Arc<AtomicBool>,
@@ -140,6 +144,8 @@ impl BinkPlayer {
         device: &wgpu::Device,
         audio_handle: Option<rodio::OutputStreamHandle>,
     ) -> Option<Self> {
+        let target_width = target_width.clamp(640, 1920);
+        let target_height = target_height.clamp(480, 1080);
         let mut child = Command::new("ffmpeg")
             .args([
                 "-re",
@@ -214,6 +220,7 @@ impl BinkPlayer {
             finished: false,
             texture,
             texture_view,
+            last_frame_time: std::time::Instant::now(),
             _audio_process: audio_process,
             _audio_thread: audio_thread,
             audio_stop,
@@ -307,11 +314,18 @@ impl BinkPlayer {
             return false;
         }
 
+        // 30fps (約33ms) 未満の過剰なフレーム更新を抑制し、GPUバス帯域とVRAM過負荷によるクラッシュを防止
+        let now = std::time::Instant::now();
+        if now.duration_since(self.last_frame_time) < Duration::from_millis(33) {
+            return true;
+        }
+
         let mut frame_data = None;
         {
             let mut guard = self.video_buffer.lock().unwrap();
             if guard.is_some() {
                 frame_data = guard.take();
+                self.last_frame_time = now;
             }
         }
 

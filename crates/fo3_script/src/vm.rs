@@ -83,6 +83,9 @@ pub struct ScriptVm {
     pub unlocked_objects: HashSet<FormId>,
     /// 実機 ESM スクリプトレコード群 (FormId -> ScptRecord)
     pub scripts: HashMap<FormId, ScptRecord>,
+    pub attached_scripts: HashMap<FormId, FormId>,
+    pub pending_var_updates: Vec<(FormId, String, f64)>,
+    pub pending_events: Vec<crate::GameEvent>,
     /// Bink ムービー再生リクエストキュー (再生ファイル名)
     pub play_bink_queue: Vec<String>,
     /// 表示メッセージリクエストキュー
@@ -115,6 +118,10 @@ pub struct ScriptVm {
     pub player_is_female: bool,
     /// フレームデルタタイム秒 (GetSecondsPassed 評価用)
     pub delta_time: f32,
+    /// ステージ Result Script の遅延実行キュー: (QuestFormID, Stage, ScriptSource)
+    /// 実機の setstage は同フレームで連鎖せず、次フレームの GameMode ループで処理される。
+    /// 参照元: Fallout 3 実機ゲームループ — SetStage の遅延実行仕様
+    pub pending_stage_scripts: std::collections::VecDeque<(FormId, u16, String)>,
 }
 
 impl Default for ScriptVm {
@@ -134,6 +141,9 @@ impl Default for ScriptVm {
             disabled_objects: HashSet::new(),
             unlocked_objects: HashSet::new(),
             scripts: HashMap::new(),
+            attached_scripts: HashMap::new(),
+            pending_var_updates: Vec::new(),
+            pending_events: Vec::new(),
             play_bink_queue: Vec::new(),
             show_messages: Vec::new(),
             player_controls: PlayerControlFlags::default(),
@@ -151,6 +161,7 @@ impl Default for ScriptVm {
             evaluate_package_requests: Vec::new(),
             player_is_female: false,
             delta_time: 0.016,
+            pending_stage_scripts: std::collections::VecDeque::new(),
         }
     }
 }
@@ -183,37 +194,41 @@ impl ScriptVm {
     /// 文字列 (0x16進数, 10進数, または EditorID) から FormID を解決。
     pub fn resolve_form_id(&self, s: &str) -> Result<FormId, ScriptError> {
         let clean = s.trim();
-        if clean.eq_ignore_ascii_case("player") || clean.eq_ignore_ascii_case("playerref") {
-            return Ok(FormId(0x14));
-        }
-        if let Some(hex) = clean
-            .strip_prefix("0x")
-            .or_else(|| clean.strip_prefix("0X"))
-        {
-            u32::from_str_radix(hex, 16)
-                .map(FormId)
-                .map_err(|e| ScriptError::ParseError(e.to_string()))
+        let res = if clean.eq_ignore_ascii_case("player") || clean.eq_ignore_ascii_case("playerref") {
+            Ok(FormId(0x14))
+        } else if let Some(hex) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) {
+            u32::from_str_radix(hex, 16).map(FormId).map_err(|e| ScriptError::ParseError(e.to_string()))
         } else if let Ok(val) = clean.parse::<u32>() {
             Ok(FormId(val))
+        } else if let Some(&form_id) = self.edid_map.get(clean) {
+            Ok(form_id)
         } else if let Some(&form_id) = self.edid_map.get(&clean.to_ascii_uppercase()) {
+            Ok(form_id)
+        } else if let Some((_, &form_id)) = self.edid_map.iter().find(|(k, _)| k.eq_ignore_ascii_case(clean)) {
             Ok(form_id)
         } else if let Some(form_id) = self.quest_manager.resolve_quest_id(clean) {
             Ok(form_id)
         } else {
-            Err(ScriptError::ParseError(format!(
-                "Unknown FormID/EditorID: {}",
-                clean
-            )))
+            Err(ScriptError::ParseError(format!("Unknown FormID/EditorID: {}", clean)))
+        };
+        if clean.eq_ignore_ascii_case("cg00dadref") || clean.eq_ignore_ascii_case("cg00") {
+            println!("[VM] resolve_form_id('{}') -> {:?}", s, res);
         }
+        res
     }
 
-    /// クエストのステージを設定し、ステージに紐づく Result Script (SCTX) を実行する。
+    /// クエストのステージを設定し、ステージに紐づく Result Script (SCTX) を遅延実行キューへ積む。
+    /// 実機 Fallout 3 では setstage は次フレームの GameMode ループ開始時に実行される。
+    /// 同フレーム内での setstage 連鎖 (ステージ 5→6→8→9→10 の一気連鎖) を防ぐため、
+    /// Result Script は pending_stage_scripts キューへ積み、app.rs で 1件/フレームで消化する。
+    /// 参照元: Fallout 3 実機ゲームループ仕様 — SetStage 遅延実行
     pub fn set_stage(&mut self, quest_id: FormId, stage: u32) {
+        println!("[EVENT:QUEST] Quest 0x{:08X} -> Stage {}", quest_id.0, stage);
         self.quest_stages.insert(quest_id, stage);
         if let Some(script) = self.quest_manager.set_stage(quest_id, stage as u16, None) {
             let lines: Vec<String> = script.lines().map(|s| s.to_string()).collect();
             if let Err(e) = self.execute_block(&lines, Some(quest_id)) {
-                eprintln!("[Script] SetStage {} ResultScript 実行エラー: {:?}", stage, e);
+                eprintln!("[Script] SetStage {} ResultScript エラー: {:?}", stage, e);
             }
         }
     }
@@ -795,23 +810,31 @@ impl ScriptVm {
             return v;
         }
 
-        // 3. ローカル変数 / クエスト変数
+        // 3. ローカル変数 / クエスト変数 / アクター相互参照変数
         if let Some((prefix, sub)) = lower.split_once('.') {
-            // "QuestID.var" の形式
-            let mut target_q_id = None;
-            if let Some(q_id) = self
-                .edid_map
-                .get(prefix)
-                .or_else(|| self.edid_map.get(&prefix.to_ascii_uppercase()))
-            {
-                if self.quest_manager.quests.contains_key(q_id) {
-                    target_q_id = Some(*q_id);
+            // 参照元: GECK Wiki: Cross-Script Variable Reference (`Reference.Variable` または `Quest.Variable`)
+            if let Ok(target_id) = self.resolve_form_id(prefix) {
+                // クエスト変数の解決
+                if self.quest_manager.quests.contains_key(&target_id) {
+                    if let Some(v) = self.quest_manager.get_quest_variable(target_id, sub) {
+                        return v as f32;
+                    }
+                }
+                // アクター / Placed Reference の正規化キー ("{:08X}.var") で globals および locals を検索
+                let hex_key = format!("{:08X}.{}", target_id.0, sub);
+                if let Some(&v) = self.globals.get(&hex_key).or_else(|| self.locals.get(&hex_key)) {
+                    return v;
+                }
+                if Some(target_id) == self_id {
+                    if let Some(&v) = self.locals.get(sub) {
+                        return v;
+                    }
                 }
             }
-            if let Some(q_id) = target_q_id {
-                if let Some(v) = self.quest_manager.get_quest_variable(q_id, sub) {
-                    return v as f32;
-                }
+            // 通常のキー ("prefix.sub") で globals または locals を検索
+            let full_key = format!("{}.{}", prefix, sub);
+            if let Some(&v) = self.globals.get(&full_key).or_else(|| self.locals.get(&full_key)) {
+                return v;
             }
             if let Some(&v) = self.locals.get(sub) {
                 return v;
@@ -854,7 +877,10 @@ impl ScriptVm {
         let mut parser = crate::parser::Parser::new(&joined);
         let stmts = match parser.parse_statements() {
             Ok(s) => s,
-            Err(e) => return Err(ScriptError::ParseError(e)),
+            Err(e) => {
+                println!("[VM] AST Parse Error: {:?} in script:\n{}", e, joined);
+                return Err(ScriptError::ParseError(e));
+            }
         };
 
         let mut activated = false;

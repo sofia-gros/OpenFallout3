@@ -13,7 +13,6 @@ use fo3_gamebryo_core::NiTransform;
 use fo3_nif::{NifBlock, NifFile};
 
 use crate::animation::{AnimationPlayer, SkeletonPose};
-use crate::pipeline::RenderContext;
 use crate::scene::bones::{
     collect_bone_world_transforms, collect_shape_transforms, find_attach_bone_name,
     recompute_bone_world_maps_with_pose, resolve_bone_world_transforms,
@@ -72,8 +71,10 @@ pub struct AnimatedRigidMesh {
 /// 参照元: Gamebryo 2.6 `NiNode` シーングラフ階層, Fallout 3 `ACHR` 配置アクター仕様
 #[derive(Clone, Debug)]
 pub struct RenderActorInstance {
-    /// アクターの FormID または一意の識別番号
+    /// アクターの FormID または一意の識別番号 (ACHR FormID)
     pub form_id: u32,
+    /// ベースオブジェクトの FormID (NPC FormID)
+    pub base_id: u32,
     /// このアクターが所属するセルの FormID (Worldstreaming 用)
     pub cell_id: Option<u32>,
     /// アクター名 (エディタ ID または表示名)
@@ -609,9 +610,10 @@ impl RenderScene {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        context: &RenderContext,
+        context: &crate::RenderContext,
         vfs: &mut VfsManager,
         form_id: u32,
+        base_id: u32,
         name: &str,
         world_transform: &NiTransform,
         nif: Arc<NifFile>,
@@ -620,8 +622,15 @@ impl RenderScene {
     ) -> usize {
         let parts = vec![nif.clone()];
         let part_refs: Vec<&NifFile> = parts.iter().map(|p| p.as_ref()).collect();
-        let mut sub_scene =
-            RenderScene::from_actor_parts(device, queue, context, &nif, &part_refs, vfs);
+        let mut sub_scene = RenderScene::from_actor_parts_with_cache(
+            device,
+            queue,
+            context,
+            &nif,
+            &part_refs,
+            vfs,
+            texture_cache,
+        );
 
         let start_idx = self.meshes.len();
         self.meshes.append(&mut sub_scene.meshes);
@@ -638,6 +647,7 @@ impl RenderScene {
 
         let actor = RenderActorInstance {
             form_id,
+            base_id,
             cell_id: None,
             name: name.to_string(),
             world_transform: world_transform.clone(),
@@ -661,9 +671,10 @@ impl RenderScene {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        context: &RenderContext,
+        context: &crate::RenderContext,
         vfs: &mut VfsManager,
         form_id: u32,
+        base_id: u32,
         name: &str,
         world_transform: &NiTransform,
         skeleton_nif: Arc<NifFile>,
@@ -832,6 +843,7 @@ impl RenderScene {
         let actor_idx = self.actors.len();
         self.actors.push(RenderActorInstance {
             form_id,
+            base_id,
             cell_id: None,
             name: name.to_string(),
             world_transform: world_transform.clone(),

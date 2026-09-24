@@ -110,8 +110,13 @@ pub fn execute(
         // PlaySound [SoundEDID]
         "playsound" => {
             if !args.is_empty() {
-                let s_id = get_form_id(&args[0])?;
+                let s_id = if let Expr::Variable(ref name) = args[0] {
+                    name.clone()
+                } else {
+                    format!("{:08X}", get_form_id(&args[0]).unwrap_or(fo3_esm::FormId(0)).0)
+                };
                 println!("[Script] PlaySound: {:?}", s_id);
+                vm.sound_queue.push(s_id);
             }
             Ok(Some(0.0))
         }

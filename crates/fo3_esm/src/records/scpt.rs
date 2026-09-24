@@ -264,6 +264,7 @@ impl ScptRecord {
                     source_text = Some(sub.as_string());
                 }
                 b"SLSD" => {
+                    // println!("SLSD len: {}", sub.data.len());
                     if sub.data.len() >= 20 {
                         let mut cur = Cursor::new(&sub.data);
                         let index = cur.read_u32::<LittleEndian>()?;
@@ -272,6 +273,11 @@ impl ScptRecord {
                         let _unk3 = cur.read_u32::<LittleEndian>()?;
                         let var_type = cur.read_u32::<LittleEndian>()?;
                         current_slsd = Some((index, var_type));
+                    } else if sub.data.len() >= 4 {
+                        let mut cur = Cursor::new(&sub.data);
+                        let index = cur.read_u32::<LittleEndian>()?;
+                        // Just use 0 for type if it's short?
+                        current_slsd = Some((index, 0));
                     }
                 }
                 b"SCVR" => {

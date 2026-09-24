@@ -22,3 +22,10 @@ Cargo.lock
 
 test/
 
+# 作業用一時スクリプト・デバッグバイナリ
+/scripts/scratch/
+fix_*.py
+test_*.exe
+test_*.pdb
+test_*.rs
+*.log

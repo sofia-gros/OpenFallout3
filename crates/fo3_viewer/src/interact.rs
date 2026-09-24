@@ -48,6 +48,8 @@ pub enum InteractableKind {
 pub struct InteractableObject {
     /// 配置参照の FormID (`REFR` または `ACHR`)
     pub form_id: u32,
+    /// ベースオブジェクトの FormID (STAT, CONT, DOOR, NPC, etc.)
+    pub base_id: u32,
     /// エディタ ID (`EDID`)
     pub edid: String,
     /// ゲーム内表示名 (`FULL` サブレコード)
@@ -233,6 +235,7 @@ mod tests {
 
         let door = InteractableObject {
             form_id: 0x0001,
+            base_id: 0,
             edid: "TestDoor".to_string(),
             name: "メガトン入口".to_string(),
             position: Vec3::new(0.0, 100.0, 0.0),
@@ -252,6 +255,7 @@ mod tests {
 
         let far_door = InteractableObject {
             form_id: 0x0003,
+            base_id: 0,
             edid: "FarDoor".to_string(),
             name: "遠くのドア".to_string(),
             position: Vec3::new(0.0, 500.0, 0.0),
@@ -266,6 +270,7 @@ mod tests {
 
         let side_item = InteractableObject {
             form_id: 0x0004,
+            base_id: 0,
             edid: "SideItem".to_string(),
             name: "横のボトルキャップ".to_string(),
             position: Vec3::new(100.0, 50.0, 0.0),
@@ -294,6 +299,7 @@ mod tests {
         // 足元が Z = -130 にある NPC に対して、プレイヤーの目線 Z = 0 から水平に見ている場合
         let npc = InteractableObject {
             form_id: 0x0005,
+            base_id: 0,
             edid: "ColinMoriarty".to_string(),
             name: "コリン・モリアティ".to_string(),
             position: Vec3::new(0.0, 100.0, -130.0), // 足元
@@ -319,6 +325,7 @@ mod tests {
     fn test_find_focused_by_raycast() {
         let door = InteractableObject {
             form_id: 0x0001572F,
+            base_id: 0,
             edid: "ShackDoor".to_string(),
             name: "モリアティ酒場のドア".to_string(),
             position: Vec3::new(100.0, 0.0, 0.0),

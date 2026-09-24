@@ -29,16 +29,18 @@ use std::sync::Arc;
 /// 現在表示中の字幕情報 (実機 `INFO` レコード由来)。
 #[derive(Clone, Debug)]
 pub struct Subtitle {
-    /// 発言 INFO の FormID
+    /// 対応 INFO の FormID
     pub form_id: FormId,
-    /// 発言者表示名
+    /// 話者の名前
     pub speaker: String,
-    /// 台詞本文 (実機 `INFO.NAM1`)
+    /// 字幕テキスト (通常 `INFO.NAM1`)
     pub text: String,
-    /// 残り表示時間（秒）
+    /// 残り表示時間(秒)
     pub remaining: f32,
-    /// 台詞終了時に自動実行する Result Script (実機 `INFO.SCTX`)
+    /// 台詞終了時に実行される Result Script (通常 `INFO.SCTX`)
     pub on_complete_script: Option<String>,
+    /// 発話中の Topic (例: "CG00DadSpeech")
+    pub topic: Option<String>,
 }
 
 /// クロスプラットフォーム オーディオおよび実機ダイアログ進行管理システム。
@@ -191,6 +193,12 @@ impl SoundEngine {
                     println!("[SoundEngine] Running ResultScript:\n{}", script_src);
                     let _ = vm.execute_result_script(&script_src, None);
                 }
+                if let Some(topic) = &sub.topic {
+                    vm.pending_events.push(fo3_script::event::GameEvent::Custom(
+                        "SayToDone".to_string(),
+                        vec![topic.clone()],
+                    ));
+                }
                 finished_speakers.push(*speaker_id);
                 line_ended_this_frame = true;
             }
@@ -264,12 +272,16 @@ impl SoundEngine {
                         return false;
                     }
                     if self.spoken_infos.contains(&info.form_id) {
+                        println!("[SoundEngine DEBUG] Skipping info {:?} because already spoken", info.form_id);
                         return false;
                     }
                     if info.conditions.is_empty() {
+                        println!("[SoundEngine DEBUG] Matching info {:?} because conditions empty", info.form_id);
                         true
                     } else {
-                        evaluate_conditions(&info.conditions, &cond_ctx)
+                        let res = evaluate_conditions(&info.conditions, &cond_ctx, vm);
+                        println!("[SoundEngine DEBUG] Evaluated conditions for info {:?} = {}", info.form_id, res);
+                        res
                     }
                 })
                 .or_else(|| {
@@ -281,10 +293,17 @@ impl SoundEngine {
                         if self.spoken_infos.contains(&info.form_id) {
                             return false;
                         }
+                        let is_say_once = (info.flags & 0x0004) != 0;
+                        if is_say_once {
+                            return false;
+                        }
                         if info.conditions.is_empty() {
+                            println!("[SoundEngine DEBUG] Fallback Matching info {:?} because conditions empty", info.form_id);
                             true
                         } else {
-                            evaluate_conditions(&info.conditions, &cond_ctx)
+                            let res = evaluate_conditions(&info.conditions, &cond_ctx, vm);
+                            println!("[SoundEngine DEBUG] Fallback Evaluated conditions for info {:?} = {}", info.form_id, res);
+                            res
                         }
                     })
                 });
@@ -341,6 +360,7 @@ impl SoundEngine {
                             text: subtitle_text,
                             remaining: duration,
                             on_complete_script: info.result_script_source.clone(),
+                            topic: Some(dial.edid.clone()),
                         },
                         sink_opt,
                     ),

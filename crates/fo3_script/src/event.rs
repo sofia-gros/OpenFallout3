@@ -41,11 +41,13 @@ pub enum GameEvent {
     OnDeath {
         /// 死亡したアクターの FormID
         actor: FormId,
-        /// 殺害者の FormID (自殺・環境死の場合は FormId(0))
+        /// 殺害者の FormID (不明な場合は FormId(0))
         killer: FormId,
     },
-    /// アニメーション終了イベント
+    /// アニメーションの完了
     OnAnimationEnd { actor: FormId },
+    /// カスタムイベント (SayToDone など)
+    Custom(String, Vec<String>),
 }
 
 /// 個々のオブジェクトインスタンスに紐づくスクリプト実行コンテキスト。
@@ -89,6 +91,9 @@ pub struct EventDispatcher {
 }
 
 impl EventDispatcher {
+    pub fn get_instance_mut(&mut self, form_id: fo3_esm::FormId) -> Option<&mut ScriptInstanceContext> {
+        self.instances.get_mut(&form_id)
+    }
     /// 新しいディスパッチャーを作成する。
     pub fn new() -> Self {
         Self::default()
@@ -218,7 +223,9 @@ impl EventDispatcher {
                                     .map(|(k, v)| (k.clone(), *v as f32))
                                     .collect();
                                 for block in gm_blocks {
-                                    let _ = vm.execute_block(&block.lines, Some(target));
+                                    if let Err(e) = vm.execute_block(&block.lines, Some(target)) {
+                                        println!("Script Execution Error on target {:?}: {:?}", target, e);
+                                    }
                                 }
                                 instance.local_vars = vm
                                     .locals
@@ -260,6 +267,9 @@ impl EventDispatcher {
                                 }
                                 for block in gm_blocks {
                                     let _ = vm.execute_block(&block.lines, Some(q_id));
+                                }
+                                for (k, v) in &vm.locals {
+                                    vm.quest_manager.set_quest_variable(q_id, k, *v as f64);
                                 }
                             }
                         }
@@ -474,6 +484,44 @@ impl EventDispatcher {
                                     .iter()
                                     .map(|(k, v)| (k.clone(), *v as f64))
                                     .collect();
+                            }
+                        }
+                    }
+                }
+                GameEvent::Custom(event_name, args) => {
+                    let instance_keys: Vec<FormId> = self.instances.keys().copied().collect();
+                    for target in instance_keys {
+                        if let Some(instance) = self.instances.get(&target) {
+                            let script_id = instance.script_form_id;
+                            if let Some(blocks) = self.parsed_blocks.get(&script_id) {
+                                let target_blocks: Vec<ScriptBlock> = blocks
+                                    .iter()
+                                    .filter(|b| {
+                                        b.event_type == ScriptEventType::Custom(event_name.clone())
+                                            && (b.args.is_empty() || b.args.iter().all(|a| args.contains(a)))
+                                    })
+                                    .cloned()
+                                    .collect();
+                                
+                                if target_blocks.is_empty() {
+                                    continue;
+                                }
+
+                                vm.locals = instance
+                                    .local_vars
+                                    .iter()
+                                    .map(|(k, v)| (k.clone(), *v as f32))
+                                    .collect();
+                                for block in target_blocks {
+                                    let _ = vm.execute_block(&block.lines, Some(target));
+                                }
+                                if let Some(inst) = self.instances.get_mut(&target) {
+                                    inst.local_vars = vm
+                                        .locals
+                                        .iter()
+                                        .map(|(k, v)| (k.clone(), *v as f64))
+                                        .collect();
+                                }
                             }
                         }
                     }

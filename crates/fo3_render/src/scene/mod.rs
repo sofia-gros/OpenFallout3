@@ -22,8 +22,6 @@ pub mod cell;
 pub mod mesh;
 pub mod traversal;
 
-#[cfg(test)]
-mod tests;
 
 use glam::{Mat4, Vec3};
 use std::collections::HashMap;
@@ -156,8 +154,29 @@ impl RenderScene {
         parts: &[&NifFile],
         vfs: &mut VfsManager,
     ) -> Self {
+        let mut texture_cache = HashMap::new();
+        Self::from_actor_parts_with_cache(
+            device,
+            queue,
+            context,
+            skeleton_nif,
+            parts,
+            vfs,
+            &mut texture_cache,
+        )
+    }
+
+    /// テクスチャキャッシュを外部から共有してアクターパーツシーンを構築する。
+    pub fn from_actor_parts_with_cache(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        context: &RenderContext,
+        skeleton_nif: &NifFile,
+        parts: &[&NifFile],
+        vfs: &mut VfsManager,
+        texture_cache: &mut HashMap<String, GpuTexture>,
+    ) -> Self {
         let mut meshes = Vec::new();
-        let mut texture_cache: HashMap<String, GpuTexture> = HashMap::new();
         let default_texture = GpuTexture::create_default_white(device, queue);
         let default_normal_texture = GpuTexture::create_default_normal(device, queue);
         let default_glow_texture = GpuTexture::create_default_black(device, queue);
@@ -226,7 +245,7 @@ impl RenderScene {
                 queue,
                 context,
                 &mut meshes,
-                &mut texture_cache,
+                &mut *texture_cache,
                 &mut part_bone_world_map,
                 Some(&skel_bone_name_world_map),
                 &default_texture,

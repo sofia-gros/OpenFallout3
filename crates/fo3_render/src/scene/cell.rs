@@ -322,7 +322,11 @@ impl RenderScene {
             }
 
             // 2. 配置された 3D オブジェクト (REFR) の走査と登録
-            for &(nif, ref world_transform) in placed_nifs.iter() {
+            println!("[DEBUG:SCENE] placed_nifs loop 開始 (cell_id: 0x{:08X}, count: {})", cell_id, placed_nifs.len());
+            for (idx, &(nif, ref world_transform)) in placed_nifs.iter().enumerate() {
+                if idx % 100 == 0 && idx > 0 {
+                    println!("[DEBUG:SCENE] placed_nifs 処理中: {} / {}", idx, placed_nifs.len());
+                }
                 let start_idx = meshes.len();
                 if !nif.blocks.is_empty() {
                     bone_world_map.clear();

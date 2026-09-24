@@ -20,7 +20,11 @@ impl ScriptVm {
     pub fn eval_ast_expr(&self, expr: &Expr, self_id: Option<FormId>) -> Result<f32, ScriptError> {
         match expr {
             Expr::Number(val) => Ok(*val),
-            Expr::Variable(name) => Ok(self.resolve_value(name, self_id)),
+            Expr::String(s) => Ok(s.parse::<f32>().unwrap_or(0.0)),
+            Expr::Variable(name) => {
+                let v = self.resolve_value(name, self_id);
+                Ok(v)
+            }
             Expr::FunctionCall {
                 subject,
                 function,
@@ -32,11 +36,13 @@ impl ScriptVm {
                 }
                 // For now fallback to string resolving for functions like GetStage
                 for arg in args {
-                    if let Expr::Variable(v) = arg {
-                        cmd = format!("{} {}", cmd, v);
-                    } else {
-                        let arg_val = self.eval_ast_expr(arg, self_id)?;
-                        cmd = format!("{} {}", cmd, arg_val);
+                    match arg {
+                        Expr::Variable(v) => cmd = format!("{} {}", cmd, v),
+                        Expr::String(s) => cmd = format!("{} {}", cmd, s),
+                        _ => {
+                            let arg_val = self.eval_ast_expr(arg, self_id)?;
+                            cmd = format!("{} {}", cmd, arg_val);
+                        }
                     }
                 }
                 Ok(self.resolve_value(&cmd, self_id))
@@ -61,8 +67,8 @@ impl ScriptVm {
                     BinaryOperator::Gt => Ok(if l > r { 1.0 } else { 0.0 }),
                     BinaryOperator::Lte => Ok(if l <= r { 1.0 } else { 0.0 }),
                     BinaryOperator::Gte => Ok(if l >= r { 1.0 } else { 0.0 }),
-                    BinaryOperator::And => Ok(if l != 0.0 && r != 0.0 { 1.0 } else { 0.0 }),
-                    BinaryOperator::Or => Ok(if l != 0.0 || r != 0.0 { 1.0 } else { 0.0 }),
+                    BinaryOperator::And => Ok(if (l != 0.0) && (r != 0.0) { 1.0 } else { 0.0 }),
+                    BinaryOperator::Or => Ok(if (l != 0.0) || (r != 0.0) { 1.0 } else { 0.0 }),
                 }
             }
         }
@@ -94,9 +100,22 @@ impl ScriptVm {
                 let val = self.eval_ast_expr(expr, self_id)?;
                 let resolved_target = self.resolve_variable_name(target, self_id);
                 self.locals.insert(resolved_target.clone(), val);
+                
+                // 元のターゲットキーでも登録
+                let target_lower = target.to_ascii_lowercase();
+                self.locals.insert(target_lower.clone(), val);
+                self.globals.insert(target_lower.clone(), val);
 
-                // If the subject is a quest, persist the variable immediately
-                if let Some(q_id) = self_id {
+                // ドット修飾 (Quest.Var または Ref.Var) の永続化
+                if let Some((prefix, sub)) = target_lower.split_once('.') {
+                    if let Ok(id) = self.resolve_form_id(prefix) {
+                        if self.quest_manager.quests.contains_key(&id) {
+                            self.quest_manager.set_quest_variable(id, sub, val as f64);
+                        } else {
+                            self.pending_var_updates.push((id, sub.to_string(), val as f64));
+                        }
+                    }
+                } else if let Some(q_id) = self_id {
                     if self.quest_manager.quests.contains_key(&q_id) {
                         self.quest_manager
                             .set_quest_variable(q_id, &resolved_target, val as f64);

@@ -21,11 +21,42 @@ pub fn execute(
 
     match cmd {
         // FUN_GetIsSex = 70 (0 = Male, 1 = Female)
+        // 参照元: GECK Wiki `GetIsSex`, Fallout3.esm
         "getissex" => {
             if !args.is_empty() {
                 let target_sex = vm.eval_ast_expr(&args[0], subject)? as u32;
-                // デフォルト 0 (Male)
+                let is_player = subject.is_none() || subject == Some(FormId(0x00000014));
+                if is_player {
+                    let actual_sex = if vm.player_is_female { 1 } else { 0 };
+                    return Ok(Some(if target_sex == actual_sex { 1.0 } else { 0.0 }));
+                }
                 return Ok(Some(if target_sex == 0 { 1.0 } else { 0.0 }));
+            }
+            Ok(Some(1.0))
+        }
+        // FUN_SexChange = 111 (0 = Male, 1 = Female)
+        // 参照元: GECK Wiki `SexChange`
+        "sexchange" => {
+            let is_female = if !args.is_empty() {
+                match &args[0] {
+                    Expr::Variable(name) => {
+                        if name.eq_ignore_ascii_case("female") {
+                            true
+                        } else if name.eq_ignore_ascii_case("male") {
+                            false
+                        } else {
+                            (vm.eval_ast_expr(&args[0], subject)? as u32) != 0
+                        }
+                    }
+                    _ => (vm.eval_ast_expr(&args[0], subject)? as u32) != 0,
+                }
+            } else {
+                !vm.player_is_female
+            };
+            let is_player = subject.is_none() || subject == Some(FormId(0x00000014));
+            if is_player {
+                vm.player_is_female = is_female;
+                println!("[Script] SexChange: プレイヤー性別変更 is_female={}", is_female);
             }
             Ok(Some(1.0))
         }

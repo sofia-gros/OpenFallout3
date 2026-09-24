@@ -68,6 +68,8 @@ pub struct NpcRecord {
     /// リストで持ち、エンジンが CTDA 条件を評価して適用中のパッケージを決定する。
     /// 参照元: `references/openmw/components/esm4/loadnpc.cpp:L71-73`
     pub ai_packages: Vec<FormId>,
+    /// アタッチされたスクリプトの FormID (SCRI)
+    pub script: Option<FormId>,
 }
 
 impl NpcRecord {
@@ -87,6 +89,7 @@ impl NpcRecord {
         let mut facegen_geometry_asymmetric = None;
         let mut facegen_texture_symmetric = None;
         let mut ai_packages = Vec::new();
+        let mut script = None;
 
         for sub in subrecords {
             match sub.type_id {
@@ -195,6 +198,11 @@ impl NpcRecord {
                     }
                     facegen_texture_symmetric = Some(coeffs);
                 }
+                crate::types::SUB_SCRI => {
+                    if let Ok(form_id) = sub.as_form_id() {
+                        script = Some(form_id);
+                    }
+                }
                 SUB_PKID => {
                     // AI パッケージ FormID リスト (4 バイト × N)
                     // 参照元: `references/openmw/components/esm4/loadnpc.cpp:L71-73`
@@ -225,6 +233,7 @@ impl NpcRecord {
             facegen_geometry_asymmetric,
             facegen_texture_symmetric,
             ai_packages,
+            script,
         })
     }
 }
